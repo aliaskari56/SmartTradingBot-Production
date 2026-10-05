@@ -119,7 +119,16 @@ bool STB_ResolvePendingDistance(const string symbol,
       slBufferPips   =configuredBaseDistance;
    }
 
-   double pip=bl.point;
+   // STB configuration values are expressed in pips, not raw broker points.
+   // Use the EA's canonical PipSize() so XAU/XAG/3-5 digit symbols receive
+   // the intended price distance.
+   double pip=PipSize(symbol);
+   if(pip<=0.0)
+   {
+      r.reason="PIP_SIZE_INVALID";
+      return false;
+   }
+
    double rawEntry=0.0;
    double rawSL=0.0;
 
