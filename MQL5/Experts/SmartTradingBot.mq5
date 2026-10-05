@@ -3335,7 +3335,7 @@ bool STB_ProtectionCalculateHedgeSL(const string symbol,
 
 bool STB_RiskAuthorizeMarketHedge(const string symbol,
                                       const int direction,
-                                      const double volume,
+                                      double &volume,
                                       const double sl)
 {
    if(symbol=="" || direction==0)
@@ -3359,8 +3359,8 @@ bool STB_RiskAuthorizeMarketHedge(const string symbol,
    if(!IsSpreadAcceptable(symbol))
       return false;
 
-   double normalizedVolume=NormalizeVolume(symbol,volume);
-   if(normalizedVolume<=0.0)
+   volume=NormalizeVolume(symbol,volume);
+   if(volume<=0.0)
       return false;
 
    long positionType=(direction>0 ? POSITION_TYPE_BUY:POSITION_TYPE_SELL);
@@ -3381,7 +3381,7 @@ bool STB_RiskAuthorizeMarketHedge(const string symbol,
    request.action=TRADE_ACTION_DEAL;
    request.symbol=symbol;
    request.magic=InpMagic;
-   request.volume=normalizedVolume;
+   request.volume=volume;
    request.type=(direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    request.price=(direction>0 ? tick.ask:tick.bid);
    request.sl=sl;
@@ -3395,6 +3395,194 @@ bool STB_RiskAuthorizeMarketHedge(const string symbol,
 
    if(check.retcode!=0 && check.retcode!=TRADE_RETCODE_DONE)
       return false;
+
+   return true;
+}
+
+// EXECUTION OWNER CONTRACT:
+// Creates a NEW market hedge position only. It receives an already-authorized
+// request, submits the deal, verifies the server response, then verifies the
+// resulting terminal position before reporting success.
+struct STB_MarketHedgeRequest
+{
+   string symbol;
+   int    direction;
+   double volume;
+   double sl;
+};
+
+bool STB_FindPositionTicketByIdentifier(const ulong positionId,
+                                        const string symbol,
+                                        const long positionType,
+                                        const long magic,
+                                        ulong &ticket)
+{
+   ticket=0;
+
+   if(positionId==0)
+      return false;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong candidate=PositionGetTicket(i);
+
+      if(candidate==0 || !PositionSelectByTicket(candidate))
+         continue;
+
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)!=positionId)
+         continue;
+
+      if(symbol!="" && PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
+
+      if(positionType>=0 &&
+         PositionGetInteger(POSITION_TYPE)!=positionType)
+         continue;
+
+      if(magic>=0 &&
+         PositionGetInteger(POSITION_MAGIC)!=magic)
+         continue;
+
+      ticket=candidate;
+      return true;
+   }
+
+   return false;
+}
+
+bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
+                            ulong &dealTicket,
+                            ulong &positionTicket,
+                            double &executedVolume)
+{
+   dealTicket=0;
+   positionTicket=0;
+   executedVolume=0.0;
+
+   if(request.symbol=="" ||
+      (request.direction!=1 && request.direction!=-1) ||
+      request.volume<=0.0 ||
+      request.sl<=0.0)
+      return false;
+
+   trade.SetExpertMagicNumber(InpMagic);
+   if(!STB_ConfigureMarketFilling(request.symbol))
+      return false;
+   trade.SetAsyncMode(false);
+
+   bool ok=(request.direction>0)
+           ? trade.Buy(request.volume,
+                       request.symbol,
+                       0.0,
+                       request.sl,
+                       0.0,
+                       "STB|HEDGE|BUY")
+           : trade.Sell(request.volume,
+                        request.symbol,
+                        0.0,
+                        request.sl,
+                        0.0,
+                        "STB|HEDGE|SELL");
+
+   if(!ok)
+   {
+      Print("STB HEDGE EXECUTION request failed symbol=",request.symbol,
+            " direction=",(request.direction>0 ? "BUY":"SELL"),
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
+      return false;
+   }
+
+   if(!TradeRetcodePlacementSucceeded() || trade.ResultDeal()<=0)
+   {
+      Print("STB HEDGE EXECUTION server did not confirm market deal symbol=",
+            request.symbol,
+            " deal=",trade.ResultDeal(),
+            " order=",trade.ResultOrder(),
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
+      return false;
+   }
+
+   dealTicket=trade.ResultDeal();
+
+   if(!HistoryDealSelect(dealTicket))
+   {
+      Print("STB HEDGE EXECUTION false-success guard symbol=",request.symbol,
+            " deal=",dealTicket,
+            " reason=DEAL_NOT_IN_HISTORY");
+      return false;
+   }
+
+   string dealSymbol=HistoryDealGetString(dealTicket,DEAL_SYMBOL);
+   long dealMagic=HistoryDealGetInteger(dealTicket,DEAL_MAGIC);
+   long dealType=HistoryDealGetInteger(dealTicket,DEAL_TYPE);
+   long dealEntry=HistoryDealGetInteger(dealTicket,DEAL_ENTRY);
+   ulong positionId=(ulong)HistoryDealGetInteger(dealTicket,DEAL_POSITION_ID);
+   executedVolume=HistoryDealGetDouble(dealTicket,DEAL_VOLUME);
+
+   long expectedPositionType=(request.direction>0 ?
+                              POSITION_TYPE_BUY:
+                              POSITION_TYPE_SELL);
+   long expectedDealType=(request.direction>0 ?
+                          DEAL_TYPE_BUY:
+                          DEAL_TYPE_SELL);
+
+   if(dealSymbol!=request.symbol ||
+      dealMagic!=(long)InpMagic ||
+      dealType!=expectedDealType ||
+      (dealEntry!=DEAL_ENTRY_IN && dealEntry!=DEAL_ENTRY_INOUT) ||
+      positionId==0 ||
+      executedVolume<=0.0)
+   {
+      Print("STB HEDGE EXECUTION post-deal verification failed symbol=",
+            request.symbol,
+            " deal=",dealTicket,
+            " magic=",dealMagic,
+            " type=",dealType,
+            " entry=",dealEntry,
+            " positionId=",positionId,
+            " volume=",DoubleToString(executedVolume,3));
+      return false;
+   }
+
+   if(!STB_FindPositionTicketByIdentifier(positionId,
+                                           request.symbol,
+                                           expectedPositionType,
+                                           (long)InpMagic,
+                                           positionTicket))
+   {
+      Print("STB HEDGE EXECUTION false-success guard symbol=",request.symbol,
+            " deal=",dealTicket,
+            " positionId=",positionId,
+            " reason=POSITION_NOT_VISIBLE");
+      return false;
+   }
+
+   double actualVolume=PositionGetDouble(POSITION_VOLUME);
+   double actualSL=PositionGetDouble(POSITION_SL);
+
+   if(actualVolume<=0.0 ||
+      actualSL<=0.0 ||
+      !IsValidSLForPosition(request.symbol,expectedPositionType,actualSL))
+   {
+      Print("STB HEDGE EXECUTION post-position verification failed symbol=",
+            request.symbol,
+            " deal=",dealTicket,
+            " position=",positionTicket,
+            " volume=",DoubleToString(actualVolume,3),
+            " sl=",DoubleToString(actualSL,
+                                  (int)SymbolInfoInteger(request.symbol,SYMBOL_DIGITS)));
+      return false;
+   }
+
+   Print("STB HEDGE EXECUTION CONFIRMED symbol=",request.symbol,
+         " deal=",dealTicket,
+         " position=",positionTicket,
+         " direction=",(request.direction>0 ? "BUY":"SELL"),
+         " executedVolume=",DoubleToString(executedVolume,3),
+         " sl=",DoubleToString(actualSL,
+                               (int)SymbolInfoInteger(request.symbol,SYMBOL_DIGITS)));
 
    return true;
 }
@@ -3420,7 +3608,8 @@ bool OneClickHedge()
    long sourceType=-1;
    double sourceVolume=0.0;
 
-   // Prefer an existing managed position on the current chart symbol.
+   // UI command may select an already-managed source position.
+   // It never owns the actual market-entry operation.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -3470,22 +3659,6 @@ bool OneClickHedge()
       return false;
    }
 
-   
-   
-   
-   
-   
-   
-   
-   
-      
-      
-   
-      
-      
-      
-   
-
    int hedgeDirection=(hedgeType==POSITION_TYPE_BUY ? 1:-1);
 
    if(!STB_RiskAuthorizeMarketHedge(symbol,hedgeDirection,volume,sl))
@@ -3494,70 +3667,42 @@ bool OneClickHedge()
       return false;
    }
 
-   trade.SetExpertMagicNumber(InpMagic);
-   if(!STB_ConfigureMarketFilling(symbol))
+   STB_MarketHedgeRequest request;
+   ZeroMemory(request);
+   request.symbol=symbol;
+   request.direction=hedgeDirection;
+   request.volume=volume;
+   request.sl=sl;
+
+   ulong dealTicket=0;
+   ulong positionTicket=0;
+   double executedVolume=0.0;
+
+   if(!STB_ExecuteMarketHedge(request,
+                              dealTicket,
+                              positionTicket,
+                              executedVolume))
       return false;
-   trade.SetAsyncMode(false);
 
-   bool ok=false;
-
-   if(hedgeType==POSITION_TYPE_BUY)
-      ok=trade.Buy(volume,symbol,0.0,sl,0.0,"STB|HEDGE|BUY");
-   else
-      ok=trade.Sell(volume,symbol,0.0,sl,0.0,"STB|HEDGE|SELL");
-
-   if(!ok)
+   // Management handoff occurs only after Execution confirmed a real position.
+   if(positionTicket==0 || !EnsureInitialSL(positionTicket))
    {
-      Print("STB HEDGE failed symbol=",symbol,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
+      Print("STB HEDGE management handoff failed symbol=",symbol,
+            " deal=",dealTicket,
+            " position=",positionTicket);
       return false;
    }
-
-   if(!TradeRetcodePlacementSucceeded() || trade.ResultDeal()<=0)
-   {
-      Print("STB HEDGE server did not confirm a market deal symbol=",symbol,
-            " deal=",trade.ResultDeal(),
-            " order=",trade.ResultOrder(),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-   }
-
-   ulong hedgeTicket=trade.ResultDeal();
 
    Print("STB HEDGE OPENED symbol=",symbol,
          " sourceTicket=",sourceTicket,
          " hedgeDirection=",(hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL"),
-         " volume=",DoubleToString(volume,3),
-         " SL=",DoubleToString(sl,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-         " deal=",hedgeTicket);
-
-   // Final immediate protection pass in case the broker adjusted the fill.
-   if(hedgeTicket>0)
-   {
-      for(int i=PositionsTotal()-1;i>=0;i--)
-      {
-         ulong ticket=PositionGetTicket(i);
-
-         if(ticket==0 || !PositionSelectByTicket(ticket))
-            continue;
-
-         if(PositionGetString(POSITION_SYMBOL)!=symbol)
-            continue;
-
-         if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
-            continue;
-
-         long type=PositionGetInteger(POSITION_TYPE);
-
-         if(type!=hedgeType)
-            continue;
-
-         EnsureInitialSL(ticket);
-         break;
-      }
-   }
+         " requestedVolume=",DoubleToString(volume,3),
+         " executedVolume=",DoubleToString(executedVolume,3),
+         " SL=",DoubleToString(
+            PositionGetDouble(POSITION_SL),
+            (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " deal=",dealTicket,
+         " position=",positionTicket);
 
    return true;
 }
@@ -4341,8 +4486,18 @@ void ManagePendingOrders()
                      " ret=",trade.ResultRetcode()," ",
                      trade.ResultRetcodeDescription());
             }
+            else if(OrderSelect(ticket))
+            {
+               Print("STB pending delete NOT CONFIRMED ticket=",ticket,
+                     " symbol=",symbol,
+                     " ret=",trade.ResultRetcode(),
+                     " reason=ORDER_STILL_VISIBLE");
+            }
             else
             {
+               Print("STB pending delete CONFIRMED ticket=",ticket,
+                     " symbol=",symbol,
+                     " ret=",trade.ResultRetcode());
                // TradeTransaction owns Adaptive order-state cleanup.
             }
          }
@@ -6833,9 +6988,22 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(trans.type==TRADE_TRANSACTION_ORDER_ADD)
    {
       if(trans.order>0)
+      {
          EnsureInitialSLForPendingOrder(trans.order);
 
+         if(InpPendingTrail)
+            STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
+      }
+
       return;
+   }
+
+   // Explicit lifecycle handoff: once a tracked pending order produces a
+   // real deal, PendingTrail stops immediately and management owns the result.
+   if(trans.type==TRADE_TRANSACTION_DEAL_ADD &&
+      trans.order>0)
+   {
+      STB_PendingTrailOnOrderFilled(trans.order);
    }
 
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD ||
