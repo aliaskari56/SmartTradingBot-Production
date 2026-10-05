@@ -318,3 +318,37 @@ Do NOT begin SECTION 02.
 Only after SECTION 01 is independently accepted may the next Agent work order be executed.
 
 ACCEPTANCE: 0 errors, 0 warnings + required runtime evidence
+
+
+# PRE-FLIGHT GATE — REQUIRED BEFORE THIS WORK ORDER IS EXECUTED
+
+This Section may be sent to the MetaTrader Agent only after the following has been completed on our side:
+
+- [ ] Current Section scope mapped from the real source
+- [ ] Relevant Git history/baseline reviewed
+- [ ] Relevant MQL5/MetaEditor semantics checked where required
+- [ ] Intended change or NO-CODE-CHANGE decision prepared
+- [ ] Affected identifiers/call paths/includes checked
+- [ ] Diff reviewed for unintended changes
+- [ ] Preflight compile performed when an authorized compiler is actually available
+
+PRE-FLIGHT STATUS:
+NOT COMPLETE until evidenced.
+
+MetaTrader Agent is responsible only for the environment-specific final stage after handoff:
+- apply the approved change to the same active Expert
+- MetaEditor compile
+- EX5 rebuild
+- install/reload the same Expert
+- runtime validation
+- Experts/Journal evidence
+
+Do not claim this Section is complete from Git/static/preflight evidence alone.
+
+SECTION 01 must finish with these three statuses:
+
+PRE-FLIGHT — OUR SIDE: PASS / FAIL / NOT VERIFIED
+MT5 EXECUTION — META TRADER AGENT: PASS / FAIL / NOT VERIFIED
+FINAL ACCEPTANCE — COMBINED: PASS / FAIL / NOT VERIFIED
+
+Only FINAL ACCEPTANCE = PASS permits SECTION 02.
