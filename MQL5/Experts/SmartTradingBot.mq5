@@ -5107,8 +5107,12 @@ void CreateButton(const string name,
    ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bgColor);
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,100);
 }
 
 void CreateButtonCorner(const string name,
@@ -5135,8 +5139,12 @@ void CreateButtonCorner(const string name,
    ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bgColor);
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,100);
 }
 
 void CreateLabel(const string name,
@@ -5535,7 +5543,13 @@ void STB_DashApplyLayout()
       ObjectSetInteger(0,name,OBJPROP_FONTSIZE,(i==1 ? g_dashCountdownPx : g_dashFontPx));
       ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
       ObjectSetInteger(0,name,OBJPROP_BGCOLOR,STB_DASH_KEY_COLORS[i]);
-      ObjectSetInteger(0,name,OBJPROP_ZORDER,1);
+      ObjectSetInteger(0,name,OBJPROP_BACK,false);
+      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+      ObjectSetInteger(0,name,OBJPROP_STATE,false);
+      // Keep every command button above the dashboard and other chart
+      // objects so the button itself owns the mouse-click event.
+      ObjectSetInteger(0,name,OBJPROP_ZORDER,100);
    }
 }
 
@@ -6824,12 +6838,36 @@ void OnChartEvent(const int id,
    if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
 
+   // Only our dashboard controls are actionable. Ignore all other chart
+   // objects and explicitly release the OBJ_BUTTON latch after every click.
+   string clicked=sparam;
+   if(StringFind(clicked,g_prefix)!=0)
+      return;
+
+   bool known=(clicked==g_prefix+"AUTO" ||
+               clicked==g_prefix+"BUYSTOP" ||
+               clicked==g_prefix+"SELLSTOP" ||
+               clicked==g_prefix+"HEDGE" ||
+               clicked==g_prefix+"SAVE20");
+
+   if(!known)
+      return;
+
+   ObjectSetInteger(0,clicked,OBJPROP_STATE,false);
+
    // TASK36 safety guard: while the dashboard is unlocked (edit mode) the
    // 7 trading controls are temporarily inert so a stray click during
    // placement can never fire a trade. UI-only; restored when locked.
    if(InpUiEditMode)
+   {
+      ChartRedraw(0);
       return;
-      
+   }
+
+   Print("STB UI CLICK object=",clicked,
+         " chart=",_Symbol,
+         " tf=",EnumToString((ENUM_TIMEFRAMES)_Period));
+
 
    string autoName=g_prefix+"AUTO";
    string saveName=g_prefix+"SAVE20";
