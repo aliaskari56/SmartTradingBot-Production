@@ -460,3 +460,23 @@ FINAL ACCEPTANCE:
 
 HARD STOP:
 Do not mark SECTION 01 complete until MetaTrader Agent performs the actual compile and returns fresh 0 errors / 0 warnings plus required runtime evidence.
+
+
+# UPDATED MASTER PREFLIGHT DEPENDENCY
+
+SECTION 01 may NOT be handed to the MetaTrader Agent for code modification until these Phase-00 conditions are satisfied:
+
+- exact active MetaTrader source identity is reconciled against the Git baseline
+- architecture ownership contract is accepted
+- Scanner/Strategy/Setup/Risk/Execution/Management boundaries are mapped
+- current cross-boundary side effects are recorded
+
+Current known architecture findings that affect Section 01:
+- ScanWatchlist -> PlaceSetup -> ExecuteSetup
+- BuildSetup mixes Strategy + Adaptive + broker normalization
+- HasManagedExposure -> IsManagedPosition couples Management to Execution eligibility
+- IsManagedPosition is ownership-agnostic while IsManagedOrder is ownership-specific
+- InpDiagnosticM15Mode can force auto trading ON
+- InpSmartZigZagEnabled is currently unused in the Git baseline
+
+SECTION 01 remains an analysis gate first. Do not patch these architecture issues from inside Section 01 unless the master architecture design explicitly assigns the repair there.
