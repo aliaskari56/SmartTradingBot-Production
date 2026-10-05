@@ -3948,7 +3948,7 @@ void AutoProfitProtection()
 // MANUAL SAVE +20
 //==================================================================
 
-int ManualSavePlus20()
+int STB_ManagementSavePlus20Command()
 {
    int completed=0;
 
@@ -7417,7 +7417,7 @@ void OnChartEvent(const int id,
 
    if(sparam==saveName)
    {
-      int completed=ManualSavePlus20();
+      int completed=STB_ManagementSavePlus20Command();
       Print("STB UI RESULT command=SAVE20 status=",
             completed>0 ? "COMPLETED":"NO_ACTION",
             " positions=",IntegerToString(completed));
