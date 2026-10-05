@@ -389,29 +389,7 @@ Existing Position/Order
 
 Management does NOT call Scanner.
 
-## 17. CURRENT SOURCE AUDIT TARGET
-
-The current Git source must be checked specifically for this known architectural coupling:
-
-`ScanWatchlist()`
-currently calls:
-`PlaceSetup()`
-which calls:
-`ExecuteSetup()`
-
-This means the current implementation combines Scanner orchestration and Execution.
-
-This is a **known architecture finding**, not yet a permission to patch.
-
-Required action:
-- record the violation
-- map all dependent paths
-- design the separation first
-- then repair in the dedicated Section where Execution/Scanner ownership is audited
-- compile and runtime-test after repair
-
-Do not blindly remove the call; the replacement handoff must be designed first.
-
+## 17. CURRENT SOURCE AUDIT TARGET,,The original Scanner -> Execution coupling has been repaired in Git main.,,Current verified flow:,`ScanWatchlist()`,-> candidate array,-> `STB_ProcessExecutionCandidates()`,-> `ExecuteSetup()`,,Additional hidden-boundary repairs now verified:,- Manual Pending UI -> `STB_ExecutionManualPendingCommand()` -> Risk -> Execution,- HEDGE UI -> `STB_ExecutionHedgeCommand()` -> Risk -> `STB_ExecuteMarketHedge()`,- HEDGE creation verifies deal, position ownership/type/volume before reporting creation.,- HEDGE protection failure is represented separately from rejection.,- Pending deletion verifies the ticket is no longer visible after a successful server retcode.,- TradeTransaction explicitly hands a filled pending ticket to PendingTrail.,- TradeTransaction registers new managed pending tickets for PendingTrail.,- Scan scheduling has one owner: OnTimer. OnTick no longer starts a second scan/execution cycle.,,The active MetaTrader source still requires forward-port + compile/runtime validation because its previously reported byte identity differs from Git main.,
 ## 18. ARCHITECTURE ACCEPTANCE TEST
 
 The architecture is accepted only when these statements are true:
@@ -451,6 +429,61 @@ The architecture contract must be accepted BEFORE the detailed Section gates.
 
 Detailed Section work may then proceed with this ownership model as the governing architecture.
 
+## 21. HIDDEN-BOUNDARY AUDIT ADDENDUM — 2026-10-06
+
+### RULES APPLIED
+- Every new-exposure creation path has one Execution owner.
+- UI captures commands only; it does not construct or submit trades.
+- Risk/Safety remains the final authorization boundary.
+- Existing-object modification remains in Management/Protection.
+- TradeTransaction performs lifecycle synchronization/handoff only.
+- Scanner scheduling has one event owner.
+- Terminal truth is required before an operation is reported as successful.
+- Foreign ownership is never inferred from a management input alone.
+- No fallback path silently re-enables live auto trading.
+- Git changes do not imply active-terminal installation or compilation.
+
+### STATIC PREFLIGHT EVIDENCE
+- Direct new-exposure APIs are isolated to `STB_ExecuteMarketHedge()` and `ExecuteSetup()`.
+- `OrderSend()` and `PositionOpen()` are absent.
+- Scanner, Strategy, Adaptive and UI sections contain no direct new-exposure CTrade call.
+- `STB_RunScanCycle()` has one scheduler call: OnTimer.
+- Legacy `OneClickHedge` and `STB_ManualPendingCommand` identifiers are gone.
+- Management bodies contain no Scanner/Strategy discovery call.
+- Raw brace balance is zero.
+- Current Git Expert blob: `76d99969a20c5828bb948db41c3d2ecf217edb1b`.
+- Current Git Expert: version 1.120, 7,408 lines, 219,385 characters.
+
+### REMAINING NON-BOUNDARY SECTION ITEMS
+- BuildSetup function cohesion.
+- CHoCH/BOS semantic classification quality.
+- UI geometry/dead-code cleanup.
+- Documentation/input-comment inconsistencies.
+- Compiler/runtime/broker validation.
+
+### TWO-SIDED ACCEPTANCE
+PRE-FLIGHT OUR SIDE:
+- [x] Hidden boundary scan completed.
+- [x] Direct new-exposure creation paths centralized.
+- [x] UI manual-entry construction moved under Execution request coordination.
+- [x] HEDGE false-result paths hardened.
+- [x] Pending deletion post-state confirmation added.
+- [x] PendingTrail transaction handoffs added.
+- [x] Scan scheduler ownership centralized.
+- [x] Active source is NOT claimed installed or compiled.
+
+MT5 EXECUTION:
+- [ ] Reconcile active source identity.
+- [ ] Forward-port corrections without overwriting active-only changes.
+- [ ] MetaEditor compile: 0 errors / 0 warnings.
+- [ ] Same SmartTradingBot.ex5 rebuilt and verified.
+- [ ] Attach/reload same Expert.
+- [ ] Runtime UI HEDGE / BUY STOP / SELL STOP / SAVE20.
+- [ ] Pending fill -> PendingTrail stop -> management handoff.
+- [ ] Timer-only scan and no duplicate OnTick scan.
+- [ ] Truthful UI RESULT logs.
+
 Status:
 ARCHITECTURE CONTRACT — DEFINED
-CURRENT IMPLEMENTATION COMPLIANCE — REQUIRES REPAIR/AUDIT
+GIT HIDDEN-BOUNDARY PREFLIGHT — COMPLETE
+ACTIVE MT5 EXECUTION — PENDING
