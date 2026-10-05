@@ -1477,6 +1477,58 @@ bool STB_TradeEnvironmentAllowed()
    return true;
 }
 
+enum STB_EXECUTION_SOURCE
+{
+   STB_EXECUTION_AUTO=0,
+   STB_EXECUTION_MANUAL=1,
+   STB_EXECUTION_HEDGE=2
+};
+
+bool STB_ExecutionModeAllowed(const STB_EXECUTION_SOURCE source,
+                              string &reason)
+{
+   reason="";
+
+   if(source==STB_EXECUTION_AUTO &&
+      (!InpAutoTrading || InpDiagnosticM15Mode || !g_autoTrading))
+   {
+      reason="AUTO_TRADING_LOCKED";
+      return false;
+   }
+
+   if(source==STB_EXECUTION_HEDGE && !InpAllowOneClickHedge)
+   {
+      reason="HEDGE_DISABLED";
+      return false;
+   }
+
+   return true;
+}
+
+bool STB_ExecutionPermissionAllowed(const string symbol,
+                                    const STB_EXECUTION_SOURCE source,
+                                    string &reason)
+{
+   reason="";
+
+   if(symbol=="")
+   {
+      reason="SYMBOL_EMPTY";
+      return false;
+   }
+
+   if(!STB_ExecutionModeAllowed(source,reason))
+      return false;
+
+   if(!STB_TradeEnvironmentAllowed())
+   {
+      reason="TRADE_PERMISSION";
+      return false;
+   }
+
+   return true;
+}
+
 bool IsSpreadAcceptable(const string symbol)
 {
    if(InpMaxSpreadPips<=0.0)
@@ -3358,10 +3410,20 @@ bool STB_RiskAuthorizeMarketHedge(const string symbol,
                                       double &volume,
                                       const double sl)
 {
-   if(symbol=="" || direction==0)
+   if(direction==0)
       return false;
 
-   if(!STB_TradeEnvironmentAllowed() || !IsHedgingAccount())
+   string authorizationReason="";
+   if(!STB_ExecutionPermissionAllowed(symbol,
+                                       STB_EXECUTION_HEDGE,
+                                       authorizationReason))
+   {
+      Print("STB HEDGE authorization rejected symbol=",symbol,
+            " reason=",authorizationReason);
+      return false;
+   }
+
+   if(!IsHedgingAccount())
       return false;
    if(!IsSymbolTradable(symbol))
       return false;
@@ -3613,12 +3675,8 @@ bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
 
 int STB_ExecutionHedgeCommand()
 {
-   if(!InpAllowOneClickHedge)
-   {
-      Print("STB HEDGE disabled by input.");
-      return STB_HEDGE_REJECTED;
-   }
-
+   // UI command only dispatches. Final execution authorization is owned by
+   // STB_RiskAuthorizeMarketHedge(), which calls the centralized gate.
    if(!IsHedgingAccount())
    {
       Print("STB HEDGE unavailable: account is not RETAIL_HEDGING. Current margin mode=",
@@ -4858,17 +4916,20 @@ bool STB_RiskAuthorizePending(Setup &s,
    if(!s.valid)
       return STB_LogPlaceReject(s,"INVALID_CANDIDATE");
 
-   if(!manual &&
-      (!InpAutoTrading || InpDiagnosticM15Mode || !g_autoTrading))
-      return STB_LogPlaceReject(s,"AUTO_TRADING_LOCKED");
+   STB_EXECUTION_SOURCE executionSource=
+      (manual ? STB_EXECUTION_MANUAL : STB_EXECUTION_AUTO);
+   string authorizationReason="";
+   if(!STB_ExecutionPermissionAllowed(s.symbol,
+                                       executionSource,
+                                       authorizationReason))
+      return STB_LogPlaceReject(s,authorizationReason);
+
    if(!IsDirectionTradable(s.symbol,s.direction))
       return STB_LogPlaceReject(s,"DIRECTION_NOT_TRADABLE");
    if(!IsSpreadAcceptable(s.symbol))
       return STB_LogPlaceReject(s,"SPREAD_FILTER");
    if(STB_HasExecutionExposure(s.symbol))
       return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_EXISTS");
-   if(!STB_TradeEnvironmentAllowed())
-      return STB_LogPlaceReject(s,"TRADE_PERMISSION");
 
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
@@ -5269,7 +5330,11 @@ bool STB_MarkExecutionSymbol(string &processedSymbols[],
 
 int STB_ProcessExecutionCandidates(Setup &candidates[])
 {
-   if(!g_autoTrading || ArraySize(candidates)<=0)
+   if(ArraySize(candidates)<=0)
+      return 0;
+
+   string authorizationReason="";
+   if(!STB_ExecutionModeAllowed(STB_EXECUTION_AUTO,authorizationReason))
       return 0;
 
    string processedSymbols[];
