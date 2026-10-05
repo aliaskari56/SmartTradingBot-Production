@@ -256,6 +256,13 @@ struct Setup
    double   score;
    int      adaptiveProfile;
 
+   // Immutable strategy-selected lifecycle parameters handed to Risk/Execution.
+   // Risk must not reactivate or read Adaptive state during authorization.
+   int      pendingMaxBars;
+   double   entryBufferPips;
+   double   slBufferPips;
+   double   minimumRR;
+
    datetime setupTime;
 };
 
@@ -840,16 +847,6 @@ void STB_AdaptiveRecordSetup(const Setup &s,const bool accepted)
    STB_AdaptiveLog(accepted ? "SETUP_PLACED":"SETUP_REJECTED",
                    s.symbol,s.direction,s.score,s.rr,
                    accepted ? 1.0:0.0,s.adaptiveProfile);
-}
-
-void STB_AdaptiveRememberLastProfile(const string symbol,
-                                     const int direction,
-                                     const int profileId)
-{
-   if(profileId<0 || profileId>=STB_ADAPTIVE_PROFILE_COUNT)
-      return;
-
-   STB_AP_Write(symbol,direction,"LASTP",0,profileId);
 }
 
 void STB_AdaptiveRememberPositionProfile(const ulong positionId,
@@ -1599,11 +1596,9 @@ bool PreparePendingSetup(Setup &s)
    if(risk<=0.0 || reward<=0.0)
       return false;
 
-   double minimumRR=InpMinimumRR;
-   if(s.adaptiveProfile>=0 &&
-      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT &&
-      g_activeAdaptiveProfileValid)
-      minimumRR=STB_EffectiveMinimumRR();
+   double minimumRR=MathMax(0.0,s.minimumRR);
+   if(minimumRR<=0.0)
+      minimumRR=InpMinimumRR;
 
    s.rr=reward/risk;
    if(s.rr+1e-9<minimumRR)
@@ -2756,6 +2751,13 @@ bool BuildSetup(const string symbol,
    g_lastBuildRejectReason="UNKNOWN";
    STB_AP_SelectActive(symbol,direction);
    s.adaptiveProfile=g_activeAdaptiveProfileId;
+
+   // Snapshot all execution-relevant profile parameters into the Setup contract.
+   // From this point Risk/Execution must not re-read Adaptive state.
+   s.pendingMaxBars=MathMax(0,STB_EffectiveMaxPendingBars());
+   s.entryBufferPips=MathMax(0.0,STB_EffectiveEntryBuffer());
+   s.slBufferPips=MathMax(0.0,STB_EffectiveSLBuffer());
+   s.minimumRR=MathMax(0.0,STB_EffectiveMinimumRR());
 
    OscillatorState osc;
    ZeroMemory(osc);
@@ -4696,6 +4698,7 @@ bool CheckPendingOrder(const Setup &s,
 }
 
 bool GetPendingLifetime(const string symbol,
+                         const int maxPendingBars,
                          ENUM_ORDER_TYPE_TIME &typeTime,
                          datetime &expiration)
 {
@@ -4704,7 +4707,9 @@ bool GetPendingLifetime(const string symbol,
 
    int modes=(int)SymbolInfoInteger(symbol,SYMBOL_EXPIRATION_MODE);
 
-   if(STB_EffectiveMaxPendingBars()<=0)
+   int effectiveBars=MathMax(0,maxPendingBars);
+
+   if(effectiveBars<=0)
    {
       if((modes & SYMBOL_EXPIRATION_GTC)==SYMBOL_EXPIRATION_GTC)
          return true;
@@ -4725,7 +4730,7 @@ bool GetPendingLifetime(const string symbol,
       return false;
    }
 
-   datetime target=TimeTradeServer()+(datetime)STB_EffectiveMaxPendingBars()*15*60;
+   datetime target=TimeTradeServer()+(datetime)effectiveBars*15*60;
 
    if((modes & SYMBOL_EXPIRATION_SPECIFIED)==SYMBOL_EXPIRATION_SPECIFIED)
    {
@@ -4849,9 +4854,9 @@ bool STB_RiskAuthorizePending(Setup &s,
    volume=0.0;
    typeTime=ORDER_TIME_GTC;
    expiration=0;
-   pendingMaxBars=MathMax(0,InpMaxPendingBars);
-   entryBufferPips=MathMax(0.0,InpEntryBufferPips);
-   slBufferPips=MathMax(0.0,InpSLBufferPips);
+   pendingMaxBars=MathMax(0,s.pendingMaxBars);
+   entryBufferPips=MathMax(0.0,s.entryBufferPips);
+   slBufferPips=MathMax(0.0,s.slBufferPips);
 
    if(!s.valid)
       return STB_LogPlaceReject(s,"INVALID_CANDIDATE");
@@ -4872,21 +4877,7 @@ bool STB_RiskAuthorizePending(Setup &s,
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
       return STB_LogPlaceReject(s,"ACCOUNT_ORDER_LIMIT");
 
-   bool profileActive=
-      s.adaptiveProfile>=0 &&
-      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT;
-
-   if(profileActive)
-      STB_AP_SetActive(s.adaptiveProfile);
-
-   pendingMaxBars=STB_EffectiveMaxPendingBars();
-   entryBufferPips=STB_EffectiveEntryBuffer();
-   slBufferPips=STB_EffectiveSLBuffer();
-
    bool normalized=PreparePendingSetup(s);
-
-   if(profileActive)
-      STB_AP_ClearActive();
 
    if(!normalized)
       return STB_LogPlaceReject(s,"BROKER_STOP_NORMALIZATION_FAILED");
@@ -4905,9 +4896,6 @@ bool STB_RiskAuthorizePending(Setup &s,
       TimeCurrent()-(datetime)lastSetup<InpSetupCooldownMinutes*60)
       return STB_LogPlaceReject(s,"SETUP_COOLDOWN");
 
-   if(profileActive)
-      STB_AP_SetActive(s.adaptiveProfile);
-
    if(InpUseRiskSizing)
       volume=CalculateOrderVolumeByRisk(s);
    else
@@ -4915,9 +4903,6 @@ bool STB_RiskAuthorizePending(Setup &s,
                              InpBaseLots*(s.trendAligned ?
                              InpTrendLotMultiplier:
                              InpUniversalLotMultiplier));
-
-   if(profileActive)
-      STB_AP_ClearActive();
 
    if(volume<=0.0)
       return STB_LogPlaceReject(s,
@@ -4931,17 +4916,10 @@ bool STB_RiskAuthorizePending(Setup &s,
       volumeLimit+1e-9)
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
 
-   if(profileActive)
-      STB_AP_SetActive(s.adaptiveProfile);
-
-   pendingMaxBars=STB_EffectiveMaxPendingBars();
-   entryBufferPips=STB_EffectiveEntryBuffer();
-   slBufferPips=STB_EffectiveSLBuffer();
-
-   bool lifetimeOK=GetPendingLifetime(s.symbol,typeTime,expiration);
-
-   if(profileActive)
-      STB_AP_ClearActive();
+   bool lifetimeOK=GetPendingLifetime(s.symbol,
+                                   pendingMaxBars,
+                                   typeTime,
+                                   expiration);
 
    if(!lifetimeOK)
       return STB_LogPlaceReject(s,"PENDING_EXPIRATION_UNSUPPORTED");
@@ -4962,9 +4940,9 @@ bool ExecuteSetup(Setup &s,const bool manual)
    double volume=0.0;
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
-   int pendingMaxBars=MathMax(0,InpMaxPendingBars);
-   double entryBufferPips=MathMax(0.0,InpEntryBufferPips);
-   double slBufferPips=MathMax(0.0,InpSLBufferPips);
+   int pendingMaxBars=MathMax(0,s.pendingMaxBars);
+   double entryBufferPips=MathMax(0.0,s.entryBufferPips);
+   double slBufferPips=MathMax(0.0,s.slBufferPips);
 
    if(!STB_RiskAuthorizePending(s,manual,volume,typeTime,expiration,
                                 pendingMaxBars,entryBufferPips,slBufferPips))
@@ -5043,23 +5021,11 @@ bool ExecuteSetup(Setup &s,const bool manual)
 
    SetLastSetupTime(s.symbol,s.direction,s.setupTime);
 
-   if(s.adaptiveProfile>=0 &&
-      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
-      STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
-
-   if(s.adaptiveProfile>=0 &&
-      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
-      STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
-
-   double orderRiskMoney=0.0;
-   ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
-
-   if(OrderCalcProfit(calcType,s.symbol,volume,s.entry,s.sl,orderRiskMoney))
-      STB_AdaptiveRememberOrderRisk(placedOrder,MathAbs(orderRiskMoney));
+   // Lifecycle/Adaptive persistence is owned by TradeTransaction after the
+   // terminal publishes the actual ORDER_ADD event. Execution only publishes
+   // the verified ticket and does not mutate learning state directly.
 
    STB_PendingTrailRegister(placedOrder,manual ? "UI_MANUAL":"AUTO");
-
-   STB_AdaptiveRecordSetup(s,true);
 
    Print("STB ORDER CREATED symbol=",s.symbol,
          " owner=EXECUTION order=",IntegerToString((int)placedOrder));
@@ -5115,6 +5081,10 @@ bool STB_ExecutionManualPendingCommand(const string symbol,const int direction)
    s.rr=MathAbs(s.tp-s.entry)/risk;
    s.score=0.0;
    s.adaptiveProfile=-1;
+   s.pendingMaxBars=MathMax(0,InpMaxPendingBars);
+   s.entryBufferPips=MathMax(0.0,InpEntryBufferPips);
+   s.slBufferPips=MathMax(0.0,InpSLBufferPips);
+   s.minimumRR=MathMax(0.0,InpMinimumRR);
    s.setupTime=iTime(symbol,PERIOD_M15,0);
 
    return ExecuteSetup(s,true);
@@ -7015,6 +6985,49 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
          if(InpPendingTrail)
             STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
+
+         // TradeTransaction is the first state owner after terminal creation.
+         // Persist immutable lifecycle metadata only after the ORDER_ADD event.
+         if(OrderSelect(trans.order))
+         {
+            string orderComment=OrderGetString(ORDER_COMMENT);
+            int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
+
+            if(profileId>=0)
+               STB_AdaptiveRememberOrderProfile(trans.order,profileId);
+
+            double orderRiskMoney=0.0;
+            string orderSymbol=OrderGetString(ORDER_SYMBOL);
+            long orderType=OrderGetInteger(ORDER_TYPE);
+
+            ENUM_ORDER_TYPE calcType=
+               (orderType==ORDER_TYPE_BUY_STOP ||
+                orderType==ORDER_TYPE_BUY_LIMIT ?
+                ORDER_TYPE_BUY :
+                orderType==ORDER_TYPE_SELL_STOP ||
+                orderType==ORDER_TYPE_SELL_LIMIT ?
+                ORDER_TYPE_SELL :
+                WRONG_VALUE);
+
+            if(calcType!=WRONG_VALUE)
+            {
+               double orderVolume=OrderGetDouble(ORDER_VOLUME_CURRENT);
+               double orderEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+               double orderSL=OrderGetDouble(ORDER_SL);
+
+               if(orderVolume>0.0 &&
+                  orderEntry>0.0 &&
+                  orderSL>0.0 &&
+                  OrderCalcProfit(calcType,
+                                  orderSymbol,
+                                  orderVolume,
+                                  orderEntry,
+                                  orderSL,
+                                  orderRiskMoney))
+                  STB_AdaptiveRememberOrderRisk(
+                     trans.order,MathAbs(orderRiskMoney));
+            }
+         }
       }
 
       return;
