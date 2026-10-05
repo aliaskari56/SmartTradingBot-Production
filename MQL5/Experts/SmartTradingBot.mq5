@@ -4840,8 +4840,6 @@ bool STB_ManualPendingCommand(const string symbol,const int direction)
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
-   STB_AP_ClearActive();
-
    double extreme=(direction>0)
                   ? iLow(symbol,PERIOD_M15,0)
                   : iHigh(symbol,PERIOD_M15,0);
@@ -4849,7 +4847,12 @@ bool STB_ManualPendingCommand(const string symbol,const int direction)
       return false;
 
    STBPendingResolution res;
-   if(!STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) ||
+   if(!STB_ResolvePendingDistance(symbol,
+                                   direction,
+                                   extreme,
+                                   InpEntryBufferPips,
+                                   res,
+                                   InpSLBufferPips) ||
       !res.valid)
       return false;
 
