@@ -352,3 +352,111 @@ MT5 EXECUTION — META TRADER AGENT: PASS / FAIL / NOT VERIFIED
 FINAL ACCEPTANCE — COMBINED: PASS / FAIL / NOT VERIFIED
 
 Only FINAL ACCEPTANCE = PASS permits SECTION 02.
+
+
+# PRE-FLIGHT RESULT — OUR SIDE — 2026-10-06
+
+## Source/Git review
+- Git source reviewed: `MQL5/Experts/SmartTradingBot.mq5`
+- Git baseline blob SHA: `e20e36fcc8604532e0a277928690d412d71065c4`
+- Declared version: `1.120`
+- SECTION 01 exact range: lines `1–188`
+- First STRUCTURES boundary: line `191`
+- Input declarations inspected: `88`
+- Duplicate input identifiers detected: `0`
+- Historical 1.127 identifiers in Section 01:
+  - `InpForensicOrderCheck`: ABSENT
+  - `InpStructuralPending`: ABSENT
+  - `InpStructuralCancelWhenInvalid`: ABSENT
+
+## Technical reference review
+MQL5 documentation confirms:
+- `#property` belongs in the main source module and controls compiled program properties.
+- `input` variables are external/read-only program parameters initialized before `OnInit`.
+- Global-scope variables/objects are initialized before event handling.
+- `input group` is valid for organizing EA parameters.
+
+References reviewed:
+- MQL5 Program Properties
+- MQL5 Input Variables
+- MQL5 Global Variables / scope
+
+## Static findings
+
+### Finding 01 — documentation drift
+Location:
+`InpUiMarginX` line 180
+
+Observed:
+- Default value: `62`
+- Inline comment says the margin range is `10..20`
+
+Classification:
+DOCUMENTATION / CONTRACT CLARITY
+Behavioral impact: NONE demonstrated.
+
+Decision:
+NO CODE CHANGE during preflight.
+Reason: changing a comment is not required to make the Expert compile or change runtime behavior, and the audit contract requires minimal behavioral diff.
+
+### Finding 02 — ownership statement requiring downstream verification
+Location:
+`InpManageEAPositions = true` line 91
+Comment:
+`ownership is not filtered`
+
+Classification:
+DESIGN RISK / DOWNSTREAM AUDIT ITEM
+Behavioral impact: NOT YET VERIFIED.
+
+Decision:
+NO CHANGE in Section 01.
+Carry to Section 10 (Exposure / Position State) for full ownership-path verification.
+
+## Preflight assessment
+
+Header/properties: PASS
+Include declarations: PASS
+Inputs: PASS
+Input identifier uniqueness: PASS
+Version-sensitive input check: PASS
+Global object declaration at header level: PASS
+Static Section 01 correctness: PASS WITH FINDINGS RECORDED
+Code patch required in Section 01: NO
+
+## Preflight compile
+
+Fresh compile on our side:
+NOT VERIFIED — no authorized MetaEditor compiler/runtime is available through this preflight environment.
+
+Important:
+- Do NOT describe Git/static validation as a fresh MetaEditor compile.
+- Existing historical 0/0 compile evidence remains historical evidence only.
+- MetaTrader Agent must perform the actual MetaEditor compile after handoff.
+
+## Section 01 preflight checklist
+
+- [x] Active Git source identified
+- [x] Version identified
+- [x] Exact Section 01 line range identified
+- [x] Header/properties reviewed
+- [x] Includes reviewed at contract level
+- [x] All 88 inputs reviewed for identifier duplication
+- [x] Version-sensitive inputs checked
+- [x] Global header object reviewed
+- [x] Static MQL5 semantics checked against official documentation
+- [x] Real findings classified
+- [x] Unnecessary code changes avoided
+- [x] Relevant downstream risk recorded
+- [ ] Preflight compile executed
+- [ ] 0 errors verified by a fresh preflight compiler
+- [ ] 0 warnings verified by a fresh preflight compiler
+
+PRE-FLIGHT STATUS:
+`PASS FOR HANDOFF WITH COMPILE PENDING IN METATRADER AGENT`
+
+FINAL ACCEPTANCE:
+`NOT COMPLETE`
+
+HARD STOP:
+Do not mark SECTION 01 complete until MetaTrader Agent performs the actual compile and returns fresh 0 errors / 0 warnings plus required runtime evidence.
