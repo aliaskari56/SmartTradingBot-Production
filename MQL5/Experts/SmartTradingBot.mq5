@@ -87,9 +87,10 @@ input double  InpAutoLockPips           = 30.0;
 input double  InpManualSaveStepPips     = 20.0;
 
 input group "=== TRADE MANAGEMENT ==="
-input bool    InpManageManualPositions  = true;
-input bool    InpManageEAPositions      = true;
+input bool    InpManageManualPositions  = true;   // global position-management enable
+input bool    InpManageEAPositions      = true;   // ownership is not filtered
 input bool    InpManageManualPending    = true;
+input double  InpEmergencySLPips        = 30.0;  // emergency SL distance when structural SL is unavailable
 input bool    InpManageEAPending        = true;
 input bool    InpAllowOneClickHedge      = true;
 
@@ -3247,15 +3248,9 @@ bool IsManagedPosition(const ulong ticket)
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
 
-   long magic=PositionGetInteger(POSITION_MAGIC);
-
-   if(magic==(long)InpMagic && InpManageEAPositions)
-      return true;
-
-   if(magic==0 && InpManageManualPositions)
-      return true;
-
-   return false;
+   // Ownership-agnostic position management: magic/comment/source do not
+   // exclude an open position from SL protection and trailing.
+   return (InpManageManualPositions || InpManageEAPositions);
 }
 
 bool IsManagedOrder(const ulong ticket)
@@ -3630,11 +3625,14 @@ bool ModifyPositionSL(const ulong ticket,const double newSL)
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double tp=PositionGetDouble(POSITION_TP);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
 
-   if(!IsValidSLForPosition(symbol,type,newSL))
+   if(point<=0.0 || !IsValidSLForPosition(symbol,type,newSL))
       return false;
 
    trade.SetExpertMagicNumber(InpMagic);
+   trade.SetAsyncMode(false);
 
    if(!trade.PositionModify(ticket,newSL,tp))
    {
@@ -3644,11 +3642,35 @@ bool ModifyPositionSL(const ulong ticket,const double newSL)
       return false;
    }
 
-   if(!TradeRetcodeModifySucceeded())
+   uint ret=trade.ResultRetcode();
+
+   if(ret!=TRADE_RETCODE_DONE &&
+      ret!=TRADE_RETCODE_DONE_PARTIAL &&
+      ret!=TRADE_RETCODE_NO_CHANGES &&
+      ret!=TRADE_RETCODE_ORDER_CHANGED)
    {
       Print("STB PositionModify server rejected ticket=",ticket,
-            " ret=",trade.ResultRetcode()," ",
+            " ret=",ret," ",
             trade.ResultRetcodeDescription());
+      return false;
+   }
+
+   if(!PositionSelectByTicket(ticket))
+   {
+      Print("STB PositionModify verification failed ticket=",ticket);
+      return false;
+   }
+
+   double actualSL=PositionGetDouble(POSITION_SL);
+   double tolerance=MathMax(point*0.5,
+                            tickSize>0.0 ? tickSize*0.5 : point*0.5);
+
+   if(actualSL<=0.0 || MathAbs(actualSL-newSL)>tolerance)
+   {
+      Print("STB PositionModify NOT CONFIRMED ticket=",ticket,
+            " requestedSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " actualSL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " ret=",ret);
       return false;
    }
 
@@ -3966,16 +3988,52 @@ bool CalculateNearestStructuralSL(const string symbol,
    return true;
 }
 
+double CalculateFallbackSL(const string symbol,
+                          const long positionType,
+                          const double entryPrice)
+{
+   if(symbol=="" || entryPrice<=0.0)
+      return 0.0;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return 0.0;
+
+   double pip=PipSize(symbol);
+   double minDist=TradeMinDistance(symbol);
+
+   if(pip<=0.0 || minDist<=0.0)
+      return 0.0;
+
+   double emergencyPips=MathMax(1.0,InpEmergencySLPips);
+   double sl=0.0;
+
+   if(positionType==POSITION_TYPE_BUY)
+      sl=MathMin(entryPrice-emergencyPips*pip,tick.bid-minDist);
+   else if(positionType==POSITION_TYPE_SELL)
+      sl=MathMax(entryPrice+emergencyPips*pip,tick.ask+minDist);
+   else
+      return 0.0;
+
+   sl=NormalizePrice(symbol,sl);
+
+   if(!IsValidSLForPosition(symbol,positionType,sl))
+      return 0.0;
+
+   return sl;
+}
+
 double CalculateInitialSL(const string symbol,
                          const long positionType,
                          const double entryPrice)
 {
    double sl=0.0;
 
-   if(!CalculateNearestStructuralSL(symbol,positionType,entryPrice,sl))
-      return 0.0;
+   if(CalculateNearestStructuralSL(symbol,positionType,entryPrice,sl) &&
+      IsValidSLForPosition(symbol,positionType,sl))
+      return sl;
 
-   return sl;
+   return CalculateFallbackSL(symbol,positionType,entryPrice);
 }
 
 bool EnsureInitialSL(const ulong ticket)
@@ -3989,53 +4047,48 @@ bool EnsureInitialSL(const ulong ticket)
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
-   double tp=PositionGetDouble(POSITION_TP);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
 
    if(currentSL>0.0)
       return true;
 
-   double candidate=CalculateInitialSL(symbol,type,entry);
+   double candidate=0.0;
+   bool structuralOK=
+      CalculateNearestStructuralSL(symbol,type,entry,candidate) &&
+      IsValidSLForPosition(symbol,type,candidate);
 
-   if(candidate<=0.0)
+   if(!structuralOK)
    {
-      Print("STB initial SL: no eligible confirmed swing ticket=",ticket,
-            " symbol=",symbol);
-      return false;
-   }
+      candidate=CalculateFallbackSL(symbol,type,entry);
 
-   if(!IsValidSLForPosition(symbol,type,candidate))
-   {
-      Print("STB initial SL candidate invalid ticket=",ticket,
+      if(candidate<=0.0)
+      {
+         Print("STB initial SL FAILED: structural and fallback unavailable",
+               " ticket=",ticket,
+               " symbol=",symbol,
+               " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"));
+         return false;
+      }
+
+      Print("STB initial SL FALLBACK ticket=",ticket,
             " symbol=",symbol,
-            " candidate=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-      return false;
+            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " fallbackPips=",DoubleToString(InpEmergencySLPips,1),
+            " SL=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
    }
 
-   trade.SetExpertMagicNumber(InpMagic);
-
-   if(!trade.PositionModify(ticket,candidate,tp))
+   if(!ModifyPositionSL(ticket,candidate))
    {
-      Print("STB initial SL request failed ticket=",ticket,
+      Print("STB initial SL NOT CONFIRMED ticket=",ticket,
             " symbol=",symbol,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
+            " requested=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
    }
 
-   if(!TradeRetcodeModifySucceeded())
-   {
-      Print("STB initial SL server rejected ticket=",ticket,
-            " symbol=",symbol,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-   }
-
-   Print("STB initial SL set immediately ticket=",ticket,
+   Print("STB initial SL set and CONFIRMED ticket=",ticket,
          " symbol=",symbol,
          " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-         " nearestSwingBufferPips=",DoubleToString(InpInitialSLBufferPips,1),
+         " source=",(structuralOK ? "STRUCTURAL":"FALLBACK"),
          " SL=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
 
    return true;
@@ -6322,6 +6375,10 @@ int OnInit()
       int recovered=STB_PendingTrailRebuildFromTerminal();
       Print("STB PENDING TRAIL INIT recovered=",IntegerToString(recovered));
    }
+
+   // Immediately protect positions that already existed before this
+   // EA instance/restart; do not wait for the first tick/timer cycle.
+   ManagePositions();
 
    g_lastChartBar=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
    g_lastM15Bar=iTime(_Symbol,PERIOD_M15,0);
