@@ -3243,29 +3243,48 @@ void SetLastSetupTime(const string symbol,const int direction,const datetime t)
 // EXPOSURE MANAGEMENT
 //==================================================================
 
-bool IsManagedPosition(const ulong ticket)
+enum STB_OWNER_CLASS
+{
+   STB_OWNER_FOREIGN = 0,
+   STB_OWNER_EA      = 1,
+   STB_OWNER_MANUAL  = 2
+};
+
+STB_OWNER_CLASS STB_GetPositionOwner(const ulong ticket)
 {
    if(ticket==0 || !PositionSelectByTicket(ticket))
-      return false;
+      return STB_OWNER_FOREIGN;
 
-   // Ownership-agnostic position management: magic/comment/source do not
-   // exclude an open position from SL protection and trailing.
-   return (InpManageManualPositions || InpManageEAPositions);
+   long magic=PositionGetInteger(POSITION_MAGIC);
+   if(magic==(long)InpMagic) return STB_OWNER_EA;
+   if(magic==0) return STB_OWNER_MANUAL;
+   return STB_OWNER_FOREIGN;
+}
+
+STB_OWNER_CLASS STB_GetOrderOwner(const ulong ticket)
+{
+   if(ticket==0 || !OrderSelect(ticket))
+      return STB_OWNER_FOREIGN;
+
+   long magic=OrderGetInteger(ORDER_MAGIC);
+   if(magic==(long)InpMagic) return STB_OWNER_EA;
+   if(magic==0) return STB_OWNER_MANUAL;
+   return STB_OWNER_FOREIGN;
+}
+
+bool IsManagedPosition(const ulong ticket)
+{
+   STB_OWNER_CLASS owner=STB_GetPositionOwner(ticket);
+   if(owner==STB_OWNER_EA) return InpManageEAPositions;
+   if(owner==STB_OWNER_MANUAL) return InpManageManualPositions;
+   return false;
 }
 
 bool IsManagedOrder(const ulong ticket)
 {
-   if(ticket==0 || !OrderSelect(ticket))
-      return false;
-
-   long magic=OrderGetInteger(ORDER_MAGIC);
-
-   if(magic==(long)InpMagic && InpManageEAPending)
-      return true;
-
-   if(magic==0 && InpManageManualPending)
-      return true;
-
+   STB_OWNER_CLASS owner=STB_GetOrderOwner(ticket);
+   if(owner==STB_OWNER_EA) return InpManageEAPending;
+   if(owner==STB_OWNER_MANUAL) return InpManageManualPending;
    return false;
 }
 
@@ -3907,10 +3926,10 @@ bool TrailPositionOnClosedCandle(const ulong ticket)
 }
 
 //==================================================================
-// MANAGE POSITIONS
+// PROTECTION SERVICE — structural/fallback SL calculation
 //==================================================================
 
-bool CalculateNearestStructuralSL(const string symbol,
+bool STB_ProtectionCalculateNearestStructuralSL(const string symbol,
                                   const long direction,
                                   const double referencePrice,
                                   double &sl)
@@ -3988,7 +4007,7 @@ bool CalculateNearestStructuralSL(const string symbol,
    return true;
 }
 
-double CalculateFallbackSL(const string symbol,
+double STB_ProtectionCalculateFallbackSL(const string symbol,
                           const long positionType,
                           const double entryPrice)
 {
@@ -4023,17 +4042,17 @@ double CalculateFallbackSL(const string symbol,
    return sl;
 }
 
-double CalculateInitialSL(const string symbol,
+double STB_ProtectionCalculateInitialSL(const string symbol,
                          const long positionType,
                          const double entryPrice)
 {
    double sl=0.0;
 
-   if(CalculateNearestStructuralSL(symbol,positionType,entryPrice,sl) &&
+   if(STB_ProtectionCalculateNearestStructuralSL(symbol,positionType,entryPrice,sl) &&
       IsValidSLForPosition(symbol,positionType,sl))
       return sl;
 
-   return CalculateFallbackSL(symbol,positionType,entryPrice);
+   return STB_ProtectionCalculateFallbackSL(symbol,positionType,entryPrice);
 }
 
 bool EnsureInitialSL(const ulong ticket)
@@ -4054,12 +4073,12 @@ bool EnsureInitialSL(const ulong ticket)
 
    double candidate=0.0;
    bool structuralOK=
-      CalculateNearestStructuralSL(symbol,type,entry,candidate) &&
+      STB_ProtectionCalculateNearestStructuralSL(symbol,type,entry,candidate) &&
       IsValidSLForPosition(symbol,type,candidate);
 
    if(!structuralOK)
    {
-      candidate=CalculateFallbackSL(symbol,type,entry);
+      candidate=STB_ProtectionCalculateFallbackSL(symbol,type,entry);
 
       if(candidate<=0.0)
       {
@@ -4121,7 +4140,7 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       return false;
 
    double candidate=0.0;
-   if(!CalculateNearestStructuralSL(symbol,direction,entry,candidate))
+   if(!STB_ProtectionCalculateNearestStructuralSL(symbol,direction,entry,candidate))
       return false;
 
    MqlTick tick;
@@ -4181,6 +4200,9 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 }
 
 
+// MANAGEMENT OWNER CONTRACT:
+// Existing positions only. No watchlist scanning or opportunity discovery.
+// Structural SL calculation is delegated to STB_Protection* services.
 void ManagePositions()
 {
    // First pass: immediately protect every managed position that has no SL.
@@ -4214,6 +4236,8 @@ void ManagePositions()
 // PENDING ORDER MANAGEMENT
 //==================================================================
 
+// PENDING MANAGEMENT OWNER CONTRACT:
+// Existing pending orders only. No scanner access and no fresh-entry discovery.
 void ManagePendingOrders()
 {
    datetime now=TimeCurrent();
@@ -6316,12 +6340,19 @@ int OnInit()
    // but isolate it by account + EA magic to avoid terminal-wide collisions.
    // In Strategy Tester, the input must be authoritative so a previous
    // emulated terminal-global state cannot silently disable trading.
-   if(InpDiagnosticM15Mode)
+   if(MQLInfoInteger(MQL_TESTER))
    {
-      g_autoTrading=true;
-      GlobalVariableSet(g_autoStateName,1.0);
+      g_autoTrading=InpAutoTrading;
+      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
    }
-   else if(MQLInfoInteger(MQL_TESTER))
+   else if(InpDiagnosticM15Mode)
+   {
+      // Diagnostic mode is analysis/telemetry only; it never authorizes
+      // live trading by itself.
+      g_autoTrading=InpAutoTrading;
+      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
+   }
+   else
    {
       g_autoTrading=InpAutoTrading;
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
@@ -6422,7 +6453,9 @@ int OnInit()
       ac.interTF=(int)InpSmartStructureInterTF;
       ac.lookback=InpSmartStructureLookback;
       ac.visualLegs=InpStructureVisualLegs;      // PHASE 55: bounded zigzag visual budget
-      ac.showZigZag=InpStructureShowZigZag;
+      ac.showZigZag=InpStructureShowZigZag && InpSmartZigZagEnabled;
+      ac.zzShowProvisional=InpSmartZigZagShowProvisional &&
+                            InpSmartZigZagEnabled;
       ac.showSwings=InpStructureShowConfirmedSwings;
       ac.showHHLL=InpStructureShowHHLL;
       ac.showBOS=InpStructureShowBOS;
@@ -6887,26 +6920,3 @@ void OnChartEvent(const int id,
 
    if(sparam==autoName)
    {
-      g_autoTrading=!g_autoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-      UpdateButtons();
-
-      Print("STB AUTO TRADING = ",
-            (g_autoTrading ? "ON":"OFF"));
-      return;
-   }
-
-   if(sparam==saveName)
-   {
-      ManualSavePlus20();
-      return;
-   }
-
-   if(sparam==hedgeName)
-   {
-      OneClickHedge();
-      return;
-   }
-}
-
-
