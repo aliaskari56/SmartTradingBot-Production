@@ -3788,8 +3788,10 @@ void AutoProfitProtection()
 // MANUAL SAVE +20
 //==================================================================
 
-void ManualSavePlus20()
+int ManualSavePlus20()
 {
+   int completed=0;
+
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -3797,7 +3799,8 @@ void ManualSavePlus20()
       if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
-      PositionSelectByTicket(ticket);
+      if(!PositionSelectByTicket(ticket))
+         continue;
 
       string symbol=PositionGetString(POSITION_SYMBOL);
       long type=PositionGetInteger(POSITION_TYPE);
@@ -3807,12 +3810,17 @@ void ManualSavePlus20()
       double currentLock=GetLockedPips(ticket);
       double requested=currentLock+InpManualSaveStepPips;
 
-      if(profit>=requested)
-         ApplyProfitLock(ticket,requested);
+      if(profit>=requested &&
+         ApplyProfitLock(ticket,requested))
+         completed++;
    }
 
-   Print("STB SAVE +20 executed.");
+   Print("STB SAVE +20 completed positions=",
+         IntegerToString(completed));
+
+   return completed;
 }
+
 
 //==================================================================
 // M15 CLOSED-CANDLE TRAILING
@@ -4200,11 +4208,34 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       return false;
    }
 
-   Print("STB pending initial SL set ticket=",ticket,
+   if(!OrderSelect(ticket))
+   {
+      Print("STB pending initial SL verification failed ticket=",ticket,
+            " symbol=",symbol,
+            " reason=ORDER_NOT_VISIBLE");
+      return false;
+   }
+
+   double actualSL=OrderGetDouble(ORDER_SL);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tolerance=MathMax(point*0.5,
+                            tickSize>0.0 ? tickSize*0.5 : point*0.5);
+
+   if(actualSL<=0.0 || MathAbs(actualSL-candidate)>tolerance)
+   {
+      Print("STB pending initial SL NOT CONFIRMED ticket=",ticket,
+            " symbol=",symbol,
+            " requested=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " actual=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
+   }
+
+   Print("STB pending initial SL set and CONFIRMED ticket=",ticket,
          " symbol=",symbol,
          " side=",(direction==POSITION_TYPE_BUY ? "BUY":"SELL"),
          " nearestSwingBufferPips=",DoubleToString(InpInitialSLBufferPips,1),
-         " SL=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+         " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
 
    return true;
 }
@@ -7159,7 +7190,10 @@ void OnChartEvent(const int id,
 
    if(sparam==saveName)
    {
-      ManualSavePlus20();
+      int completed=ManualSavePlus20();
+      Print("STB UI RESULT command=SAVE20 status=",
+            completed>0 ? "COMPLETED":"NO_ACTION",
+            " positions=",IntegerToString(completed));
       return;
    }
 
