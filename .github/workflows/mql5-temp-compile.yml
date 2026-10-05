@@ -1,0 +1,48 @@
+name: MQL5 Temporary Compile
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MT5
+        shell: pwsh
+        run: |
+          $i=Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          Invoke-WebRequest "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $i
+          Start-Process $i -ArgumentList "/auto" -Wait -NoNewWindow
+      - name: Compile SmartTradingBot
+        shell: pwsh
+        run: |
+          $meta=(Get-ChildItem "C:\Program Files\MetaTrader 5" -Filter "MetaEditor64.exe" -Recurse -File | Select-Object -First 1).FullName
+          if(-not $meta){throw "MetaEditor64.exe not found"}
+          $src=Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.mq5"
+          $inc=Join-Path $env:GITHUB_WORKSPACE "MQL5"
+          $out=Join-Path $env:GITHUB_WORKSPACE "compile-out"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $p=Start-Process $meta -ArgumentList @("/compile:$src","/inc:$inc","/log") -Wait -PassThru -NoNewWindow
+          Start-Sleep 3
+          Write-Host "MetaEditorExit=$($p.ExitCode)"
+          $ex5=Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.ex5"
+          if(-not(Test-Path $ex5)){throw "EX5 not produced"}
+          Get-ChildItem "$env:APPDATA\MetaQuotes","$env:LOCALAPPDATA\MetaQuotes","$env:GITHUB_WORKSPACE" -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {$_.LastWriteTime -ge (Get-Date).AddMinutes(-5)} |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 10 |
+            ForEach-Object {
+              Copy-Item $_.FullName (Join-Path $out ($_.Name+".txt")) -Force
+              Write-Host "=== $($_.FullName) ==="
+              Get-Content $_.FullName -Tail 120 | Write-Host
+            }
+          Copy-Item $ex5 (Join-Path $out "SmartTradingBot.ex5") -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smarttradingbot-pendingtrail-compile
+          path: compile-out/**
+          if-no-files-found: warn
