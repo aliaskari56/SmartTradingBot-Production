@@ -89,7 +89,8 @@ bool STB_ResolvePendingDistance(const string symbol,
                                 const int direction,
                                 const double extreme,
                                 const double configuredBaseDistance,
-                                STBPendingResolution &r)
+                                STBPendingResolution &r,
+                                const double configuredSLBufferPips=-1.0)
 {
    ZeroMemory(r);
    r.valid=false;
@@ -108,16 +109,19 @@ bool STB_ResolvePendingDistance(const string symbol,
       return false;
    }
 
-   // Existing STB adaptive context is the source of truth. The caller
-   // may override with a configured base distance (pips) when needed.
+   // Adaptive context remains available for Strategy-owned callers. Lifecycle
+   // managers can pass immutable stored buffers and therefore do not need
+   // Adaptive access.
    double entryOffsetPips=STB_EffectiveEntryBuffer();
    double slBufferPips   =STB_EffectiveSLBuffer();
 
    if(configuredBaseDistance>0.0)
-   {
       entryOffsetPips=configuredBaseDistance;
-      slBufferPips   =configuredBaseDistance;
-   }
+
+   if(configuredSLBufferPips>=0.0)
+      slBufferPips=configuredSLBufferPips;
+   else if(configuredBaseDistance>0.0)
+      slBufferPips=configuredBaseDistance;
 
    // STB configuration values are expressed in pips, not raw broker points.
    // Use the EA's canonical PipSize() so XAU/XAG/3-5 digit symbols receive
