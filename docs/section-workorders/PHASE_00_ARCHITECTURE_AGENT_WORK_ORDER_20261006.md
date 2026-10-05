@@ -224,3 +224,153 @@ Return only the architecture evidence and findings.
 
 ACCEPTANCE:
 Architecture map complete + all cross-boundary calls mapped + no source modification.
+
+
+# MASTER PREFLIGHT UPDATE — EXACT SOURCE RECONCILIATION REQUIRED
+
+Before any code modification, the Agent MUST reconcile the exact active MetaTrader source with the Git baseline used by the preflight audit.
+
+## SOURCE RECONCILIATION
+
+Report:
+- exact active source path
+- #property version
+- file size in bytes
+- line count
+- last-write timestamp
+- SHA-256 hash if available
+
+If the active file is inside a local Git working tree:
+run the equivalent of:
+`git hash-object <active SmartTradingBot.mq5>`
+
+Expected Git blob SHA for the audited Git baseline:
+`e20e36fcc8604532e0a277928690d412d71065c4`
+
+IMPORTANT:
+Do not assume that equal version + equal line count means equal source.
+
+Previously reported:
+- active MetaTrader source: 211,466 bytes
+- Git-retrieved source: 201,272 bytes
+- both report version 1.120 and 6,889 lines
+
+Therefore source identity is NOT yet proven.
+
+If the hashes do not match:
+- DO NOT PATCH
+- DO NOT RESTORE
+- DO NOT COPY
+- DO NOT OVERWRITE
+- report the mismatch and return the active-file evidence only.
+
+## ARCHITECTURE VERIFICATION
+
+On the exact active source, map:
+- Scanner
+- Strategy
+- Candidate/Setup
+- Risk/Safety
+- Execution
+- Position Management
+- Pending Management
+- Protection/SL calculation
+- TradeTransaction
+- Adaptive Learning
+- UI
+- Diagnostics
+- Persistence
+
+Trace at minimum:
+- ScanWatchlist
+- BuildSetup
+- PlaceSetup
+- ExecuteSetup
+- STB_ManualPendingCommand
+- OneClickHedge
+- ManagePositions
+- ManagePendingOrders
+- CalculateNearestStructuralSL
+- CalculateHedgeSL
+- OnTick
+- OnTimer
+- OnTradeTransaction
+- OnChartEvent
+
+Explicitly verify these known Git findings against the active source:
+1. ScanWatchlist -> PlaceSetup -> ExecuteSetup
+2. BuildSetup mixes Strategy + Adaptive + broker normalization
+3. Management -> CollectSwings through protection calculation
+4. HasManagedExposure -> IsManagedPosition ownership coupling
+5. InpDiagnosticM15Mode can force auto trading
+6. InpSmartZigZagEnabled may be unused
+7. UI result reporting accuracy
+
+## PROHIBITIONS
+
+This Phase is read-only.
+
+Do NOT:
+- modify SmartTradingBot.mq5
+- modify any Include
+- create backup
+- create duplicate
+- create another Expert
+- create another EX5
+- restore Git
+- overwrite the active source
+- compile a changed source
+
+Compilation is NOT required because this phase makes no code changes. Record this as:
+COMPILE: NOT APPLICABLE — READ-ONLY SOURCE RECONCILIATION
+
+## OUTPUT
+
+Return:
+
+PHASE 00
+STATUS: PASS / MISMATCH / NOT VERIFIED
+
+SOURCE IDENTITY
+Path:
+Version:
+Size:
+Lines:
+Mtime:
+SHA-256:
+Git hash-object:
+Matches baseline: YES / NO / UNKNOWN
+
+ARCHITECTURE MAP
+...
+
+CROSS-BOUNDARY VIOLATIONS
+...
+
+CHECKLIST
+- [ ] Exact active source identified
+- [ ] Version verified
+- [ ] Size verified
+- [ ] Line count verified
+- [ ] Hash verified
+- [ ] Git baseline comparison completed where possible
+- [ ] Scanner boundary verified
+- [ ] Strategy boundary verified
+- [ ] Setup handoff verified
+- [ ] Risk boundary verified
+- [ ] Execution ownership verified
+- [ ] Management boundary verified
+- [ ] Protection boundary verified
+- [ ] TradeTransaction boundary verified
+- [ ] Learning boundary verified
+- [ ] UI boundary verified
+- [ ] Diagnostics boundary verified
+- [ ] Persistence boundary verified
+- [ ] No code changed
+- [ ] PHASE 00 — COMPLETE ✅
+
+HARD STOP:
+Do not proceed to SECTION 01 or any repair until source identity and architecture map are returned.
+
+ACCEPTANCE:
+Exact active-source identity + complete architecture map + zero source changes.
