@@ -1,0 +1,37 @@
+name: STB UI Compile
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MT5
+        shell: pwsh
+        run: |
+          $i=Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          Invoke-WebRequest "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $i
+          Start-Process $i -ArgumentList "/auto" -Wait -NoNewWindow
+      - name: Compile SmartTradingBot
+        shell: pwsh
+        run: |
+          $meta=(Get-ChildItem "C:\Program Files\MetaTrader 5" -Filter "MetaEditor64.exe" -Recurse -File | Select-Object -First 1).FullName
+          if(-not $meta){throw "MetaEditor64.exe not found"}
+          $src=Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.mq5"
+          $inc=Join-Path $env:GITHUB_WORKSPACE "MQL5"
+          $p=Start-Process $meta -ArgumentList @("/compile:$src","/inc:$inc","/log") -Wait -PassThru -NoNewWindow
+          Start-Sleep 5
+          $log=Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.log"
+          if(Test-Path $log){Get-Content $log -Tail 120 | Write-Host}else{throw "Compile log missing"}
+          if((Get-Content $log -Raw) -notmatch "Result:\s+0 errors"){throw "Compile did not report 0 errors"}
+          Write-Host "COMPILE PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stb-ui-compile-log
+          path: MQL5/Experts/SmartTradingBot.log
+          if-no-files-found: warn
