@@ -16,7 +16,7 @@ jobs:
           $i=Join-Path $env:RUNNER_TEMP "mt5setup.exe"
           Invoke-WebRequest "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $i
           Start-Process $i -ArgumentList "/auto" -Wait -NoNewWindow
-      - name: Compile SmartTradingBot
+      - name: Compile and inspect
         shell: pwsh
         run: |
           $meta=(Get-ChildItem "C:\Program Files\MetaTrader 5" -Filter "MetaEditor64.exe" -Recurse -File | Select-Object -First 1).FullName
@@ -25,24 +25,60 @@ jobs:
           $inc=Join-Path $env:GITHUB_WORKSPACE "MQL5"
           $out=Join-Path $env:GITHUB_WORKSPACE "compile-out"
           New-Item -ItemType Directory -Force $out | Out-Null
+
           $p=Start-Process $meta -ArgumentList @("/compile:$src","/inc:$inc","/log") -Wait -PassThru -NoNewWindow
-          Start-Sleep 3
           Write-Host "MetaEditorExit=$($p.ExitCode)"
-          $ex5=Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.ex5"
-          if(-not(Test-Path $ex5)){throw "EX5 not produced"}
-          Get-ChildItem "$env:APPDATA\MetaQuotes","$env:LOCALAPPDATA\MetaQuotes","$env:GITHUB_WORKSPACE" -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object {$_.LastWriteTime -ge (Get-Date).AddMinutes(-5)} |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 10 |
-            ForEach-Object {
-              Copy-Item $_.FullName (Join-Path $out ($_.Name+".txt")) -Force
-              Write-Host "=== $($_.FullName) ==="
-              Get-Content $_.FullName -Tail 120 | Write-Host
-            }
-          Copy-Item $ex5 (Join-Path $out "SmartTradingBot.ex5") -Force
+
+          Start-Sleep 5
+
+          $roots=@(
+            $env:GITHUB_WORKSPACE,
+            "$env:APPDATA\MetaQuotes",
+            "$env:LOCALAPPDATA\MetaQuotes",
+            "C:\Users\runneradmin\AppData\Roaming\MetaQuotes",
+            "C:\Users\runneradmin\AppData\Local\MetaQuotes"
+          ) | Where-Object {Test-Path $_} | Select-Object -Unique
+
+          $logs=@()
+          foreach($root in $roots){
+            $logs += Get-ChildItem $root -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue
+          }
+          $logs=$logs | Sort-Object LastWriteTime -Descending -Unique
+
+          Write-Host "=== RECENT LOGS ==="
+          foreach($f in ($logs | Where-Object {$_.LastWriteTime -ge (Get-Date).AddMinutes(-10)} | Select-Object -First 20)){
+            Write-Host "LOG=$($f.FullName) TIME=$($f.LastWriteTime)"
+            Copy-Item $f.FullName (Join-Path $out ("LOG_"+$([IO.Path]::GetFileName($f.FullName)))) -Force
+            Get-Content $f.FullName -Tail 250 | Write-Host
+          }
+
+          $ex5=@()
+          foreach($root in $roots){
+            $ex5 += Get-ChildItem $root -Filter "SmartTradingBot.ex5" -Recurse -File -ErrorAction SilentlyContinue
+          }
+          $ex5=$ex5 | Sort-Object LastWriteTime -Descending -Unique
+
+          Write-Host "=== EX5 FILES ==="
+          foreach($f in $ex5 | Select-Object -First 20){
+            Write-Host "EX5=$($f.FullName) SIZE=$($f.Length) TIME=$($f.LastWriteTime)"
+            Copy-Item $f.FullName (Join-Path $out ("EX5_"+$([Guid]::NewGuid().ToString("N"))+".ex5")) -Force
+          }
+
+          @(
+            "MetaEditor=$meta"
+            "ExitCode=$($p.ExitCode)"
+            "Source=$src"
+            "LatestLogCount=$($logs.Count)"
+            "LatestEX5Count=$($ex5.Count)"
+          ) | Set-Content (Join-Path $out "compile-meta.txt")
+
+          Get-ChildItem $out -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
+
+          if($p.ExitCode -ne 0){throw "MetaEditor exit code non-zero"}
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: smarttradingbot-pendingtrail-compile
+          name: smarttradingbot-pendingtrail-compile-final
           path: compile-out/**
           if-no-files-found: warn
