@@ -3019,9 +3019,6 @@ bool BuildSetup(const string symbol,
    if(s.rr+1e-9<minimumRR)
       return STB_BuildReject(symbol,direction,"RR_BELOW_PROFILE_MINIMUM");
 
-   if(!PreparePendingSetup(s))
-      return STB_BuildReject(symbol,direction,"BROKER_STOP_NORMALIZATION_FAILED");
-
    s.score=(aligned ? 40.0:25.0);
 
    if(bosShift<=2)
@@ -4630,143 +4627,102 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
    return false;
 }
 
+
 bool ExecuteSetup(Setup &s,const bool manual)
 {
+   // EXECUTION OWNER CONTRACT: new pending exposure only.
    if(!s.valid)
       return false;
 
    if(!g_autoTrading && !manual)
       return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
-
    if(!IsDirectionTradable(s.symbol,s.direction))
       return STB_LogPlaceReject(s,"DIRECTION_NOT_TRADABLE");
-
    if(!IsSpreadAcceptable(s.symbol))
       return STB_LogPlaceReject(s,"SPREAD_FILTER");
-
    if(HasManagedExposure(s.symbol))
       return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_EXISTS");
-
    if(!STB_TradeEnvironmentAllowed())
       return STB_LogPlaceReject(s,"TRADE_PERMISSION");
 
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
-
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
       return STB_LogPlaceReject(s,"ACCOUNT_ORDER_LIMIT");
 
+   STB_AP_SetActive(s.adaptiveProfile);
+   bool normalized=PreparePendingSetup(s);
+   STB_AP_ClearActive();
+
+   if(!normalized)
+      return STB_LogPlaceReject(s,"BROKER_STOP_NORMALIZATION_FAILED");
+
    if(!ValidatePendingSetup(s))
-      {
-         STB_PendingGeometryDiagnose(s);
-         return STB_LogPlaceReject(s,"PENDING_GEOMETRY_INVALID");
-      }
-      // (removed: duplicate unreachable reject; block above owns the path)
+   {
+      STB_PendingGeometryDiagnose(s);
+      return STB_LogPlaceReject(s,"PENDING_GEOMETRY_INVALID");
+   }
 
    datetime lastSetup=GetLastSetupTime(s.symbol,s.direction);
-
    if(lastSetup==s.setupTime)
       return STB_LogPlaceReject(s,"SETUP_ALREADY_PLACED");
 
-   if(InpSetupCooldownMinutes>0 &&
-      lastSetup>0 &&
+   if(InpSetupCooldownMinutes>0 && lastSetup>0 &&
       TimeCurrent()-(datetime)lastSetup<InpSetupCooldownMinutes*60)
       return STB_LogPlaceReject(s,"SETUP_COOLDOWN");
 
    double volume=0.0;
+   STB_AP_SetActive(s.adaptiveProfile);
 
    if(InpUseRiskSizing)
-   {
       volume=CalculateOrderVolumeByRisk(s);
-
-      if(volume<=0.0)
-      {
-         return STB_LogPlaceReject(s,"RISK_VOLUME_INVALID");
-      }
-   }
    else
-   {
-      double multiplier=s.trendAligned ? InpTrendLotMultiplier : InpUniversalLotMultiplier;
-      volume=NormalizeVolume(s.symbol,InpBaseLots*multiplier);
+      volume=NormalizeVolume(s.symbol,
+                             InpBaseLots*(s.trendAligned ?
+                             InpTrendLotMultiplier:
+                             InpUniversalLotMultiplier));
 
-      if(volume<=0.0)
-         return STB_LogPlaceReject(s,"FIXED_VOLUME_INVALID");
-   }
+   STB_AP_ClearActive();
+
+   if(volume<=0.0)
+      return STB_LogPlaceReject(s,
+                                InpUseRiskSizing ?
+                                "RISK_VOLUME_INVALID":
+                                "FIXED_VOLUME_INVALID");
 
    double volumeLimit=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_LIMIT);
    if(volumeLimit>0.0 &&
-      DirectionExposureVolume(s.symbol,s.direction)+volume>volumeLimit+1e-9)
-   {
-      Print("STB order rejected by SYMBOL_VOLUME_LIMIT symbol=",s.symbol,
-            " requested=",DoubleToString(volume,3),
-            " currentDirectionVolume=",DoubleToString(DirectionExposureVolume(s.symbol,s.direction),3),
-            " limit=",DoubleToString(volumeLimit,3));
+      DirectionExposureVolume(s.symbol,s.direction)+volume>
+      volumeLimit+1e-9)
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
-   }
 
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
 
-   // The pending lifetime is a learned strategy parameter, so activate
-   // the exact profile that produced this immutable setup.
    STB_AP_SetActive(s.adaptiveProfile);
    bool lifetimeOK=GetPendingLifetime(s.symbol,typeTime,expiration);
    STB_AP_ClearActive();
 
    if(!lifetimeOK)
-   {
-      Print("STB order rejected: symbol has no supported pending expiration mode symbol=",s.symbol,
-            " profile=",IntegerToString(s.adaptiveProfile));
       return STB_LogPlaceReject(s,"PENDING_EXPIRATION_UNSUPPORTED");
-   }
 
    if(!STB_OrderCheckDiagnoseAndCheck(s,volume,typeTime,expiration))
-   {
-      Print("STB ORDERCHECK REJECT symbol=",s.symbol,
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " profile=",IntegerToString(s.adaptiveProfile),
-            " score=",DoubleToString(s.score,1),
-            " RR=",DoubleToString(s.rr,2));
-      return false;
-   }
+      return STB_LogPlaceReject(s,"ORDERCHECK_REJECT");
 
    trade.SetExpertMagicNumber(InpMagic);
-   // Pending orders use RETURN filling regardless of execution mode.
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
    trade.SetAsyncMode(false);
 
    string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile);
 
-   bool ok=false;
-
-   if(s.direction>0)
-      ok=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
-   else
-      ok=trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
+   bool ok=(s.direction>0)
+           ? trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment)
+           : trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
 
    if(!ok)
-   {
-      Print("STB order request failed symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " lots=",DoubleToString(volume,3),
-            " entry=",DoubleToString(s.entry,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-   }
+      return STB_LogPlaceReject(s,"PLACEMENT_REQUEST_REJECTED");
 
    if(!TradeRetcodePlacementSucceeded())
-   {
-      Print("STB order server rejected symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " order=",IntegerToString((int)trade.ResultOrder()),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-   }
+      return STB_LogPlaceReject(s,"PLACEMENT_RETCODE_REJECT");
 
    SetLastSetupTime(s.symbol,s.direction,s.setupTime);
    STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
@@ -4778,40 +4734,19 @@ bool ExecuteSetup(Setup &s,const bool manual)
       STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
 
       double orderRiskMoney=0.0;
-      ENUM_ORDER_TYPE calcType=
-         (s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
+      ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
 
-      if(OrderCalcProfit(calcType,s.symbol,volume,
-                         s.entry,s.sl,orderRiskMoney))
-      {
-         orderRiskMoney=MathAbs(orderRiskMoney);
-         STB_AdaptiveRememberOrderRisk(placedOrder,orderRiskMoney);
-      }
+      if(OrderCalcProfit(calcType,s.symbol,volume,s.entry,s.sl,orderRiskMoney))
+         STB_AdaptiveRememberOrderRisk(placedOrder,MathAbs(orderRiskMoney));
+
+      STB_PendingTrailRegister(placedOrder,manual ? "UI_MANUAL":"AUTO");
    }
 
    STB_AdaptiveRecordSetup(s,true);
 
-   // Phase 5 hook: register the CONFIRMED terminal ticket with the
-   // Pending Trail only after the broker accepted the pending order.
-   if(placedOrder>0)
-      STB_PendingTrailRegister(placedOrder,
-                               manual ? "UI_MANUAL":"AUTO");
-
-   // Re-activate the same learned profile for the visual confirmation
-   // immediately after order creation; the setup itself remains immutable.
-   STB_AP_SetActive(s.adaptiveProfile);
-
-   OscillatorState osc;
-   if(GetOscillatorState(s.symbol,osc))
-      DrawOscillatorSignal(s,osc);
-
-   STB_AP_ClearActive();
-
-   Print("STB AUTO PENDING CREATED ",s.symbol," ",
-         (s.direction>0 ? "BUY":"SELL"),
-         " magic=",IntegerToString((int)InpMagic),
-         " order=",IntegerToString((int)trade.ResultOrder()),
-         " lots=",DoubleToString(volume,3),
+   Print("STB ORDER CREATED symbol=",s.symbol," ",
+         (s.direction>0 ? "BUY_STOP":"SELL_STOP"),
+         " owner=EXECUTION order=",IntegerToString((int)trade.ResultOrder()),
          " entry=",DoubleToString(s.entry,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
          " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
          " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
@@ -4823,12 +4758,6 @@ bool ExecuteSetup(Setup &s,const bool manual)
 //==================================================================
 // WATCHLIST SCANNER
 //==================================================================
-
-//--- Backward-compatible wrapper: auto path stays unchanged ----
-bool PlaceSetup(Setup &s)
-{
-   return ExecuteSetup(s,false);
-}
 
 //--- Manual BUY STOP / SELL STOP UI command ----------------------
 // Button -> UI event -> command -> existing risk -> existing safety
@@ -4905,14 +4834,6 @@ bool STB_ManualPendingCommand(const string symbol,const int direction)
    s.setupTime=iTime(symbol,PERIOD_M15,0);
 
    STB_AP_ClearActive();
-
-   if(!PreparePendingSetup(s))
-   {
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=BROKER_STOP_NORMALIZATION_FAILED");
-      return false;
-   }
 
    return ExecuteSetup(s,true);
 }
@@ -5010,20 +4931,22 @@ int STB_BuildScannerUniverse(string &symbols[])
    return ArraySize(symbols);
 }
 
-void ScanWatchlist()
+
+/* SCANNER OWNER CONTRACT:
+   Candidate discovery only. No order creation or position management. */
+int ScanWatchlist(Setup &candidates[])
 {
+   ArrayResize(candidates,0);
+
    string symbols[];
    int total=STB_BuildScannerUniverse(symbols);
-
    int tradable=0;
    int buyReady=0;
    int sellReady=0;
-   int placements=0;
 
    for(int i=0;i<total;i++)
    {
       string symbol=symbols[i];
-
       if(symbol=="" || !IsSymbolTradable(symbol))
          continue;
 
@@ -5031,54 +4954,23 @@ void ScanWatchlist()
 
       Setup buySetup;
       Setup sellSetup;
-
       bool buyOK=BuildSetup(symbol,1,buySetup);
       bool sellOK=BuildSetup(symbol,-1,sellSetup);
 
       if(buyOK)
+      {
+         int n=ArraySize(candidates);
+         ArrayResize(candidates,n+1);
+         candidates[n]=buySetup;
          buyReady++;
+      }
 
       if(sellOK)
-         sellReady++;
-
-      if(g_autoTrading)
       {
-         if(HasManagedExposure(symbol))
-            continue;
-
-         if(buyOK && sellOK)
-         {
-            if(buySetup.trendAligned && !sellSetup.trendAligned)
-            {
-               if(PlaceSetup(buySetup))
-                  placements++;
-            }
-            else if(sellSetup.trendAligned && !buySetup.trendAligned)
-            {
-               if(PlaceSetup(sellSetup))
-                  placements++;
-            }
-            else if(buySetup.score>=sellSetup.score)
-            {
-               if(PlaceSetup(buySetup))
-                  placements++;
-            }
-            else
-            {
-               if(PlaceSetup(sellSetup))
-                  placements++;
-            }
-         }
-         else if(buyOK)
-         {
-            if(PlaceSetup(buySetup))
-               placements++;
-         }
-         else if(sellOK)
-         {
-            if(PlaceSetup(sellSetup))
-               placements++;
-         }
+         int n=ArraySize(candidates);
+         ArrayResize(candidates,n+1);
+         candidates[n]=sellSetup;
+         sellReady++;
       }
    }
 
@@ -5086,10 +4978,101 @@ void ScanWatchlist()
          " tradable=",IntegerToString(tradable),
          " buyReady=",IntegerToString(buyReady),
          " sellReady=",IntegerToString(sellReady),
+         " candidates=",IntegerToString(ArraySize(candidates)),
+         " owner=SCANNER execution=DEFERRED");
+
+   return ArraySize(candidates);
+}
+
+int STB_FindCandidateIndex(const Setup &candidates[],
+                           const int count,
+                           const string symbol,
+                           const int direction)
+{
+   int best=-1;
+   for(int i=0;i<count;i++)
+   {
+      if(!candidates[i].valid ||
+         candidates[i].symbol!=symbol ||
+         candidates[i].direction!=direction)
+         continue;
+
+      if(best<0 || candidates[i].score>candidates[best].score)
+         best=i;
+   }
+   return best;
+}
+
+bool STB_MarkExecutionSymbol(string &processedSymbols[],
+                             const string symbol)
+{
+   for(int i=0;i<ArraySize(processedSymbols);i++)
+      if(processedSymbols[i]==symbol)
+         return false;
+
+   int n=ArraySize(processedSymbols);
+   ArrayResize(processedSymbols,n+1);
+   processedSymbols[n]=symbol;
+   return true;
+}
+
+int STB_ProcessExecutionCandidates(Setup &candidates[])
+{
+   if(!g_autoTrading || ArraySize(candidates)<=0)
+      return 0;
+
+   string processedSymbols[];
+   int placements=0;
+
+   for(int i=0;i<ArraySize(candidates);i++)
+   {
+      string symbol=candidates[i].symbol;
+
+      if(symbol=="" ||
+         !STB_MarkExecutionSymbol(processedSymbols,symbol))
+         continue;
+
+      if(HasManagedExposure(symbol))
+         continue;
+
+      int buyIndex=STB_FindCandidateIndex(candidates,ArraySize(candidates),symbol,1);
+      int sellIndex=STB_FindCandidateIndex(candidates,ArraySize(candidates),symbol,-1);
+      int chosen=-1;
+
+      if(buyIndex>=0 && sellIndex>=0)
+      {
+         if(candidates[buyIndex].trendAligned &&
+            !candidates[sellIndex].trendAligned)
+            chosen=buyIndex;
+         else if(candidates[sellIndex].trendAligned &&
+                 !candidates[buyIndex].trendAligned)
+            chosen=sellIndex;
+         else
+            chosen=(candidates[buyIndex].score>=candidates[sellIndex].score)
+                   ? buyIndex:sellIndex;
+      }
+      else if(buyIndex>=0)
+         chosen=buyIndex;
+      else if(sellIndex>=0)
+         chosen=sellIndex;
+
+      if(chosen>=0 && ExecuteSetup(candidates[chosen],false))
+         placements++;
+   }
+
+   return placements;
+}
+
+void STB_RunScanCycle()
+{
+   Setup candidates[];
+   int candidateCount=ScanWatchlist(candidates);
+   int placements=STB_ProcessExecutionCandidates(candidates);
+
+   Print("STB EXECUTION COORDINATOR candidateCount=",
+         IntegerToString(candidateCount),
          " placements=",IntegerToString(placements),
-         " auto=",g_autoTrading ? "ON":"OFF",
-         " universe=",
-         (StringLen(InpScannerSymbols)>0 ? "INPUT":"MARKET_WATCH"));
+         " owner=EXECUTION");
 }
 
 //==================================================================
@@ -6435,7 +6418,7 @@ int OnInit()
    if(GetOscillatorState(_Symbol,osc))
       DrawOscillatorPanel(osc);
 
-   ScanWatchlist();
+   STB_RunScanCycle();
    UpdatePanel();
 
       //==================================================================
@@ -6579,7 +6562,7 @@ void OnTick()
       if(GetOscillatorState(_Symbol,osc))
          DrawOscillatorPanel(osc);
 
-      ScanWatchlist();
+      STB_RunScanCycle();
       UpdatePanel();
    }
 }
@@ -6609,7 +6592,7 @@ void OnTimer()
    if(GetOscillatorState(_Symbol,osc))
       DrawOscillatorPanel(osc);
 
-   ScanWatchlist();
+   STB_RunScanCycle();
    UpdatePanel();
 
    UpdateButtons();
