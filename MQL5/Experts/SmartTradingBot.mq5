@@ -1517,6 +1517,11 @@ bool TradeRetcodePlacementSucceeded()
           ret==TRADE_RETCODE_PLACED;
 }
 
+bool TradeRetcodeDeleteSucceeded()
+{
+   return trade.ResultRetcode()==TRADE_RETCODE_DONE;
+}
+
 // Minimum distance required by the broker for pending price, SL and TP.
 // Uses both STOP and FREEZE levels because some symbols expose a valid
 // STOP level while still rejecting a pending order inside the FREEZE zone.
@@ -4289,7 +4294,7 @@ void ManagePendingOrders()
          {
             Print("STB PENDING EXPIRE ticket=",ticket,
                   " symbol=",symbol,
-                  " profile=",IntegerToString(profileId),
+                  " maxBars=",IntegerToString(maxBars),
                   " serverExpired=",expiredByServer ? "YES":"NO",
                   " localExpired=",expiredByLocalAge ? "YES":"NO");
 
@@ -4299,7 +4304,7 @@ void ManagePendingOrders()
                      " ret=",trade.ResultRetcode()," ",
                      trade.ResultRetcodeDescription());
             }
-            else if(!TradeRetcodeModifySucceeded())
+            else if(!TradeRetcodeDeleteSucceeded())
             {
                Print("STB pending delete server rejected ticket=",ticket,
                      " ret=",trade.ResultRetcode()," ",
