@@ -426,3 +426,85 @@ Therefore the active MetaTrader source MUST NOT be blindly overwritten.
 
 The MetaTrader Agent must first inspect the active file and forward-port the prepared architecture corrections onto the actual active source while preserving any active-source-only work.
 
+
+
+---
+
+## Hidden-boundary deep audit checkpoint — 2026-10-06
+
+### RULES APPLIED
+- One owner per action.
+- Scanner discovery only.
+- Strategy qualification only.
+- Risk/Safety authorization only.
+- Execution is the sole creator of new exposure.
+- Management owns existing objects only.
+- TradeTransaction owns lifecycle synchronization and immediate safety handoff.
+- Adaptive Learning does not directly authorize or create trades.
+- UI only dispatches commands and displays verified results.
+- Persistence does not initiate trades.
+- Foreign ownership is never inferred from management-enable flags.
+- Terminal state must support every success result.
+- No diagnostic mode may silently enable live auto trading.
+- Active MetaTrader source must never be blindly overwritten.
+
+### Prepared hidden-boundary corrections now in Git main
+Latest prepared SmartTradingBot source:
+- Blob: 8fdb5e61f95d6bf5eb59863fb00755d198a02ee4
+- Version: 1.120
+- Lines: 7,437
+- Characters: 221,726
+- Raw brace balance: 0
+
+Deep-pass commits:
+- 095610badcb4f3b7545e7436fe48d437b235cdbb
+- 42c989a44ab65008964bb4040ca256e37e30a165
+- 86195cb43b1b805c76c484130afb17d904ccbbd4
+- 1ee0e71c1a7f64917fb58abebad2fa1278021fd8
+- 013b6fb7f379a13c968045fbf0981d4185bd727b
+- c950ff54f5ea3c9c7800cc291e11bfe4d7f73804
+- 2606a28eaf8b28e58daef3749ad7e4382489096f
+- dbed352e6c8b1e67c4a97573688fe5d8d49659d1
+- e21f3ff8de0b169ed2a8866e10c45ad780c08c77
+- c343f52abdcb0db755d29ff5894e8468cf4d5653
+
+### Hidden boundaries now statically repaired
+1. Automatic path: ScanWatchlist -> candidates -> STB_ProcessExecutionCandidates -> ExecuteSetup.
+2. Adaptive -> Risk: BuildSetup snapshots pendingMaxBars, entryBufferPips, slBufferPips and minimumRR into Setup; STB_RiskAuthorizePending no longer activates or reads Adaptive state.
+3. Adaptive -> Execution: ExecuteSetup no longer writes Adaptive order/profile/risk state; TradeTransaction ORDER_ADD owns EA-order Adaptive persistence.
+4. Persistence -> Execution: ExecuteSetup no longer writes SetLastSetupTime; setup time is carried in lifecycle metadata and restored by TradeTransaction.
+5. PendingTrail lifecycle: registration and fill handoff are owned by TradeTransaction/recovery.
+6. Execution exposure: STB_HasExecutionExposure enforces one-setup-per-symbol without depending on management-enable flags.
+7. HEDGE: UI -> Execution command -> centralized Risk/Safety -> STB_ExecuteMarketHedge; deal and terminal position evidence are required before EXECUTED.
+8. Manual Pending: UI -> Execution request coordinator -> Risk/Safety -> ExecuteSetup.
+9. SAVE20: UI routes to STB_ManagementSavePlus20Command; no new-entry API exists in this path.
+10. Scheduler: STB_RunScanCycle has one scheduler call, OnTimer; OnTick does not launch a second scan/execution decision.
+11. Pending delete: successful delete retcode is followed by terminal post-state verification.
+12. ORDER_ADD ownership: Adaptive/persistence state writes occur only for EA-owned orders.
+
+### Static acceptance evidence
+- Direct new-entry CTrade calls: only STB_ExecuteMarketHedge and ExecuteSetup.
+- OrderSend and PositionOpen absent.
+- No direct CTrade entry calls in Scanner/Strategy/Risk/UI/Adaptive.
+- Risk authorization has no STB_AP_* or STB_Effective* call.
+- ExecuteSetup has no Adaptive state mutation, SetLastSetupTime, or PendingTrail registration.
+- Exactly one STB_RunScanCycle call remains, in OnTimer.
+- OnChartEvent has no direct CTrade call.
+- Management bodies contain no Scanner/Strategy discovery calls.
+- Legacy identifiers OneClickHedge, STB_ManualPendingCommand, ManualSavePlus20 and HasManagedExposure are absent.
+- Raw brace balance: 0.
+
+### Important limitation
+These are Git/source preflight changes only.
+No MetaEditor compile, EX5 rebuild, attachment/reload, or runtime validation has been performed by this environment.
+Previously reported active source was version 1.120 / 211,466 bytes / 6,889 lines.
+The active file must be re-measured and forward-ported by the MetaTrader Agent.
+Git main must not be used as a blind replacement.
+
+### Agent work order
+docs/section-workorders/DEEP_HIDDEN_BOUNDARY_AUDIT_AGENT_WORK_ORDER_20261006.md
+Agent must reconcile active source identity, forward-port all prepared corrections, compile 0 errors / 0 warnings, rebuild the same SmartTradingBot.ex5, reload the same Expert, execute runtime tests and return logs/evidence.
+
+Status:
+GIT DEEP HIDDEN-BOUNDARY PREFLIGHT — COMPLETE
+ACTIVE MT5 EXECUTION — PENDING
