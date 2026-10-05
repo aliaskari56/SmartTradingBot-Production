@@ -341,3 +341,88 @@ Status:
 PREFLIGHT AUDIT — FINDINGS COMPLETE FOR CURRENT GIT BASELINE
 ACTIVE-SOURCE RECONCILIATION — PENDING
 CODE CHANGES — NONE
+
+
+## Implementation checkpoint — architecture corrections prepared in Git main
+
+The following source-level architecture corrections have now been prepared and committed in the existing `MQL5/Experts/SmartTradingBot.mq5` on `main`:
+
+1. Explicit position/order ownership classification:
+   - EA-owned
+   - manual-owned
+   - foreign-owned
+   Foreign positions/orders are no longer treated as managed merely because one management input is enabled.
+
+2. Diagnostic mode no longer silently forces `g_autoTrading=true`.
+   Diagnostic mode is treated as analysis/telemetry behavior; live trading remains governed by the trading input/state.
+
+3. `InpSmartZigZagEnabled` is wired to the ACSS ZigZag presentation/configuration path instead of being a dead input.
+
+4. Protection SL calculation is explicitly named as a `STB_Protection*` service boundary.
+   Position Management remains the caller/owner of existing-position management, not the owner of market-opportunity scanning.
+
+5. Scanner/Execution separation:
+   - `ScanWatchlist(Setup &candidates[])` discovers and returns candidates only.
+   - `STB_ProcessExecutionCandidates()` performs candidate selection/handoff.
+   - `ExecuteSetup()` owns actual new pending-order creation.
+   - The legacy `PlaceSetup()` wrapper was removed.
+
+6. Strategy/Risk boundary:
+   - direction tradability
+   - spread filter
+   - setup cooldown
+   were removed from `BuildSetup()` as execution gates.
+   They are now enforced by `STB_RiskAuthorizePending()`.
+
+7. Execution boundary:
+   `ExecuteSetup()` receives a candidate, calls the Risk/Safety authorization contract, then owns only request construction, submission, retcode verification and execution handoff.
+
+8. Execution rejection diagnostics were preserved after the architecture refactor, including broker retcode and description.
+
+### Git implementation sequence
+
+- `9c4576a2a748f96ae8382e82f001b4f780191c35`
+  `ARCH: define ownership boundaries and protect diagnostic mode`
+- `e32fcc6e8ca14fe7f3d6a80b8035a4747952a1dd`
+  `ARCH: isolate scanner candidates from execution ownership`
+- `d95b8edc1f067e90963f7358113ef141944a9d21`
+  `ARCH: isolate strategy from risk and execution gates`
+- `1162c491f1eb87b5e8598e06f60a98e2780c640b`
+  `ARCH: preserve execution retcode diagnostics after separation`
+
+Current Git source blob:
+`7520e31944ade35bfb09757c581da8805fbe2081`
+
+### Current preflight status
+
+Static architecture checks on the Git source now report:
+- Scanner direct execution leak: NOT FOUND
+- `PlaceSetup`: NOT FOUND
+- explicit Risk authorization function: PRESENT
+- explicit Execution function: PRESENT
+- explicit ownership model: PRESENT
+- diagnostic auto-enable: NOT FOUND
+- SmartZigZag enable wiring: PRESENT
+- Protection service boundary: PRESENT
+- Management watchlist scanning: NOT FOUND in the Management function body
+
+### Important limitation
+
+These are Git/source-level corrections only.
+
+No fresh MetaEditor compile has been performed in this environment.
+
+The active MetaTrader file previously reported:
+- version 1.120
+- 211,466 bytes
+- 6,889 lines
+
+The Git source after the corrections reports:
+- version 1.120
+- 201,257 bytes
+- 6,884 lines
+
+Therefore the active MetaTrader source MUST NOT be blindly overwritten.
+
+The MetaTrader Agent must first inspect the active file and forward-port the prepared architecture corrections onto the actual active source while preserving any active-source-only work.
+
