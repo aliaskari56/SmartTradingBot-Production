@@ -1514,8 +1514,7 @@ bool TradeRetcodePlacementSucceeded()
 
    return ret==TRADE_RETCODE_DONE ||
           ret==TRADE_RETCODE_DONE_PARTIAL ||
-          ret==TRADE_RETCODE_PLACED ||
-          ret==TRADE_RETCODE_NO_CHANGES;
+          ret==TRADE_RETCODE_PLACED;
 }
 
 // Minimum distance required by the broker for pending price, SL and TP.
@@ -4799,31 +4798,62 @@ bool ExecuteSetup(Setup &s,const bool manual)
       return STB_LogPlaceReject(s,"PLACEMENT_RETCODE_REJECT");
    }
 
+   ulong placedOrder=trade.ResultOrder();
+
+   // A placement retcode alone is not enough: verify that the terminal
+   // exposes the actual pending order with the expected ownership/geometry.
+   if(placedOrder==0 || !OrderSelect(placedOrder))
+   {
+      Print("STB EXECUTION false-success guard symbol=",s.symbol,
+            " resultOrder=",IntegerToString((int)placedOrder),
+            " ret=",trade.ResultRetcode(),
+            " reason=ORDER_NOT_VISIBLE");
+      return STB_LogPlaceReject(s,"PLACEMENT_NO_CONFIRMED_ORDER");
+   }
+
+   long expectedType=(s.direction>0 ?
+                      ORDER_TYPE_BUY_STOP:
+                      ORDER_TYPE_SELL_STOP);
+
+   if(OrderGetInteger(ORDER_MAGIC)!=(long)InpMagic ||
+      OrderGetString(ORDER_SYMBOL)!=s.symbol ||
+      OrderGetInteger(ORDER_TYPE)!=expectedType ||
+      OrderGetDouble(ORDER_SL)<=0.0 ||
+      OrderGetDouble(ORDER_TP)<=0.0)
+   {
+      Print("STB EXECUTION post-placement verification failed symbol=",s.symbol,
+            " order=",IntegerToString((int)placedOrder),
+            " magic=",OrderGetInteger(ORDER_MAGIC),
+            " type=",OrderGetInteger(ORDER_TYPE),
+            " sl=",DoubleToString(OrderGetDouble(ORDER_SL),
+                                  (int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
+            " tp=",DoubleToString(OrderGetDouble(ORDER_TP),
+                                  (int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)));
+      return STB_LogPlaceReject(s,"PLACEMENT_POST_VERIFY_FAILED");
+   }
+
    SetLastSetupTime(s.symbol,s.direction,s.setupTime);
 
    if(s.adaptiveProfile>=0 &&
       s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
       STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
 
-   ulong placedOrder=trade.ResultOrder();
-   if(placedOrder>0)
-   {
-      if(s.adaptiveProfile>=0 &&
-         s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
-         STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
+   if(s.adaptiveProfile>=0 &&
+      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
+      STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
 
-      double orderRiskMoney=0.0;
-      ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
-      if(OrderCalcProfit(calcType,s.symbol,volume,s.entry,s.sl,orderRiskMoney))
-         STB_AdaptiveRememberOrderRisk(placedOrder,MathAbs(orderRiskMoney));
+   double orderRiskMoney=0.0;
+   ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
 
-      STB_PendingTrailRegister(placedOrder,manual ? "UI_MANUAL":"AUTO");
-   }
+   if(OrderCalcProfit(calcType,s.symbol,volume,s.entry,s.sl,orderRiskMoney))
+      STB_AdaptiveRememberOrderRisk(placedOrder,MathAbs(orderRiskMoney));
+
+   STB_PendingTrailRegister(placedOrder,manual ? "UI_MANUAL":"AUTO");
 
    STB_AdaptiveRecordSetup(s,true);
 
    Print("STB ORDER CREATED symbol=",s.symbol,
-         " owner=EXECUTION order=",IntegerToString((int)trade.ResultOrder()));
+         " owner=EXECUTION order=",IntegerToString((int)placedOrder));
    return true;
 }
 
@@ -7086,13 +7116,17 @@ void OnChartEvent(const int id,
 
    if(sparam==g_prefix+"BUYSTOP")
    {
-      STB_ManualPendingCommand(_Symbol,1);
+      bool ok=STB_ManualPendingCommand(_Symbol,1);
+      Print("STB UI RESULT command=BUY_STOP status=",
+            ok ? "EXECUTED":"REJECTED");
       return;
    }
 
    if(sparam==g_prefix+"SELLSTOP")
    {
-      STB_ManualPendingCommand(_Symbol,-1);
+      bool ok=STB_ManualPendingCommand(_Symbol,-1);
+      Print("STB UI RESULT command=SELL_STOP status=",
+            ok ? "EXECUTED":"REJECTED");
       return;
    }
 
@@ -7126,7 +7160,9 @@ void OnChartEvent(const int id,
 
    if(sparam==hedgeName)
    {
-      OneClickHedge();
+      bool ok=OneClickHedge();
+      Print("STB UI RESULT command=HEDGE status=",
+            ok ? "EXECUTED":"REJECTED");
       return;
    }
 }
