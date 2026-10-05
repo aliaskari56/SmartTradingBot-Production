@@ -6635,6 +6635,125 @@ void OnTimer()
 // CHART EVENTS
 //==================================================================
 
+string STB_LifecycleDealMarkerName(const ulong deal)
+{
+   return ScopedStateName("LIFECYCLE_DEAL_"+(string)deal);
+}
+
+bool STB_IsLifecycleDealProcessed(const ulong deal)
+{
+   if(deal==0)
+      return false;
+
+   return GlobalVariableCheck(STB_LifecycleDealMarkerName(deal));
+}
+
+void STB_MarkLifecycleDealProcessed(const ulong deal)
+{
+   if(deal==0)
+      return;
+
+   GlobalVariableSet(STB_LifecycleDealMarkerName(deal),1.0);
+   GlobalVariablesFlush();
+}
+
+// Recover immutable strategy lifecycle state from terminal history when
+// OnTradeTransaction delivery order did not allow the entry handler to
+// persist it first. The history snapshot is the authoritative fallback.
+bool STB_RecoverPositionAdaptiveState(const ulong positionId,
+                                      int &profileId,
+                                      double &riskMoney,
+                                      int &direction)
+{
+   profileId=STB_AdaptiveReadPositionProfile(positionId);
+   riskMoney=STB_AdaptiveReadPositionRisk(positionId);
+   direction=0;
+
+   if(positionId==0)
+      return false;
+
+   if((profileId>=0 && riskMoney>0.0 && direction!=0))
+      return true;
+
+   if(!HistorySelectByPosition(positionId))
+      return (profileId>=0);
+
+   int deals=HistoryDealsTotal();
+
+   for(int i=0;i<deals;i++)
+   {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0)
+         continue;
+
+      long entryType=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      if(entryType!=DEAL_ENTRY_IN)
+         continue;
+
+      string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+      if(STB_AdaptiveIsHedgeComment(comment))
+         continue;
+
+      long dealType=HistoryDealGetInteger(deal,DEAL_TYPE);
+      int dealDirection=(dealType==DEAL_TYPE_BUY ? 1 :
+                         dealType==DEAL_TYPE_SELL ? -1 : 0);
+
+      if(dealDirection!=0 && direction==0)
+         direction=dealDirection;
+
+      ulong orderTicket=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
+
+      if(profileId<0 && orderTicket>0)
+         profileId=STB_AdaptiveReadOrderProfile(orderTicket);
+
+      if(profileId<0)
+         profileId=STB_AdaptiveParseProfileFromComment(comment);
+
+      if(riskMoney<=0.0)
+      {
+         double volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+         double price=HistoryDealGetDouble(deal,DEAL_PRICE);
+         double initialSL=HistoryDealGetDouble(deal,DEAL_SL);
+
+         if(volume>0.0 && price>0.0 && initialSL>0.0)
+         {
+            ENUM_ORDER_TYPE calcType=
+               (dealType==DEAL_TYPE_BUY ? ORDER_TYPE_BUY:
+                dealType==DEAL_TYPE_SELL ? ORDER_TYPE_SELL:
+                WRONG_VALUE);
+
+            double loss=0.0;
+            if(calcType!=WRONG_VALUE &&
+               OrderCalcProfit(calcType,
+                               HistoryDealGetString(deal,DEAL_SYMBOL),
+                               volume,
+                               price,
+                               initialSL,
+                               loss))
+               riskMoney=MathAbs(loss);
+         }
+      }
+
+      if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
+      {
+         STB_AdaptiveRememberPositionProfile(positionId,profileId);
+
+         if(riskMoney>0.0)
+            STB_AdaptiveRememberPositionRisk(positionId,riskMoney);
+
+         if(orderTicket>0)
+            STB_AdaptiveDeleteOrderState(orderTicket);
+
+         return true;
+      }
+
+      // Keep searching in case the first entry was manual/legacy and a
+      // later entry contains the strategy lifecycle metadata.
+   }
+
+   return profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT;
+}
+
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                        const MqlTradeRequest &request,
                        const MqlTradeResult &result)
@@ -6652,30 +6771,37 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       !HistoryDealSelect(trans.deal))
       return;
 
-   // Pending Trail trigger handoff: a BUY_STOP / SELL_STOP filled.
-   // PENDING_TRIGGERED -> PENDING_TRAIL_STOPPED handoff=TRADE_MANAGEMENT
-   if(InpPendingTrail && trans.order>0)
-      STB_PendingTrailOnOrderFilled(trans.order);
+   if(trans.position>0)
+      EnsureInitialSL(trans.position);
 
    string comment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
    long magic=HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
    long entryType=HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
 
-   // Preserve the immediate no-SL protection path from the hardened
-   // execution layer. Adaptive learning is independent from protection.
-   if(trans.position>0)
-      EnsureInitialSL(trans.position);
-
    if(magic!=(long)InpMagic)
       return;
 
-   // Hedges use the same magic but are not strategy-profile observations.
    bool isHedge=STB_AdaptiveIsHedgeComment(comment);
+
+   if(isHedge)
+      return;
+
+   bool closesLifecycle=
+      entryType==DEAL_ENTRY_OUT ||
+      entryType==DEAL_ENTRY_OUT_BY ||
+      entryType==DEAL_ENTRY_INOUT;
+
+   if(closesLifecycle && STB_IsLifecycleDealProcessed(trans.deal))
+   {
+      Print("STB LIFECYCLE duplicate deal ignored deal=",
+            IntegerToString((int)trans.deal));
+      return;
+   }
 
    string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
 
-   if(entryType==DEAL_ENTRY_IN && !isHedge && positionId>0)
+   if(entryType==DEAL_ENTRY_IN && positionId>0)
    {
       long dealType=HistoryDealGetInteger(trans.deal,DEAL_TYPE);
       int direction=(dealType==DEAL_TYPE_BUY ? 1 :
@@ -6690,8 +6816,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
          if(profileId<0)
          {
-            // Legacy/manual trades without an explicit strategy profile
-            // must not contaminate the adaptive learner.
             Print("STB ADAPTIVE skip lifecycle without profile symbol=",
                   symbol," position=",positionId,
                   " order=",trans.order);
@@ -6715,9 +6839,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                   (positionType==POSITION_TYPE_BUY ?
                    ORDER_TYPE_BUY:ORDER_TYPE_SELL);
 
-               if(OrderCalcProfit(calcType,symbol,positionVolume,
-                                  entryPrice,initialSL,riskMoney))
-                  riskMoney=MathAbs(riskMoney);
+               double calculated=0.0;
+
+               if(OrderCalcProfit(calcType,symbol,
+                                  positionVolume,entryPrice,
+                                  initialSL,calculated))
+                  riskMoney=MathAbs(calculated);
             }
          }
 
@@ -6726,14 +6853,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
          STB_AdaptiveDeleteOrderState(trans.order);
       }
+
+      return;
    }
 
-   if(isHedge)
-      return;
-
-   if(entryType!=DEAL_ENTRY_OUT &&
-      entryType!=DEAL_ENTRY_OUT_BY &&
-      entryType!=DEAL_ENTRY_INOUT)
+   if(!closesLifecycle)
       return;
 
    double dealPnl=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+
@@ -6743,6 +6867,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    int originalDirection=0;
    int profileId=STB_AdaptiveReadPositionProfile(positionId);
+   double riskMoney=STB_AdaptiveReadPositionRisk(positionId);
+
+   int recoveredDirection=0;
+   STB_RecoverPositionAdaptiveState(positionId,
+                                     profileId,
+                                     riskMoney,
+                                     recoveredDirection);
+
+   if(originalDirection==0)
+      originalDirection=recoveredDirection;
 
    if(entryType==DEAL_ENTRY_INOUT)
    {
@@ -6756,11 +6890,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       double priorPnl=GetAccumulatedPositionPnl(positionId);
       TakeAccumulatedPositionPnl(positionId);
 
-      if(originalDirection!=0)
+      if(originalDirection!=0 &&
+         profileId>=0 &&
+         profileId<STB_ADAPTIVE_PROFILE_COUNT)
       {
          double lifecyclePnl=priorPnl+dealPnl;
-         double riskMoney=STB_AdaptiveReadPositionRisk(positionId);
-         double rMultiple=(riskMoney>0.0 ? lifecyclePnl/riskMoney:0.0);
+         double rMultiple=(riskMoney>0.0 ?
+                           lifecyclePnl/riskMoney:0.0);
 
          STB_AdaptiveRecordClosedDeal(symbol,
                                       originalDirection,
@@ -6768,9 +6904,17 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                                       profileId,
                                       rMultiple);
       }
+      else
+      {
+         Print("STB ADAPTIVE close skipped: lifecycle state unresolved",
+               " position=",positionId,
+               " profile=",profileId,
+               " direction=",originalDirection);
+      }
 
       STB_AdaptiveDeletePositionProfile(positionId);
       STB_AdaptiveDeletePositionRisk(positionId);
+      STB_MarkLifecycleDealProcessed(trans.deal);
       return;
    }
 
@@ -6785,38 +6929,45 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    bool positionStillOpen=IsPositionIdentifierOpen(positionId);
 
    if(positionStillOpen)
+   {
+      STB_MarkLifecycleDealProcessed(trans.deal);
       return;
+   }
 
    cumulative=TakeAccumulatedPositionPnl(positionId);
 
-   if(positionId>0 && HistorySelectByPosition(positionId))
+   if(originalDirection==0)
    {
-      int deals=HistoryDealsTotal();
-
-      for(int j=0;j<deals;j++)
+      if(positionId>0 && HistorySelectByPosition(positionId))
       {
-         ulong d=HistoryDealGetTicket(j);
+         int deals=HistoryDealsTotal();
 
-         if(d==0)
-            continue;
-
-         long e=HistoryDealGetInteger(d,DEAL_ENTRY);
-
-         if(e!=DEAL_ENTRY_IN)
-            continue;
-
-         long t=HistoryDealGetInteger(d,DEAL_TYPE);
-
-         if(t==DEAL_TYPE_BUY)
+         for(int j=0;j<deals;j++)
          {
-            originalDirection=1;
-            break;
-         }
+            ulong d=HistoryDealGetTicket(j);
+            if(d==0)
+               continue;
 
-         if(t==DEAL_TYPE_SELL)
-         {
-            originalDirection=-1;
-            break;
+            if(HistoryDealGetInteger(d,DEAL_ENTRY)!=DEAL_ENTRY_IN)
+               continue;
+
+            string entryComment=HistoryDealGetString(d,DEAL_COMMENT);
+            if(STB_AdaptiveIsHedgeComment(entryComment))
+               continue;
+
+            long t=HistoryDealGetInteger(d,DEAL_TYPE);
+
+            if(t==DEAL_TYPE_BUY)
+            {
+               originalDirection=1;
+               break;
+            }
+
+            if(t==DEAL_TYPE_SELL)
+            {
+               originalDirection=-1;
+               break;
+            }
          }
       }
    }
@@ -6827,18 +6978,29 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       originalDirection=(closedType==DEAL_TYPE_SELL ? 1:-1);
    }
 
-   double riskMoney=STB_AdaptiveReadPositionRisk(positionId);
-   double rMultiple=(riskMoney>0.0 ? cumulative/riskMoney:0.0);
+   double rMultiple=(riskMoney>0.0 ?
+                     cumulative/riskMoney:0.0);
 
-   STB_AdaptiveRecordClosedDeal(symbol,
-                                originalDirection,
-                                cumulative,
-                                profileId,
-                                rMultiple);
+   if(profileId>=0 &&
+      profileId<STB_ADAPTIVE_PROFILE_COUNT)
+   {
+      STB_AdaptiveRecordClosedDeal(symbol,
+                                   originalDirection,
+                                   cumulative,
+                                   profileId,
+                                   rMultiple);
+   }
+   else
+   {
+      Print("STB ADAPTIVE close skipped: no recoverable strategy profile",
+            " position=",positionId);
+   }
 
    STB_AdaptiveDeletePositionProfile(positionId);
    STB_AdaptiveDeletePositionRisk(positionId);
+   STB_MarkLifecycleDealProcessed(trans.deal);
 }
+
 
 void OnChartEvent(const int id,
                   const long &lparam,
