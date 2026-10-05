@@ -4707,9 +4707,22 @@ bool ExecuteSetup(Setup &s,const bool manual)
            : trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
 
    if(!ok)
+   {
+      Print("STB EXECUTION request failed symbol=",s.symbol,
+            " dir=",(s.direction>0 ? "BUY_STOP":"SELL_STOP"),
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
       return STB_LogPlaceReject(s,"PLACEMENT_REQUEST_REJECTED");
+   }
+
    if(!TradeRetcodePlacementSucceeded())
+   {
+      Print("STB EXECUTION server rejected symbol=",s.symbol,
+            " order=",IntegerToString((int)trade.ResultOrder()),
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
       return STB_LogPlaceReject(s,"PLACEMENT_RETCODE_REJECT");
+   }
 
    SetLastSetupTime(s.symbol,s.direction,s.setupTime);
    STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
