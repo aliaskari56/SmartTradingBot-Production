@@ -594,3 +594,71 @@ Because the supplied evidence uses aggregate Sections rather than the plan's 20 
 Status of this checkpoint:
 `EVIDENCE RECORDED — INDIVIDUAL SECTION GATES PENDING EXPLICIT MAPPING`
 
+
+
+## Rule 41 — Preflight on our side before MetaTrader Agent execution
+
+Every Section must pass a **preflight gate** before its work order is sent to the MetaTrader Agent.
+
+### Phase A — Source and history preparation
+On our side:
+1. Inspect the current active-source contract and the corresponding Git history.
+2. Compare the relevant source/include files against the intended baseline/history.
+3. Use official technical references when behavior depends on MetaEditor/MQL5 semantics.
+4. Map the complete Section scope, dependencies and acceptance criteria.
+5. Prepare the exact intended code change or no-change decision before sending the Agent task.
+
+### Phase B — Preflight validation
+On our side, before dispatch:
+- perform static/source validation,
+- check syntax-sensitive edits,
+- check symbol/identifier consistency,
+- review affected call paths,
+- inspect the diff for unintended changes,
+- and, where an authorized compile-capable environment is available, perform a preflight compile.
+
+Do NOT claim a compile happened when the required MetaEditor/compiler is unavailable.
+
+### Phase C — MetaTrader Agent execution
+Only after Phase A/B succeeds, send the Agent work order.
+
+The MetaTrader Agent then performs the environment-specific steps:
+- apply the approved change to the existing active Expert,
+- compile in MetaEditor,
+- install/reload the resulting EX5 on the existing Expert,
+- run the relevant runtime/UI tests,
+- collect terminal/journal evidence,
+- and report the actual result.
+
+### Phase D — Acceptance
+The Section is accepted only when both sides agree:
+
+OUR PREFLIGHT:
+- source/history reviewed
+- intended change prepared
+- static/diff validation passed
+- preflight compile passed when technically available
+
+METATRADER AGENT:
+- active source confirmed
+- actual MetaEditor compile passed with 0 errors / 0 warnings
+- EX5 rebuilt/loaded
+- required runtime tests passed
+- checklist completed with evidence
+
+If either side fails, the Section remains **NOT COMPLETE**.
+
+### Rule 41.1 — No blind dispatch
+Never send a raw "fix this" instruction to MetaTrader. The Agent must receive the prepared Section scope, applicable rules, exact acceptance criteria and known expected behavior.
+
+### Rule 41.2 — No blind merge from Git
+Git is used as source/history/reference validation. Do not blindly replace the active Expert with a Git version merely because it is newer or cleaner.
+
+### Rule 41.3 — Compile ownership
+Final MetaEditor compilation remains an environment/runtime responsibility of the MetaTrader Agent. A prior Git/CI/static validation result cannot be mislabeled as a fresh MetaEditor compile.
+
+### Rule 41.4 — Two-stage evidence
+Each completed Section must distinguish:
+- PRECHECK — our side
+- MT5 EXECUTION — MetaTrader Agent side
+- FINAL ACCEPTANCE — combined result
