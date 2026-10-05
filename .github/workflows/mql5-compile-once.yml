@@ -1,0 +1,84 @@
+name: MQL5 Compile Once
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/auto" -Wait -NoNewWindow
+
+      - name: Locate MetaEditor
+        shell: pwsh
+        run: |
+          $meta = Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA" -Filter "metaeditor64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $meta) { throw "metaeditor64.exe not found." }
+          "METAEDITOR=$($meta.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "MetaEditor=$($meta.FullName)"
+
+      - name: Compile SmartTradingBot
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.mq5"
+          $meta   = $env:METAEDITOR
+          if (-not (Test-Path $source)) { throw "Source not found: $source" }
+
+          $before = Get-Date
+          & $meta "/compile:$source" "/inc:$((Join-Path $env:GITHUB_WORKSPACE 'MQL5'))" "/log"
+          $exitCode = $LASTEXITCODE
+          Write-Host "MetaEditor exit code: $exitCode"
+
+          $ex5 = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.ex5"
+          if (-not (Test-Path $ex5)) { throw "SmartTradingBot.ex5 was not produced." }
+
+          Write-Host "EX5 size: $((Get-Item $ex5).Length) bytes"
+
+          $logCandidates = @(
+            Get-ChildItem -Path $env:GITHUB_WORKSPACE,$env:APPDATA,$env:LOCALAPPDATA,$env:USERPROFILE -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -ge $before.AddMinutes(-1) } |
+              Sort-Object LastWriteTime -Descending
+          )
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:GITHUB_WORKSPACE "compile-evidence") | Out-Null
+          if ($logCandidates.Count -eq 0) {
+            Write-Host "No recent .log file found; creating metadata evidence."
+            @(
+              "MetaEditor=$meta"
+              "ExitCode=$exitCode"
+              "EX5=$ex5"
+              "EX5Size=$((Get-Item $ex5).Length)"
+            ) | Set-Content (Join-Path $env:GITHUB_WORKSPACE "compile-evidence\compile-meta.txt")
+          } else {
+            foreach ($f in $logCandidates) {
+              $safe = ($f.FullName -replace '[:\\/]','_').Trim('_')
+              Copy-Item $f.FullName (Join-Path $env:GITHUB_WORKSPACE "compile-evidence\$safe.log") -Force
+              Write-Host "Captured log: $($f.FullName)"
+              Get-Content $f.FullName -Tail 80 | Write-Host
+            }
+          }
+
+          if ($exitCode -ne 0) {
+            throw "MetaEditor returned non-zero exit code."
+          }
+
+      - name: Upload fresh compile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smarttradingbot-fresh-compile
+          path: |
+            MQL5/Experts/SmartTradingBot.ex5
+            compile-evidence/**
+          if-no-files-found: error
