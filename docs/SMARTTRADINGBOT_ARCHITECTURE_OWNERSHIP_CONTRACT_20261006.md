@@ -487,3 +487,52 @@ Status:
 ARCHITECTURE CONTRACT — DEFINED
 GIT HIDDEN-BOUNDARY PREFLIGHT — COMPLETE
 ACTIVE MT5 EXECUTION — PENDING
+
+## 22. DEEP HIDDEN-BOUNDARY UPDATE — 2026-10-06
+
+### RULES APPLIED
+- Execution creation is isolated from Strategy, Risk, Adaptive, Persistence and Management state mutation.
+- Adaptive parameters cross into Risk only as immutable Setup snapshots.
+- Execution exposure gating is independent of Management enable switches.
+- TradeTransaction is the lifecycle owner after terminal creation events.
+- UI routes only to explicit execution/management command handlers.
+- Foreign objects cannot populate EA lifecycle state.
+- Terminal state verification is required before truthful success.
+
+### CURRENT GIT SOURCE
+- SmartTradingBot.mq5 blob: 8fdb5e61f95d6bf5eb59863fb00755d198a02ee4
+- Version: 1.120
+- Lines: 7,437
+- Characters: 221,726
+- Raw brace balance: 0
+
+### DEEP BOUNDARY FINDINGS NOW CLOSED
+- Risk authorization no longer activates or reads Adaptive state.
+- ExecuteSetup no longer writes Adaptive order/profile/risk state.
+- ExecuteSetup no longer writes LastSetup persistence.
+- ExecuteSetup no longer registers PendingTrail.
+- TradeTransaction owns EA order lifecycle persistence and PendingTrail registration.
+- Execution one-symbol exposure protection is independent of Management toggles.
+- HEDGE creation is isolated in STB_ExecuteMarketHedge and is terminal-verified.
+- HEDGE Execution ends at confirmed creation; TradeTransaction owns immediate protection/management handoff.
+- UI Save20 is routed through an explicit Management command.
+- Scanner execution scheduling is Timer-owned only.
+- ORDER_ADD lifecycle state writes are restricted to EA-owned orders.
+
+### ACCEPTANCE
+- [x] Git/source hidden-boundary preflight complete.
+- [x] Direct new-exposure paths statically isolated.
+- [x] Risk/Adaptive boundary isolated.
+- [x] Execution/Persistence boundary isolated.
+- [x] Execution/Management handoff isolated.
+- [x] UI routing audited.
+- [x] Execution exposure invariant audited.
+- [ ] Active MetaTrader source reconciled.
+- [ ] MetaEditor compile 0/0.
+- [ ] Same EX5 rebuilt.
+- [ ] Runtime validation complete.
+
+Status:
+ARCHITECTURE CONTRACT — DEFINED
+GIT HIDDEN-BOUNDARY PREFLIGHT — COMPLETE
+ACTIVE MT5 EXECUTION — PENDING
