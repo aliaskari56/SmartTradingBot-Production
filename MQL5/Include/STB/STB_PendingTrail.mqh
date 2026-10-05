@@ -35,6 +35,7 @@ struct STBPendingTrailState
    datetime lastNoNewExtremeLogBar;
    datetime lastFailLogBar;
    int      lastProcessedCycle;
+   int      profileId;       // immutable adaptive profile for this pending order
    bool     active;
 };
 
@@ -147,11 +148,33 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
 
    int direction=STB_PendingTrailDirection(orderType);
 
-   double extreme=(direction>0)
-                  ? iLow(symbol,PERIOD_M15,1)
-                  : iHigh(symbol,PERIOD_M15,1);
+   double pip=PipSize(symbol);
+   if(pip<=0.0)
+      return false;
 
-   if(extreme<=0.0)
+   // Keep the adaptive geometry that created this pending order.
+   // On restart/manual discovery the comment is the durable profile source.
+   int profileId=STB_AdaptiveParseProfileFromComment(
+      OrderGetString(ORDER_COMMENT));
+
+   double entryBufferPips=InpEntryBufferPips;
+   if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
+   {
+      STBAdaptiveProfile profile;
+      STB_AP_LoadProfile(profileId,profile);
+      entryBufferPips=profile.entryBufferPips;
+   }
+
+   double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+
+   // Infer the structural anchor represented by the existing Entry price.
+   // This prevents restart/re-discovery from silently resetting the trail
+   // baseline to the current candle and skipping a required first move.
+   double inferredExtreme=(direction>0)
+                          ? currentEntry-entryBufferPips*pip
+                          : currentEntry+entryBufferPips*pip;
+
+   if(inferredExtreme<=0.0)
       return false;
 
    STBPendingTrailState st;
@@ -161,13 +184,14 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.symbol=symbol;
    st.orderType=orderType;
    st.source=source;
-   st.trackedExtreme=extreme;
-   st.lastEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   st.trackedExtreme=inferredExtreme;
+   st.lastEntry=currentEntry;
    st.lastSL=OrderGetDouble(ORDER_SL);
    st.lastModifyTime=0;
    st.lastNoNewExtremeLogBar=0;
    st.lastFailLogBar=0;
    st.lastProcessedCycle=-1;
+   st.profileId=profileId;
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
@@ -180,7 +204,8 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
          " symbol=",symbol,
          " type=",STB_PendingTrailTypeName(orderType),
          " source=",source,
-         " trackedExtreme=",DoubleToString(extreme,digits),
+         " trackedExtreme=",DoubleToString(st.trackedExtreme,digits),
+         " profile=",IntegerToString(st.profileId),
          " entry=",DoubleToString(st.lastEntry,digits),
          " sl=",DoubleToString(st.lastSL,digits));
 
@@ -218,6 +243,52 @@ void STB_PendingTrailLogNoNewExtreme(const ulong ticket,
 
    Print("PENDING_TRAIL_NO_NEW_EXTREME ticket=",IntegerToString((int)ticket),
          " symbol=",symbol);
+}
+
+//--- Preflight broker check for one pending-order modification --------
+bool STB_PendingTrailOrderCheckModify(const ulong ticket,
+                                      const string symbol,
+                                      const double entry,
+                                      const double sl,
+                                      const double tp,
+                                      const ENUM_ORDER_TYPE_TIME typeTime,
+                                      const datetime expiration,
+                                      const double stopLimit,
+                                      string &reason)
+{
+   reason="";
+
+   MqlTradeRequest req;
+   MqlTradeCheckResult chk;
+   ZeroMemory(req);
+   ZeroMemory(chk);
+
+   req.action=TRADE_ACTION_MODIFY;
+   req.order=ticket;
+   req.symbol=symbol;
+   req.price=entry;
+   req.sl=sl;
+   req.tp=tp;
+   req.type_time=typeTime;
+   req.expiration=expiration;
+   req.stoplimit=stopLimit;
+
+   if(!OrderCheck(req,chk))
+   {
+      reason="OrderCheck API failed err="+IntegerToString(GetLastError());
+      return false;
+   }
+
+   if(chk.retcode!=TRADE_RETCODE_DONE &&
+      chk.retcode!=TRADE_RETCODE_DONE_PARTIAL &&
+      chk.retcode!=TRADE_RETCODE_NO_CHANGES)
+   {
+      reason="ret="+IntegerToString((int)chk.retcode)+
+             " comment="+chk.comment;
+      return false;
+   }
+
+   return true;
 }
 
 //--- Atomic modify pipeline for ONE ticket ---------------------------
@@ -294,8 +365,19 @@ bool STB_PendingTrailManageOne(const ulong ticket)
 
    // 3) Calculate + validate + tick align via the resolver.
    STBPendingResolution res;
+   bool profileActivated=
+      g_stbPendingTrail[idx].profileId>=0 &&
+      g_stbPendingTrail[idx].profileId<STB_ADAPTIVE_PROFILE_COUNT;
 
-   if(!STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) || !res.valid)
+   if(profileActivated)
+      STB_AP_SetActive(g_stbPendingTrail[idx].profileId);
+
+   bool resolved=STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res);
+
+   if(profileActivated)
+      STB_AP_ClearActive();
+
+   if(!resolved || !res.valid)
    {
       datetime bar=iTime(symbol,PERIOD_M15,1);
 
@@ -341,7 +423,28 @@ bool STB_PendingTrailManageOne(const ulong ticket)
    double oldSL=curSL;
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
 
-   // 5) Modify once.
+   // 5) Preflight the exact modify request against the terminal/broker.
+   string checkReason;
+   if(!STB_PendingTrailOrderCheckModify(ticket,
+                                        symbol,
+                                        res.entry,
+                                        res.sl,
+                                        tp,
+                                        typeTime,
+                                        expiration,
+                                        stopLimit,
+                                        checkReason))
+   {
+      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " stage=ORDERCHECK",
+            " reason=",checkReason,
+            " requestedEntry=",DoubleToString(res.entry,digits),
+            " requestedSL=",DoubleToString(res.sl,digits));
+      return true;
+   }
+
+   // 6) Modify once, synchronously.
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
 
@@ -365,7 +468,7 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return true;
    }
 
-   // 6) Read terminal again and confirm.
+   // 7) Read terminal again and confirm.
    if(!OrderSelect(ticket))
    {
       Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
@@ -395,7 +498,7 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return true;
    }
 
-   // 7) Commit internal state ONLY after terminal confirmation.
+   // 8) Commit internal state ONLY after terminal confirmation.
    g_stbPendingTrail[idx].trackedExtreme=extreme;
    g_stbPendingTrail[idx].lastEntry=confirmedEntry;
    g_stbPendingTrail[idx].lastSL=confirmedSL;
