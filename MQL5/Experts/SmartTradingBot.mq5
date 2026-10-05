@@ -6836,7 +6836,9 @@ void OnTick()
       if(GetOscillatorState(_Symbol,osc))
          DrawOscillatorPanel(osc);
 
-      STB_RunScanCycle();
+      // Scan/execution scheduling has one owner: OnTimer.
+      // OnTick handles market-state refresh only and never starts a second
+      // opportunity-discovery/execution cycle at the M15 boundary.
       UpdatePanel();
    }
 }
