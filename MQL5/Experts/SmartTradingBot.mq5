@@ -3153,6 +3153,22 @@ void SetLastSetupTime(const string symbol,const int direction,const datetime t)
 // IMMUTABLE PENDING LIFECYCLE METADATA
 //==================================================================
 
+datetime STB_ParsePendingSetupTime(const string comment,
+                                      const datetime fallback)
+{
+   int pos=StringFind(comment,"|T");
+   if(pos<0)
+      return fallback;
+
+   int start=pos+2;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                       : StringSubstr(comment,start));
+
+   long value=(long)StringToInteger(raw);
+   return value>0 ? (datetime)value:fallback;
+}
+
 int STB_ParsePendingMaxBars(const string comment,const int fallback)
 {
    int pos=StringFind(comment,"|L");
@@ -4959,7 +4975,8 @@ bool ExecuteSetup(Setup &s,const bool manual)
    else
       comment+="|M";
 
-   comment+="|L"+IntegerToString(pendingMaxBars)+
+   comment+="|T"+(string)s.setupTime+
+            "|L"+IntegerToString(pendingMaxBars)+
             "|EB"+DoubleToString(entryBufferPips,8)+
             "|SB"+DoubleToString(slBufferPips,8);
 
@@ -5019,13 +5036,8 @@ bool ExecuteSetup(Setup &s,const bool manual)
       return STB_LogPlaceReject(s,"PLACEMENT_POST_VERIFY_FAILED");
    }
 
-   SetLastSetupTime(s.symbol,s.direction,s.setupTime);
-
-   // Lifecycle/Adaptive persistence is owned by TradeTransaction after the
-   // terminal publishes the actual ORDER_ADD event. Execution only publishes
-   // the verified ticket and does not mutate learning state directly.
-
-   STB_PendingTrailRegister(placedOrder,manual ? "UI_MANUAL":"AUTO");
+   // Execution has finished after terminal verification.
+   // Persistence and PendingTrail registration are owned by TradeTransaction.
 
    Print("STB ORDER CREATED symbol=",s.symbol,
          " owner=EXECUTION order=",IntegerToString((int)placedOrder));
@@ -6991,13 +7003,29 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          if(OrderSelect(trans.order))
          {
             string orderComment=OrderGetString(ORDER_COMMENT);
+            string orderSymbol=OrderGetString(ORDER_SYMBOL);
             int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
+
+            datetime setupTime=STB_ParsePendingSetupTime(
+               orderComment,0);
+
+            if(setupTime>0)
+            {
+               long orderTypeForState=OrderGetInteger(ORDER_TYPE);
+               int setupDirection=
+                  (orderTypeForState==ORDER_TYPE_BUY_STOP ||
+                   orderTypeForState==ORDER_TYPE_BUY_LIMIT ? 1 :
+                   orderTypeForState==ORDER_TYPE_SELL_STOP ||
+                   orderTypeForState==ORDER_TYPE_SELL_LIMIT ? -1 : 0);
+
+               if(setupDirection!=0)
+                  SetLastSetupTime(orderSymbol,setupDirection,setupTime);
+            }
 
             if(profileId>=0)
                STB_AdaptiveRememberOrderProfile(trans.order,profileId);
 
             double orderRiskMoney=0.0;
-            string orderSymbol=OrderGetString(ORDER_SYMBOL);
             long orderType=OrderGetInteger(ORDER_TYPE);
 
             ENUM_ORDER_TYPE calcType=
@@ -7057,6 +7085,18 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       return;
 
    bool isHedge=STB_AdaptiveIsHedgeComment(comment);
+
+   if(entryType==DEAL_ENTRY_IN)
+   {
+      int setupDirection=(HistoryDealGetInteger(trans.deal,DEAL_TYPE)==DEAL_TYPE_BUY ? 1 :
+                          HistoryDealGetInteger(trans.deal,DEAL_TYPE)==DEAL_TYPE_SELL ? -1 : 0);
+      datetime setupTime=STB_ParsePendingSetupTime(comment,0);
+
+      if(setupDirection!=0 && setupTime>0)
+         SetLastSetupTime(HistoryDealGetString(trans.deal,DEAL_SYMBOL),
+                          setupDirection,
+                          setupTime);
+   }
 
    if(isHedge)
       return;
