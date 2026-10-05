@@ -170,3 +170,123 @@ MT5 EXECUTION AGENT:
 - [ ] Logs/evidence returned.
 
 Status: DEEP HIDDEN-BOUNDARY PREFLIGHT — COMPLETE; ACTIVE MT5 EXECUTION — PENDING
+
+## FINAL INTEGRATED HANDOFF — 2026-10-06
+
+### MISSION
+Apply the prepared architecture and hidden-boundary corrections to the SAME active SmartTradingBot only, reconcile active-vs-Git differences first, compile through MetaEditor, rebuild the SAME EX5, reload the SAME Expert and return runtime evidence.
+
+### NON-NEGOTIABLE RULEBOOK
+- One owner per action.
+- Scanner discovers only.
+- Strategy qualifies only.
+- Candidate/Setup is data only.
+- Risk/Safety authorizes only.
+- Execution creates new exposure only.
+- Management manages existing objects only.
+- TradeTransaction owns lifecycle synchronization and immediate handoff.
+- Adaptive owns historical learning/profile state only.
+- UI dispatches commands and reports verified results only.
+- Persistence reconstructs state and never starts trades.
+- Diagnostics do not execute.
+- Foreign objects remain foreign.
+- Management enable flags never control execution ownership or duplicate-entry locking.
+- SL remains mandatory.
+- Broker stop/freeze/tick geometry remains authoritative.
+- OrderCheck is preflight, not execution proof.
+- CTrade boolean success is not execution proof; server result and terminal state must be verified.
+- No look-ahead.
+- No duplicate decision execution.
+- No hidden callback may re-enter execution outside the owner chain.
+- No destructive cleanup or second production path.
+
+### OWNER MAP
+Automatic: MarketData -> Scanner -> Strategy -> Setup -> Risk/Safety -> Execution -> Created Exposure -> Management -> TradeTransaction -> Adaptive outcome.
+Manual Pending: UI -> Manual Entry Command -> Risk/Safety -> Execution -> Pending Management -> TradeTransaction.
+HEDGE: UI -> STB_ExecutionHedgeCommand -> Risk/Safety -> STB_ExecuteMarketHedge -> verified deal/position -> TradeTransaction -> Management.
+SAVE20: UI -> STB_ManagementSavePlus20Command -> existing-position management -> confirmed modification.
+Pending lifecycle: ORDER_ADD -> protection -> PendingTrail -> validated modify/read-back -> fill -> PendingTrail stop -> Position Management.
+
+### PREPARED SOURCE
+SmartTradingBot.mq5 blob: 8fdb5e61f95d6bf5eb59863fb00755d198a02ee4
+Version: 1.120
+Lines: 7,437
+Characters: 221,726
+Brace balance: 0
+Prepared deep-pass commits: 095610badcb4f3b7545e7436fe48d437b235cdbb, 42c989a44ab65008964bb4040ca256e37e30a165, 86195cb43b1b805c76c484130afb17d904ccbbd4, 1ee0e71c1a7f64917fb58abebad2fa1278021fd8, 013b6fb7f379a13c968045fbf0981d4185bd727b, c950ff54f5ea3c9c7800cc291e11bfe4d7f73804, 2606a28eaf8b28e58daef3749ad7e4382489096f, dbed352e6c8b1e67c4a97573688fe5d8d49659d1, e21f3ff8de0b169ed2a8866e10c45ad780c08c77, c343f52abdcb0db755d29ff5894e846cf4d5653.
+
+### HIDDEN-BOUNDARY REPAIRS
+1. Scanner emits candidates only; execution is downstream.
+2. BuildSetup snapshots Adaptive-derived execution parameters into Setup; Risk no longer reads Adaptive state.
+3. ExecuteSetup no longer writes Adaptive state.
+4. ExecuteSetup no longer writes SetLastSetupTime.
+5. TradeTransaction owns EA-order lifecycle persistence and PendingTrail registration/fill handoff.
+6. STB_HasExecutionExposure is independent of management flags.
+7. HEDGE creation is isolated in STB_ExecuteMarketHedge and terminal-verified.
+8. HEDGE Execution ends at creation; long-lived protection belongs to lifecycle/management.
+9. Manual BUY STOP/SELL STOP use an Execution command and do not use Scanner discovery.
+10. SAVE20 is an explicit Management command.
+11. Only OnTimer starts STB_RunScanCycle.
+12. Pending deletion has terminal post-state verification.
+13. ORDER_ADD lifecycle writes are restricted to EA-owned orders.
+14. Diagnostic mode never silently enables auto trading.
+
+### 20-SECTION MAP
+01 Header / Inputs / Globals — hidden defaults, contradictory inputs, authorization state.
+02 Structs / Identity / State — Setup contract, decision identity, ticket/lifecycle state.
+03 Adaptive Learning — selection, decay, no look-ahead, dedup, execution isolation.
+04 Persistence / Restart — GlobalVariables, account/magic scope, recovery, stale state.
+05 Utility / Broker Helpers — tick/point/volume/filling/stops/freeze normalization.
+06 Swing / Closed-Bar — confirmed-bar semantics and deterministic swing inputs.
+07 Pending Setup / SL / TP / RR — mandatory protection and broker-valid geometry.
+08 Trend / Structure / FVG / OB — semantics, look-ahead, linkage and deterministic pattern logic.
+09 Strategy / Signal Gates — qualification only, score, profile snapshot, candidate output.
+10 Exposure / Position State — EA/manual/foreign ownership and execution exposure invariant.
+11 Hedge / Emergency SL — centralized authorization, verified creation and protection handoff.
+12 Trailing / Pending Lifetime — existing-object-only management and immutable lifecycle parameters.
+13 OrderCheck / Execution — final authorization, retcodes, terminal read-back and truthful result.
+14 Scanner — universe, bounded scan, candidate-only output and single scheduler.
+15 Dashboard / UI — controller only, known controls, truthful result, no direct trade API.
+16 OnInit / OnDeinit — validation, timer, restart state, no accidental live enablement.
+17 OnTick / OnTimer — one event owner for scan/execution, no duplicate decision.
+18 OnTradeTransaction — transaction-order independence, lifecycle repair, dedup, handoff.
+19 OnChartEvent — UI routing only, edit-mode safety, no bypass.
+20 Final Integration / Runtime — full chain, 0/0, EX5, reload, runtime evidence, restart/regression.
+
+### PER-SECTION ADVANCED REVIEW
+For every Section check correctness, safety, determinism, state integrity, ownership, event ordering, failure handling, broker compatibility, restart behavior, observability, performance, maintainability, edge cases, regression risk, hidden alternate path, callback path and persistence side effects.
+
+### STATIC HARD GATES
+- [ ] OrderSend absent.
+- [ ] PositionOpen absent.
+- [ ] New-exposure CTrade APIs only in ExecuteSetup and STB_ExecuteMarketHedge.
+- [ ] Scanner/Strategy/Risk/UI/Adaptive have no direct new-exposure API.
+- [ ] Risk authorization has no Adaptive activation/read.
+- [ ] ExecuteSetup has no Adaptive mutation, SetLastSetupTime or PendingTrail registration.
+- [ ] STB_HasExecutionExposure ignores management-enable flags.
+- [ ] Exactly one STB_RunScanCycle call exists and it is OnTimer.
+- [ ] Management has no Scanner/Strategy discovery.
+- [ ] PendingTrail creates no exposure.
+- [ ] ORDER_ADD lifecycle state is owner-checked.
+- [ ] Brace/structure scan balanced.
+
+### ACTIVE SOURCE GATE
+Re-measure active source version, bytes, lines, mtime and hash before writing. Historical values were 1.120 / 211,466 bytes / 6,889 lines; do not assume they remain current. Forward-port instead of blind replacement.
+
+### COMPILE / EX5 GATE
+Same SmartTradingBot.mq5, same MetaEditor. 0 errors AND 0 warnings after each corrective unit; final 0/0 mandatory. Then rebuild same SmartTradingBot.ex5 and report path, timestamp, size and hash when available.
+
+### RUNTIME GATE
+Test Auto-Off+Diagnostic, Timer-only scan, Manual BUY STOP, Manual SELL STOP, HEDGE reject/accept, SAVE20 truthfulness, pending ORDER_ADD/protection/trail, pending fill handoff, expiration/delete confirmation, restart recovery, foreign ownership, management-disabled exposure lock, and Tick/Timer boundary duplication.
+
+### EVIDENCE
+Every reject reports stage/owner/symbol/direction/reason and retcode/ticket where applicable. Every success reports terminal-confirmed evidence. No EXECUTED/CREATED/CONFIRMED message without proof.
+
+### HARD STOP
+Stop on active-source ambiguity, unsafe merge, any compile error/warning, duplicate execution path, UI/Risk bypass, foreign-object mutation, optional protection, false-success log, direct Adaptive authorization, Execution-owned long-lived management, duplicate decision, inconsistent restart state or hidden re-entry callback.
+
+### FINAL STATUS RULE
+SECTION XX — COMPLETE ✅ only when that Section has evidence. Final COMPLETE requires architecture boundary pass + compile 0/0 + same EX5 rebuilt + same Expert reloaded + runtime evidence + zero unresolved hard-stop defect.
+
+Status: GIT DEEP HIDDEN-BOUNDARY PREFLIGHT — COMPLETE
+Status: ACTIVE MT5 EXECUTION — PENDING
