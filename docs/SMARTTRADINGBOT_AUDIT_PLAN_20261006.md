@@ -498,3 +498,99 @@ Audit documents, checklists and Agent work orders must be structured, readable a
 - no unsupported completion claims
 
 The documentation itself is part of the engineering audit trail and must remain production-quality.
+
+
+## Audit checkpoint — 2026-10-06 active 1.120 validation
+
+### Evidence supplied by MetaTrader/MetaEditor Agent
+
+Active source reported:
+`C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\3C7BBB4F3CD116F4C39A2AB44A72DD87\MQL5\Experts\SmartTradingBot.mq5`
+
+Reported source:
+- Version: 1.120
+- Size: 211,466 bytes
+- Lines: 6,889
+- Reported unchanged during the session
+- No complete 1.127 `.mq5` found on disk
+- 1.127 remnants exist only in historical `.bak` include files
+
+Reported active EX5:
+- Size: 283,158 bytes
+- Build time: 2026-10-05 21:02:20Z
+- Report states this build is the one connected to XAUUSD+ H1
+
+Reported compile evidence:
+- Full compile previously recorded: 0 errors, 0 warnings
+- A current recompile attempt was blocked by MetaEditor5 MCP transport availability
+- Because the source was reported byte-identical to the previously compiled source, the Agent treats the prior 0/0 build as the current binary's source validation
+- This is recorded as prior-build evidence, not a newly executed compile
+
+### Section status discipline
+
+The supplied report groups the audit into 9 aggregate sections. The master plan requires 20 individually gated Sections. Therefore:
+
+- Aggregate findings are preserved as evidence.
+- The 20-item master checklist must NOT be falsely marked complete merely because an aggregate section mentions multiple areas.
+- Individual Section checkboxes remain unchecked until their own line range, acceptance criteria and gate evidence are explicitly mapped.
+
+### Runtime/UI evidence reported
+
+Reported runtime evidence includes:
+- initialization
+- timer/tick/transaction activity
+- dashboard creation
+- AUTO click and state result
+- BUY/SELL command routing and pipeline rejection
+- SAVE+20 execution
+- HEDGE handler invocation and no hedge position on the tested symbol/context
+- OBJECT_CLICK tracing
+- live pending orders with SL/TP
+- live positions with SL
+- adaptive learning and dedup behavior
+
+### Observability issue retained as unresolved
+
+The report states that the UI may log:
+`STB UI RESULT command=HEDGE executed.`
+even when the underlying `OneClickHedge()` path does not actually open a hedge position.
+
+Classification:
+- Functional trading bypass: NOT demonstrated
+- Observability/telemetry correctness defect: PRESENT / UNRESOLVED
+- Required future repair: UI result must reflect the actual `OneClickHedge()` return/result rather than unconditional success text
+
+This item must not be described as "no defect" until repaired and re-tested.
+
+### Compile transport limitation
+
+The MetaEditor5 MCP transport failure is an environment/tooling limitation, not evidence of a source compilation failure. The prior 0/0 build remains valid only insofar as the source is demonstrably byte-identical to the compiled source. A fresh F7/MetaEditor compile is the preferred verification step when MetaEditor access is restored.
+
+### Checklist checkpoint
+
+Because the supplied evidence uses aggregate Sections rather than the plan's 20 individual gates:
+
+- [ ] SECTION 01 — Header / Inputs / Globals
+- [ ] SECTION 02 — Structs / Identity / State
+- [ ] SECTION 03 — Adaptive Learning
+- [ ] SECTION 04 — Persistence / Restart
+- [ ] SECTION 05 — Utility / Broker Helpers
+- [ ] SECTION 06 — Swing / Closed-Bar
+- [ ] SECTION 07 — Pending Setup / SL / TP / RR
+- [ ] SECTION 08 — Trend / Structure / FVG / OB
+- [ ] SECTION 09 — Signal / Strategy / Gates
+- [ ] SECTION 10 — Exposure / Position State
+- [ ] SECTION 11 — Hedge / Emergency SL
+- [ ] SECTION 12 — Trailing / Pending Lifetime
+- [ ] SECTION 13 — OrderCheck / Execution
+- [ ] SECTION 14 — Scanner
+- [ ] SECTION 15 — Dashboard / UI
+- [ ] SECTION 16 — OnInit / OnDeinit
+- [ ] SECTION 17 — OnTick / OnTimer
+- [ ] SECTION 18 — OnTradeTransaction
+- [ ] SECTION 19 — OnChartEvent
+- [ ] SECTION 20 — Final Integration / Runtime
+
+Status of this checkpoint:
+`EVIDENCE RECORDED — INDIVIDUAL SECTION GATES PENDING EXPLICIT MAPPING`
+
