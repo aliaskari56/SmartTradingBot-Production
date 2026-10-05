@@ -662,3 +662,55 @@ Each completed Section must distinguish:
 - PRECHECK — our side
 - MT5 EXECUTION — MetaTrader Agent side
 - FINAL ACCEPTANCE — combined result
+
+
+## Architecture gate — mandatory Phase 00
+
+Before Section 01 begins, the **Architecture Ownership Contract** must be accepted as the governing boundary model.
+
+Reference:
+`docs/SMARTTRADINGBOT_ARCHITECTURE_OWNERSHIP_CONTRACT_20261006.md`
+
+### Phase 00 acceptance
+The Agent/team must explicitly map:
+- Scanner ownership
+- Strategy ownership
+- Candidate/Setup handoff
+- Risk/Safety ownership
+- Execution ownership
+- Position/Pending Management ownership
+- TradeTransaction synchronization ownership
+- Adaptive Learning ownership
+- UI/controller ownership
+- Diagnostics ownership
+- Persistence/recovery ownership
+
+### Current known finding
+The current source contains this coupling:
+`ScanWatchlist() -> PlaceSetup() -> ExecuteSetup()`
+
+This is an architecture-boundary violation because Scanner currently participates directly in order creation.
+
+No automatic patch is authorized yet.
+
+Required sequence:
+1. map all side effects and callers/callees
+2. define the replacement handoff
+3. define the single owner of execution
+4. define management handoff after creation
+5. define reject/error ownership
+6. then schedule the actual code repair in the dedicated Section
+
+### Phase 00 checklist
+- [ ] Ownership map defined
+- [ ] Interfaces/handoffs defined
+- [ ] Current cross-boundary calls mapped
+- [ ] Known violations recorded
+- [ ] Replacement architecture defined
+- [ ] Runtime side effects identified
+- [ ] Architecture review accepted
+- [ ] MetaTrader Agent work order prepared
+- [ ] Section 01 unblocked
+
+Architecture status:
+`DEFINED — CURRENT CODE COMPLIANCE NOT YET PASS`
