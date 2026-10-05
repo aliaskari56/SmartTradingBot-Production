@@ -3471,8 +3471,7 @@ bool STB_FindPositionTicketByIdentifier(const ulong positionId,
 enum STB_HEDGE_COMMAND_RESULT
 {
    STB_HEDGE_REJECTED = 0,
-   STB_HEDGE_EXECUTED = 1,
-   STB_HEDGE_CREATED_PROTECTION_FAILED = 2
+   STB_HEDGE_EXECUTED = 1
 };
 
 bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
@@ -3707,42 +3706,20 @@ int STB_ExecutionHedgeCommand()
                               executedVolume))
       return STB_HEDGE_REJECTED;
 
-   // Management handoff occurs only after Execution confirmed a real position.
+   // Execution ends after creation is terminal-confirmed.
+   // TradeTransaction owns immediate protection and the management handoff.
    if(positionTicket==0)
-   {
-      Print("STB HEDGE management handoff failed symbol=",symbol,
-            " deal=",dealTicket,
-            " position=",positionTicket);
       return STB_HEDGE_REJECTED;
-   }
 
-   if(!EnsureInitialSL(positionTicket))
-   {
-      Print("STB HEDGE CREATED BUT PROTECTION NOT CONFIRMED symbol=",symbol,
-            " deal=",dealTicket,
-            " position=",positionTicket,
-            " status=CREATED_PROTECTION_FAILED);
-      return STB_HEDGE_CREATED_PROTECTION_FAILED;
-   }
-
-   double confirmedSL=0.0;
-   if(PositionSelectByTicket(positionTicket))
-      confirmedSL=PositionGetDouble(POSITION_SL);
-
-   Print("STB HEDGE OPENED symbol=",symbol,
+   Print("STB HEDGE CREATED CONFIRMED symbol=",symbol,
          " sourceTicket=",sourceTicket,
          " hedgeDirection=",(hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL"),
          " requestedVolume=",DoubleToString(volume,3),
          " executedVolume=",DoubleToString(executedVolume,3),
-         " SL=",DoubleToString(
-            confirmedSL,
-            (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
          " deal=",dealTicket,
          " position=",positionTicket);
 
    return STB_HEDGE_EXECUTED;
-}
-
 //==================================================================
 // STOP VALIDATION
 //==================================================================
@@ -6999,61 +6976,66 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
 
          // TradeTransaction is the first state owner after terminal creation.
-         // Persist immutable lifecycle metadata only after the ORDER_ADD event.
+         // Adaptive/persistence lifecycle state belongs only to EA-owned orders.
          if(OrderSelect(trans.order))
          {
-            string orderComment=OrderGetString(ORDER_COMMENT);
-            string orderSymbol=OrderGetString(ORDER_SYMBOL);
-            int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
+            STB_OWNER_CLASS orderOwner=STB_GetOrderOwner(trans.order);
 
-            datetime setupTime=STB_ParsePendingSetupTime(
-               orderComment,0);
-
-            if(setupTime>0)
+            if(orderOwner==STB_OWNER_EA)
             {
-               long orderTypeForState=OrderGetInteger(ORDER_TYPE);
-               int setupDirection=
-                  (orderTypeForState==ORDER_TYPE_BUY_STOP ||
-                   orderTypeForState==ORDER_TYPE_BUY_LIMIT ? 1 :
-                   orderTypeForState==ORDER_TYPE_SELL_STOP ||
-                   orderTypeForState==ORDER_TYPE_SELL_LIMIT ? -1 : 0);
+               string orderComment=OrderGetString(ORDER_COMMENT);
+               string orderSymbol=OrderGetString(ORDER_SYMBOL);
+               int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
 
-               if(setupDirection!=0)
-                  SetLastSetupTime(orderSymbol,setupDirection,setupTime);
-            }
+               datetime setupTime=STB_ParsePendingSetupTime(
+                  orderComment,0);
 
-            if(profileId>=0)
-               STB_AdaptiveRememberOrderProfile(trans.order,profileId);
+               if(setupTime>0)
+               {
+                  long orderTypeForState=OrderGetInteger(ORDER_TYPE);
+                  int setupDirection=
+                     (orderTypeForState==ORDER_TYPE_BUY_STOP ||
+                      orderTypeForState==ORDER_TYPE_BUY_LIMIT ? 1 :
+                      orderTypeForState==ORDER_TYPE_SELL_STOP ||
+                      orderTypeForState==ORDER_TYPE_SELL_LIMIT ? -1 : 0);
 
-            double orderRiskMoney=0.0;
-            long orderType=OrderGetInteger(ORDER_TYPE);
+                  if(setupDirection!=0)
+                     SetLastSetupTime(orderSymbol,setupDirection,setupTime);
+               }
 
-            ENUM_ORDER_TYPE calcType=
-               (orderType==ORDER_TYPE_BUY_STOP ||
-                orderType==ORDER_TYPE_BUY_LIMIT ?
-                ORDER_TYPE_BUY :
-                orderType==ORDER_TYPE_SELL_STOP ||
-                orderType==ORDER_TYPE_SELL_LIMIT ?
-                ORDER_TYPE_SELL :
-                WRONG_VALUE);
+               if(profileId>=0)
+                  STB_AdaptiveRememberOrderProfile(trans.order,profileId);
 
-            if(calcType!=WRONG_VALUE)
-            {
-               double orderVolume=OrderGetDouble(ORDER_VOLUME_CURRENT);
-               double orderEntry=OrderGetDouble(ORDER_PRICE_OPEN);
-               double orderSL=OrderGetDouble(ORDER_SL);
+               double orderRiskMoney=0.0;
+               long orderType=OrderGetInteger(ORDER_TYPE);
 
-               if(orderVolume>0.0 &&
-                  orderEntry>0.0 &&
-                  orderSL>0.0 &&
-                  OrderCalcProfit(calcType,
-                                  orderSymbol,
-                                  orderVolume,
-                                  orderEntry,
-                                  orderSL,
-                                  orderRiskMoney))
-                  STB_AdaptiveRememberOrderRisk(
-                     trans.order,MathAbs(orderRiskMoney));
+               ENUM_ORDER_TYPE calcType=
+                  (orderType==ORDER_TYPE_BUY_STOP ||
+                   orderType==ORDER_TYPE_BUY_LIMIT ?
+                   ORDER_TYPE_BUY :
+                   orderType==ORDER_TYPE_SELL_STOP ||
+                   orderType==ORDER_TYPE_SELL_LIMIT ?
+                   ORDER_TYPE_SELL :
+                   WRONG_VALUE);
+
+               if(calcType!=WRONG_VALUE)
+               {
+                  double orderVolume=OrderGetDouble(ORDER_VOLUME_CURRENT);
+                  double orderEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+                  double orderSL=OrderGetDouble(ORDER_SL);
+
+                  if(orderVolume>0.0 &&
+                     orderEntry>0.0 &&
+                     orderSL>0.0 &&
+                     OrderCalcProfit(calcType,
+                                     orderSymbol,
+                                     orderVolume,
+                                     orderEntry,
+                                     orderSL,
+                                     orderRiskMoney))
+                     STB_AdaptiveRememberOrderRisk(
+                        trans.order,MathAbs(orderRiskMoney));
+               }
             }
          }
       }
@@ -7444,18 +7426,8 @@ void OnChartEvent(const int id,
    {
       int hedgeStatus=STB_ExecutionHedgeCommand();
 
-      if(hedgeStatus==STB_HEDGE_EXECUTED)
-      {
-         Print("STB UI RESULT command=HEDGE status=EXECUTED");
-      }
-      else if(hedgeStatus==STB_HEDGE_CREATED_PROTECTION_FAILED)
-      {
-         Print("STB UI RESULT command=HEDGE status=CREATED_PROTECTION_FAILED");
-      }
-      else
-      {
-         Print("STB UI RESULT command=HEDGE status=REJECTED");
-      }
+      Print("STB UI RESULT command=HEDGE status=",
+            hedgeStatus==STB_HEDGE_EXECUTED ? "EXECUTED":"REJECTED");
       return;
    }
 }
