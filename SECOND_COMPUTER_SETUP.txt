@@ -1,0 +1,32 @@
+SMARTTRADINGBOT — SECOND COMPUTER SETUP
+========================================
+
+1. Install the same MetaTrader 5 terminal/broker environment.
+
+2. Open the target terminal's MQL5 data folder:
+   File -> Open Data Folder
+
+3. Copy the CONTENTS of this package's MQL5 folder into:
+   <TARGET TERMINAL DATA FOLDER>\MQL5\
+
+4. Preserve these paths:
+   MQL5\Experts\SmartTradingBot.mq5
+   MQL5\Experts\SmartTradingBot.ex5
+   MQL5\Include\...
+
+5. Open SmartTradingBot.mq5 in MetaEditor.
+
+6. Before changing anything:
+   - verify the source hash against PRODUCTION_CLOSURE_SHA256.txt
+   - compile once
+   - confirm 0 errors
+   - do not attach it to a live trading chart yet
+
+7. For forensic development, modify ONLY the copied source tree.
+
+8. Do NOT mix the historical AstraCore tree into this production closure.
+
+9. The existing pending order and terminal Global Variables are NOT transferred.
+   They remain on the original computer/terminal.
+
+10. The EX5 is included as the frozen executable baseline.
