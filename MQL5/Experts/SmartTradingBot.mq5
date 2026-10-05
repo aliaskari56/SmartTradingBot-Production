@@ -3450,6 +3450,13 @@ bool STB_FindPositionTicketByIdentifier(const ulong positionId,
    return false;
 }
 
+enum STB_HEDGE_COMMAND_RESULT
+{
+   STB_HEDGE_REJECTED = 0,
+   STB_HEDGE_EXECUTED = 1,
+   STB_HEDGE_CREATED_PROTECTION_FAILED = 2
+};
+
 bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
                             ulong &dealTicket,
                             ulong &positionTicket,
@@ -3560,46 +3567,44 @@ bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
    }
 
    double actualVolume=PositionGetDouble(POSITION_VOLUME);
-   double actualSL=PositionGetDouble(POSITION_SL);
+
+   double volumeTolerance=
+      MathMax(SymbolInfoDouble(request.symbol,SYMBOL_VOLUME_MIN)*0.5,1e-9);
 
    if(actualVolume<=0.0 ||
-      actualSL<=0.0 ||
-      !IsValidSLForPosition(request.symbol,expectedPositionType,actualSL))
+      actualVolume+volumeTolerance<executedVolume)
    {
       Print("STB HEDGE EXECUTION post-position verification failed symbol=",
             request.symbol,
             " deal=",dealTicket,
             " position=",positionTicket,
-            " volume=",DoubleToString(actualVolume,3),
-            " sl=",DoubleToString(actualSL,
-                                  (int)SymbolInfoInteger(request.symbol,SYMBOL_DIGITS)));
+            " expectedVolume=",DoubleToString(executedVolume,3),
+            " actualVolume=",DoubleToString(actualVolume,3));
       return false;
    }
 
-   Print("STB HEDGE EXECUTION CONFIRMED symbol=",request.symbol,
+   Print("STB HEDGE EXECUTION CREATED symbol=",request.symbol,
          " deal=",dealTicket,
          " position=",positionTicket,
          " direction=",(request.direction>0 ? "BUY":"SELL"),
-         " executedVolume=",DoubleToString(executedVolume,3),
-         " sl=",DoubleToString(actualSL,
-                               (int)SymbolInfoInteger(request.symbol,SYMBOL_DIGITS)));
+         " executedVolume=",DoubleToString(executedVolume,3));
 
    return true;
 }
 
-bool STB_ExecutionHedgeCommand()
+int STB_ExecutionHedgeCommand()
 {
    if(!InpAllowOneClickHedge)
    {
       Print("STB HEDGE disabled by input.");
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    if(!IsHedgingAccount())
    {
       Print("STB HEDGE unavailable: account is not RETAIL_HEDGING. Current margin mode=",
             AccountInfoInteger(ACCOUNT_MARGIN_MODE));
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    string symbol=_Symbol;
@@ -3632,7 +3637,7 @@ bool STB_ExecutionHedgeCommand()
    if(sourceTicket==0 || sourceVolume<=0.0)
    {
       Print("STB HEDGE: no managed position on ",symbol);
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    long hedgeType=(sourceType==POSITION_TYPE_BUY)
@@ -3643,20 +3648,20 @@ bool STB_ExecutionHedgeCommand()
    if(HasManagedPositionDirection(symbol,hedgeType))
    {
       Print("STB HEDGE: opposite managed position already exists on ",symbol);
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    double volume=NormalizeVolume(symbol,sourceVolume);
 
    if(volume<=0.0)
-      return false;
+      return STB_HEDGE_REJECTED;
 
    double sl=0.0;
 
    if(!STB_ProtectionCalculateHedgeSL(symbol,hedgeType,sl))
    {
       Print("STB HEDGE: could not calculate a broker-valid SL on ",symbol);
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    int hedgeDirection=(hedgeType==POSITION_TYPE_BUY ? 1:-1);
@@ -3664,7 +3669,7 @@ bool STB_ExecutionHedgeCommand()
    if(!STB_RiskAuthorizeMarketHedge(symbol,hedgeDirection,volume,sl))
    {
       Print("STB HEDGE rejected by centralized risk/safety gate symbol=",symbol);
-      return false;
+      return STB_HEDGE_REJECTED;
    }
 
    STB_MarketHedgeRequest request;
@@ -3682,16 +3687,29 @@ bool STB_ExecutionHedgeCommand()
                               dealTicket,
                               positionTicket,
                               executedVolume))
-      return false;
+      return STB_HEDGE_REJECTED;
 
    // Management handoff occurs only after Execution confirmed a real position.
-   if(positionTicket==0 || !EnsureInitialSL(positionTicket))
+   if(positionTicket==0)
    {
       Print("STB HEDGE management handoff failed symbol=",symbol,
             " deal=",dealTicket,
             " position=",positionTicket);
-      return false;
+      return STB_HEDGE_REJECTED;
    }
+
+   if(!EnsureInitialSL(positionTicket))
+   {
+      Print("STB HEDGE CREATED BUT PROTECTION NOT CONFIRMED symbol=",symbol,
+            " deal=",dealTicket,
+            " position=",positionTicket,
+            " status=CREATED_PROTECTION_FAILED);
+      return STB_HEDGE_CREATED_PROTECTION_FAILED;
+   }
+
+   double confirmedSL=0.0;
+   if(PositionSelectByTicket(positionTicket))
+      confirmedSL=PositionGetDouble(POSITION_SL);
 
    Print("STB HEDGE OPENED symbol=",symbol,
          " sourceTicket=",sourceTicket,
@@ -3699,12 +3717,12 @@ bool STB_ExecutionHedgeCommand()
          " requestedVolume=",DoubleToString(volume,3),
          " executedVolume=",DoubleToString(executedVolume,3),
          " SL=",DoubleToString(
-            PositionGetDouble(POSITION_SL),
+            confirmedSL,
             (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
          " deal=",dealTicket,
          " position=",positionTicket);
 
-   return true;
+   return STB_HEDGE_EXECUTED;
 }
 
 //==================================================================
@@ -7369,9 +7387,20 @@ void OnChartEvent(const int id,
 
    if(sparam==hedgeName)
    {
-      bool ok=STB_ExecutionHedgeCommand();
-      Print("STB UI RESULT command=HEDGE status=",
-            ok ? "EXECUTED":"REJECTED");
+      int hedgeStatus=STB_ExecutionHedgeCommand();
+
+      if(hedgeStatus==STB_HEDGE_EXECUTED)
+      {
+         Print("STB UI RESULT command=HEDGE status=EXECUTED");
+      }
+      else if(hedgeStatus==STB_HEDGE_CREATED_PROTECTION_FAILED)
+      {
+         Print("STB UI RESULT command=HEDGE status=CREATED_PROTECTION_FAILED");
+      }
+      else
+      {
+         Print("STB UI RESULT command=HEDGE status=REJECTED");
+      }
       return;
    }
 }
