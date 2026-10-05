@@ -820,7 +820,10 @@ void STB_AdaptiveLog(const string eventName,
 
 void STB_AdaptiveRecordSetup(const Setup &s,const bool accepted)
 {
-   if(!InpAdaptiveLearning || s.setupTime<=0)
+   if(!InpAdaptiveLearning ||
+      s.setupTime<=0 ||
+      s.adaptiveProfile<0 ||
+      s.adaptiveProfile>=STB_ADAPTIVE_PROFILE_COUNT)
       return;
 
    string suffix=(accepted ? "DECISION_A":"DECISION_R");
@@ -3208,6 +3211,46 @@ void SetLastSetupTime(const string symbol,const int direction,const datetime t)
 }
 
 //==================================================================
+// IMMUTABLE PENDING LIFECYCLE METADATA
+//==================================================================
+
+int STB_ParsePendingMaxBars(const string comment,const int fallback)
+{
+   int pos=StringFind(comment,"|L");
+   if(pos<0) return fallback;
+   int start=pos+2;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                      : StringSubstr(comment,start));
+   int value=(int)StringToInteger(raw);
+   return value>=0 ? value:fallback;
+}
+
+double STB_ParsePendingEntryBufferPips(const string comment,const double fallback)
+{
+   int pos=StringFind(comment,"|EB");
+   if(pos<0) return fallback;
+   int start=pos+3;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                      : StringSubstr(comment,start));
+   double value=StringToDouble(raw);
+   return (MathIsValidNumber(value) && value>=0.0) ? value:fallback;
+}
+
+double STB_ParsePendingSLBufferPips(const string comment,const double fallback)
+{
+   int pos=StringFind(comment,"|SB");
+   if(pos<0) return fallback;
+   int start=pos+3;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                      : StringSubstr(comment,start));
+   double value=StringToDouble(raw);
+   return (MathIsValidNumber(value) && value>=0.0) ? value:fallback;
+}
+
+//==================================================================
 // EXPOSURE MANAGEMENT
 //==================================================================
 
@@ -3608,6 +3651,12 @@ bool ModifyPositionSL(const ulong ticket,const double newSL)
 {
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
+
+   if(!IsManagedPosition(ticket))
+   {
+      Print("STB PositionModify owner reject ticket=",ticket);
+      return false;
+   }
 
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
@@ -4234,17 +4283,9 @@ void ManagePendingOrders()
 
       if(magic==(long)InpMagic)
       {
-         int profileId=STB_AdaptiveParseProfileFromComment(
-            OrderGetString(ORDER_COMMENT));
-
-         int maxBars=InpMaxPendingBars;
-
-         if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
-         {
-            STB_AP_SetActive(profileId);
-            maxBars=STB_EffectiveMaxPendingBars();
-            STB_AP_ClearActive();
-         }
+         int maxBars=STB_ParsePendingMaxBars(
+            OrderGetString(ORDER_COMMENT),
+            InpMaxPendingBars);
 
          bool expiredByServer=
             OrderGetInteger(ORDER_TYPE_TIME)==ORDER_TIME_SPECIFIED &&
@@ -4278,7 +4319,7 @@ void ManagePendingOrders()
             }
             else
             {
-               STB_AdaptiveDeleteOrderState(ticket);
+               // TradeTransaction owns Adaptive order-state cleanup.
             }
          }
       }
@@ -4759,76 +4800,48 @@ bool STB_ManualPendingCommand(const string symbol,const int direction)
    if(symbol=="" || direction==0)
       return false;
 
-   if(!IsDirectionTradable(symbol,direction))
-   {
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=DIRECTION_NOT_TRADABLE");
-      return false;
-   }
-
-   if(!IsSpreadAcceptable(symbol))
-   {
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=SPREAD_FILTER");
-      return false;
-   }
-
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
-   {
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=NO_TICK");
       return false;
-   }
 
-   STB_AP_SelectActive(symbol,direction);
+   STB_AP_ClearActive();
 
    double extreme=(direction>0)
                   ? iLow(symbol,PERIOD_M15,0)
                   : iHigh(symbol,PERIOD_M15,0);
-
    if(extreme<=0.0)
-   {
-      STB_AP_ClearActive();
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=EXTREME_UNAVAILABLE");
       return false;
-   }
 
    STBPendingResolution res;
-
-   if(!STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) || !res.valid)
-   {
-      STB_AP_ClearActive();
-      Print("STB_PIPELINE_REJECT stage=MANUAL symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " reason=DISTANCE_",res.reason);
+   if(!STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) ||
+      !res.valid)
       return false;
-   }
+
+   double risk=MathAbs(res.entry-res.sl);
+   double reward=MathMax(risk*MathMax(0.10,InpMinimumRR),
+                          TradeMinDistance(symbol));
+   if(risk<=0.0 || reward<=0.0)
+      return false;
 
    Setup s;
    ZeroMemory(s);
-
    s.valid=true;
    s.symbol=symbol;
    s.direction=direction;
    s.trendAligned=false;
    s.entry=res.entry;
    s.sl=res.sl;
-   s.tp=0.0;
-   s.rr=0.0;
-   s.score=50.0;
-   s.adaptiveProfile=g_activeAdaptiveProfileId;
+   s.tp=NormalizePrice(symbol,
+                       direction>0 ? res.entry+reward :
+                                      res.entry-reward);
+   s.rr=MathAbs(s.tp-s.entry)/risk;
+   s.score=0.0;
+   s.adaptiveProfile=-1;
    s.setupTime=iTime(symbol,PERIOD_M15,0);
-
-   STB_AP_ClearActive();
 
    return ExecuteSetup(s,true);
 }
+
 
 bool STB_IsDuplicateSymbol(const string &symbols[],
                            const int count,
@@ -6316,29 +6329,15 @@ int OnInit()
    // In Strategy Tester, the input must be authoritative so a previous
    // emulated terminal-global state cannot silently disable trading.
    if(MQLInfoInteger(MQL_TESTER))
-   {
-      g_autoTrading=InpAutoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-   }
-   else if(InpDiagnosticM15Mode)
-   {
-      // Diagnostic mode is analysis/telemetry only; it never authorizes
-      // live trading by itself.
-      g_autoTrading=InpAutoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-   }
-   else
-   {
-      g_autoTrading=InpAutoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-   }
+      g_autoTrading=(InpAutoTrading && !InpDiagnosticM15Mode);
+   else if(InpDiagnosticM15Mode || !InpAutoTrading)
+      g_autoTrading=false;
    else if(GlobalVariableCheck(g_autoStateName))
       g_autoTrading=(GlobalVariableGet(g_autoStateName)>0.5);
    else
-   {
-      g_autoTrading=InpAutoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-   }
+      g_autoTrading=true;
+
+   GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -6410,7 +6409,7 @@ int OnInit()
    if(GetOscillatorState(_Symbol,osc))
       DrawOscillatorPanel(osc);
 
-   STB_RunScanCycle();
+   // Restart/attach initializes state only; scheduler owns new exposure.
    UpdatePanel();
 
       //==================================================================
@@ -6895,3 +6894,36 @@ void OnChartEvent(const int id,
 
    if(sparam==autoName)
    {
+      if(InpDiagnosticM15Mode || !InpAutoTrading)
+      {
+         g_autoTrading=false;
+         GlobalVariableSet(g_autoStateName,0.0);
+         UpdateButtons();
+         Print("STB AUTO TRADING LOCKED diagnostic=",
+               InpDiagnosticM15Mode ? "ON":"OFF",
+               " inputAuto=",InpAutoTrading ? "ON":"OFF");
+         return;
+      }
+
+      g_autoTrading=!g_autoTrading;
+      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
+      UpdateButtons();
+
+      Print("STB AUTO TRADING = ",
+            (g_autoTrading ? "ON":"OFF"));
+      return;
+   }
+
+   if(sparam==saveName)
+   {
+      ManualSavePlus20();
+      return;
+   }
+
+   if(sparam==hedgeName)
+   {
+      OneClickHedge();
+      return;
+   }
+}
+
