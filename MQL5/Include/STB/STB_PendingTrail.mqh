@@ -35,7 +35,8 @@ struct STBPendingTrailState
    datetime lastNoNewExtremeLogBar;
    datetime lastFailLogBar;
    int      lastProcessedCycle;
-   int      profileId;       // immutable adaptive profile for this pending order
+   double   entryBufferPips;
+   double   slBufferPips;
    bool     active;
 };
 
@@ -107,69 +108,45 @@ string STB_PendingTrailTypeName(const long orderType)
 // the latest CLOSED M15 extreme (Low[1] for buy / High[1] for sell).
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
 {
-   if(ticket==0)
-      return false;
-
-   if(!OrderSelect(ticket))
-      return false;
-
-   if(!IsManagedOrder(ticket))
+   if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
       return false;
 
    long orderType=OrderGetInteger(ORDER_TYPE);
-
    if(!STB_PendingTrailIsStopType(orderType))
       return false;
 
    int existing=STB_PendingTrailFind(ticket);
-
    if(existing>=0)
    {
       if(!g_stbPendingTrail[existing].active)
       {
-         // Slot reuse: previously stopped for this ticket.
          g_stbPendingTrail[existing].active=true;
          g_stbPendingTrail[existing].source=source;
          g_stbPendingTrail[existing].lastProcessedCycle=-1;
       }
-
       return true;
    }
 
    string symbol=OrderGetString(ORDER_SYMBOL);
-
-   if(symbol=="")
-      return false;
-
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-
-   if(point<=0.0)
-      return false;
-
-   int direction=STB_PendingTrailDirection(orderType);
-
    double pip=PipSize(symbol);
-   if(pip<=0.0)
+
+   if(symbol=="" || point<=0.0 || pip<=0.0)
       return false;
 
-   // Keep the adaptive geometry that created this pending order.
-   // On restart/manual discovery the comment is the durable profile source.
-   int profileId=STB_AdaptiveParseProfileFromComment(
-      OrderGetString(ORDER_COMMENT));
+   string comment=OrderGetString(ORDER_COMMENT);
 
-   double entryBufferPips=InpEntryBufferPips;
-   if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
-   {
-      STBAdaptiveProfile profile;
-      STB_AP_LoadProfile(profileId,profile);
-      entryBufferPips=profile.entryBufferPips;
-   }
+   double entryBufferPips=
+      STB_ParsePendingEntryBufferPips(comment,InpEntryBufferPips);
+   double slBufferPips=
+      STB_ParsePendingSLBufferPips(comment,InpSLBufferPips);
+
+   if(entryBufferPips<0.0 || slBufferPips<0.0)
+      return false;
 
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   int direction=STB_PendingTrailDirection(orderType);
 
-   // Infer the structural anchor represented by the existing Entry price.
-   // This prevents restart/re-discovery from silently resetting the trail
-   // baseline to the current candle and skipping a required first move.
    double inferredExtreme=(direction>0)
                           ? currentEntry-entryBufferPips*pip
                           : currentEntry+entryBufferPips*pip;
@@ -191,7 +168,8 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.lastNoNewExtremeLogBar=0;
    st.lastFailLogBar=0;
    st.lastProcessedCycle=-1;
-   st.profileId=profileId;
+   st.entryBufferPips=entryBufferPips;
+   st.slBufferPips=slBufferPips;
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
@@ -205,24 +183,19 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
          " type=",STB_PendingTrailTypeName(orderType),
          " source=",source,
          " trackedExtreme=",DoubleToString(st.trackedExtreme,digits),
-         " profile=",IntegerToString(st.profileId),
+         " entryBufferPips=",DoubleToString(st.entryBufferPips,4),
+         " slBufferPips=",DoubleToString(st.slBufferPips,4),
          " entry=",DoubleToString(st.lastEntry,digits),
          " sl=",DoubleToString(st.lastSL,digits));
 
-   // PENDING_DISTANCE: resolved offsets and broker minimum distance.
    STBPendingResolution res;
-   bool profileActivated=
-      st.profileId>=0 &&
-      st.profileId<STB_ADAPTIVE_PROFILE_COUNT;
-
-   if(profileActivated)
-      STB_AP_SetActive(st.profileId);
-
    bool distanceOK=
-      STB_ResolvePendingDistance(symbol,direction,st.trackedExtreme,0.0,res);
-
-   if(profileActivated)
-      STB_AP_ClearActive();
+      STB_ResolvePendingDistance(symbol,
+                                 direction,
+                                 st.trackedExtreme,
+                                 st.entryBufferPips,
+                                 res,
+                                 st.slBufferPips);
 
    if(distanceOK && res.valid)
    {
@@ -323,6 +296,15 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return false;
    }
 
+   if(!IsManagedOrder(ticket))
+   {
+      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " reason=OWNERSHIP_LOST");
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
    long orderType=OrderGetInteger(ORDER_TYPE);
 
    if(!STB_PendingTrailIsStopType(orderType))
@@ -375,19 +357,16 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return true;
    }
 
-   // 3) Calculate + validate + tick align via the resolver.
+   // 3) Calculate + validate + tick align via immutable order metadata.
    STBPendingResolution res;
-   bool profileActivated=
-      g_stbPendingTrail[idx].profileId>=0 &&
-      g_stbPendingTrail[idx].profileId<STB_ADAPTIVE_PROFILE_COUNT;
 
-   if(profileActivated)
-      STB_AP_SetActive(g_stbPendingTrail[idx].profileId);
-
-   bool resolved=STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res);
-
-   if(profileActivated)
-      STB_AP_ClearActive();
+   bool resolved=
+      STB_ResolvePendingDistance(symbol,
+                                 direction,
+                                 extreme,
+                                 g_stbPendingTrail[idx].entryBufferPips,
+                                 res,
+                                 g_stbPendingTrail[idx].slBufferPips);
 
    if(!resolved || !res.valid)
    {
