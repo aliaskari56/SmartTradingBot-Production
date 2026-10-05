@@ -1253,31 +1253,40 @@ datetime g_lastM15Bar = 0;
 STBIndicatorCache g_indicatorCache[];
 datetime g_lastChartBar = 0;
 
-bool STB_ConfigureMarketFilling(const string symbol)
+bool STB_GetMarketFilling(const string symbol,ENUM_ORDER_TYPE_FILLING &filling)
 {
-   int filling=(int)SymbolInfoInteger(symbol,SYMBOL_FILLING_MODE);
+   int modes=(int)SymbolInfoInteger(symbol,SYMBOL_FILLING_MODE);
 
-   if((filling & SYMBOL_FILLING_FOK)==SYMBOL_FILLING_FOK)
+   if((modes & SYMBOL_FILLING_FOK)==SYMBOL_FILLING_FOK)
    {
-      trade.SetTypeFilling(ORDER_FILLING_FOK);
+      filling=ORDER_FILLING_FOK;
       return true;
    }
 
-   if((filling & SYMBOL_FILLING_IOC)==SYMBOL_FILLING_IOC)
+   if((modes & SYMBOL_FILLING_IOC)==SYMBOL_FILLING_IOC)
    {
-      trade.SetTypeFilling(ORDER_FILLING_IOC);
+      filling=ORDER_FILLING_IOC;
       return true;
    }
 
    long execution=SymbolInfoInteger(symbol,SYMBOL_TRADE_EXEMODE);
    if(execution!=SYMBOL_TRADE_EXECUTION_MARKET)
    {
-      trade.SetTypeFilling(ORDER_FILLING_RETURN);
+      filling=ORDER_FILLING_RETURN;
       return true;
    }
 
    Print("STB filling rejected: no broker-supported FOK/IOC for market execution symbol=",symbol);
    return false;
+}
+
+bool STB_ConfigureMarketFilling(const string symbol)
+{
+   ENUM_ORDER_TYPE_FILLING filling=ORDER_FILLING_RETURN;
+   if(!STB_GetMarketFilling(symbol,filling))
+      return false;
+   trade.SetTypeFilling(filling);
+   return true;
 }
 
 int TrendlineLookback(const ENUM_TIMEFRAMES tf)
@@ -1531,7 +1540,6 @@ double TradeMinDistance(const string symbol)
 bool PreparePendingSetup(Setup &s)
 {
    MqlTick tick;
-
    if(!SymbolInfoTick(s.symbol,tick))
       return false;
 
@@ -1539,11 +1547,8 @@ bool PreparePendingSetup(Setup &s)
    int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
    double minDist=TradeMinDistance(s.symbol);
 
-   if(point<=0.0)
+   if(point<=0.0 || minDist<=0.0)
       return false;
-
-   if(minDist<=0.0)
-      minDist=point;
 
    double oldEntry=s.entry;
    double oldSL=s.sl;
@@ -1552,109 +1557,31 @@ bool PreparePendingSetup(Setup &s)
    if(s.direction>0)
    {
       double minEntry=tick.ask+minDist;
-      if(s.entry<minEntry)
-         s.entry=minEntry;
+      if(s.entry<minEntry) s.entry=minEntry;
 
       double maxSL=tick.bid-minDist;
       double entrySL=s.entry-minDist;
+      if(s.sl>maxSL) s.sl=maxSL;
+      if(s.sl>entrySL) s.sl=entrySL;
 
-      if(s.sl>maxSL)
-         s.sl=maxSL;
-
-      if(s.sl>entrySL)
-         s.sl=entrySL;
-
-      if(s.sl>=s.entry)
-      {
-         Print("STB setup rejected: BUY SL is not below entry symbol=",s.symbol);
+      if(s.sl>=s.entry || s.tp<=s.entry)
          return false;
-      }
-
-      SwingPoint highs[];
-      SwingPoint lows[];
-      if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
-
-      double risk=s.entry-s.sl;
-      double target=DBL_MAX;
-
-      for(int i=0;i<ArraySize(highs);i++)
-      {
-         double candidate=highs[i].price;
-         if(candidate<=s.entry)
-            continue;
-
-         if(candidate-s.entry+1e-12 < risk*STB_EffectiveMinimumRR())
-            continue;
-
-         if(candidate<target)
-            target=candidate;
-      }
-
-      if(target==DBL_MAX || target<=s.entry+minDist)
-      {
-         Print("STB setup rejected after broker normalization: BUY TP is too close or no RR target symbol=",s.symbol,
-               " entry=",DoubleToString(s.entry,digits),
-               " sl=",DoubleToString(s.sl,digits),
-               " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
-      }
-
-      s.tp=NormalizePrice(s.symbol,target);
    }
-   else
+   else if(s.direction<0)
    {
       double maxEntry=tick.bid-minDist;
-      if(s.entry>maxEntry)
-         s.entry=maxEntry;
+      if(s.entry>maxEntry) s.entry=maxEntry;
 
       double minSL=tick.ask+minDist;
       double entrySL=s.entry+minDist;
+      if(s.sl<minSL) s.sl=minSL;
+      if(s.sl<entrySL) s.sl=entrySL;
 
-      if(s.sl<minSL)
-         s.sl=minSL;
-
-      if(s.sl<entrySL)
-         s.sl=entrySL;
-
-      if(s.sl<=s.entry)
-      {
-         Print("STB setup rejected: SELL SL is not above entry symbol=",s.symbol);
+      if(s.sl<=s.entry || s.tp>=s.entry)
          return false;
-      }
-
-      SwingPoint highs[];
-      SwingPoint lows[];
-      if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
-
-      double risk=s.sl-s.entry;
-      double target=-DBL_MAX;
-
-      for(int i=0;i<ArraySize(lows);i++)
-      {
-         double candidate=lows[i].price;
-         if(candidate>=s.entry)
-            continue;
-
-         if(s.entry-candidate+1e-12 < risk*STB_EffectiveMinimumRR())
-            continue;
-
-         if(candidate>target)
-            target=candidate;
-      }
-
-      if(target==-DBL_MAX || target>=s.entry-minDist)
-      {
-         Print("STB setup rejected after broker normalization: SELL TP is too close or no RR target symbol=",s.symbol,
-               " entry=",DoubleToString(s.entry,digits),
-               " sl=",DoubleToString(s.sl,digits),
-               " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
-      }
-
-      s.tp=NormalizePrice(s.symbol,target);
    }
+   else
+      return false;
 
    s.entry=NormalizePrice(s.symbol,s.entry);
    s.sl=NormalizePrice(s.symbol,s.sl);
@@ -1662,18 +1589,22 @@ bool PreparePendingSetup(Setup &s)
 
    double risk=MathAbs(s.entry-s.sl);
    double reward=MathAbs(s.tp-s.entry);
-
    if(risk<=0.0 || reward<=0.0)
       return false;
 
-   s.rr=reward/risk;
+   double minimumRR=InpMinimumRR;
+   if(s.adaptiveProfile>=0 &&
+      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT &&
+      g_activeAdaptiveProfileValid)
+      minimumRR=STB_EffectiveMinimumRR();
 
-   if(s.rr+1e-9<STB_EffectiveMinimumRR())
+   s.rr=reward/risk;
+   if(s.rr+1e-9<minimumRR)
    {
-      Print("STB setup rejected after broker-stop normalization symbol=",s.symbol,
+      Print("STB setup rejected after broker normalization symbol=",s.symbol,
             " dir=",(s.direction>0 ? "BUY":"SELL"),
             " RR=",DoubleToString(s.rr,2),
-            " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2),
+            " minRR=",DoubleToString(minimumRR,2),
             " entry=",DoubleToString(s.entry,digits),
             " sl=",DoubleToString(s.sl,digits),
             " tp=",DoubleToString(s.tp,digits));
@@ -1694,12 +1625,11 @@ bool PreparePendingSetup(Setup &s)
             " SL ",DoubleToString(oldSL,digits)," -> ",DoubleToString(s.sl,digits),
             " TP ",DoubleToString(oldTP,digits)," -> ",DoubleToString(s.tp,digits),
             " RR=",DoubleToString(s.rr,2),
-         " profile=",IntegerToString(s.adaptiveProfile));
+            " owner=RISK");
    }
 
    return true;
 }
-
 //==================================================================
 // RSI + CCI COMPOSITE
 //==================================================================
@@ -3373,47 +3303,93 @@ bool HasManagedPositionDirection(const string symbol,const long positionType)
    return false;
 }
 
-bool CalculateHedgeSL(const string symbol,const long positionType,double &sl)
+bool STB_ProtectionCalculateHedgeSL(const string symbol,
+                                      const long positionType,
+                                      double &sl)
 {
-   SwingPoint highs[];
-   SwingPoint lows[];
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return false;
 
-   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+   double referencePrice=
+      (positionType==POSITION_TYPE_BUY ? tick.ask :
+       positionType==POSITION_TYPE_SELL ? tick.bid : 0.0);
+
+   if(referencePrice<=0.0)
+      return false;
+
+   if(!STB_ProtectionCalculateNearestStructuralSL(
+         symbol,positionType,referencePrice,sl))
+      return false;
+
+   sl=NormalizePrice(symbol,sl);
+   return IsValidSLForPosition(symbol,positionType,sl);
+}
+
+bool STB_RiskAuthorizeMarketHedge(const string symbol,
+                                      const int direction,
+                                      const double volume,
+                                      const double sl)
+{
+   if(symbol=="" || direction==0)
+      return false;
+
+   if(!STB_TradeEnvironmentAllowed() || !IsHedgingAccount())
+      return false;
+   if(!IsSymbolTradable(symbol))
+      return false;
+
+   long tradeMode=SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE);
+   if((direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
+      (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+      return false;
+
+   long orderMode=SymbolInfoInteger(symbol,SYMBOL_ORDER_MODE);
+   if((orderMode & SYMBOL_ORDER_MARKET)!=SYMBOL_ORDER_MARKET ||
+      (orderMode & SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
+      return false;
+
+   if(!IsSpreadAcceptable(symbol))
+      return false;
+
+   double normalizedVolume=NormalizeVolume(symbol,volume);
+   if(normalizedVolume<=0.0)
+      return false;
+
+   long positionType=(direction>0 ? POSITION_TYPE_BUY:POSITION_TYPE_SELL);
+   if(!IsValidSLForPosition(symbol,positionType,sl))
       return false;
 
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
-   double pip=PipSize(symbol);
-   double minDist=TradeMinDistance(symbol);
-
-   if(pip<=0.0 || minDist<=0.0)
+   ENUM_ORDER_TYPE_FILLING filling=ORDER_FILLING_RETURN;
+   if(!STB_GetMarketFilling(symbol,filling))
       return false;
 
-   double buffer=InpSLBufferPips*pip;
+   MqlTradeRequest request={};
+   MqlTradeCheckResult check={};
 
-   if(positionType==POSITION_TYPE_BUY)
-   {
-      if(ArraySize(lows)<=0)
-         return false;
+   request.action=TRADE_ACTION_DEAL;
+   request.symbol=symbol;
+   request.magic=InpMagic;
+   request.volume=normalizedVolume;
+   request.type=(direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
+   request.price=(direction>0 ? tick.ask:tick.bid);
+   request.sl=sl;
+   request.type_filling=filling;
+   request.type_time=ORDER_TIME_GTC;
+   request.comment="STB|HEDGE";
 
-      sl=lows[ArraySize(lows)-1].price-buffer;
-      sl=MathMin(sl,tick.bid-minDist);
-   }
-   else if(positionType==POSITION_TYPE_SELL)
-   {
-      if(ArraySize(highs)<=0)
-         return false;
-
-      sl=highs[ArraySize(highs)-1].price+buffer;
-      sl=MathMax(sl,tick.ask+minDist);
-   }
-   else
+   ResetLastError();
+   if(!OrderCheck(request,check))
       return false;
 
-   sl=NormalizePrice(symbol,sl);
-   return IsValidSLForPosition(symbol,positionType,sl);
+   if(check.retcode!=0 && check.retcode!=TRADE_RETCODE_DONE)
+      return false;
+
+   return true;
 }
 
 bool OneClickHedge()
@@ -3481,7 +3457,7 @@ bool OneClickHedge()
 
    double sl=0.0;
 
-   if(!CalculateHedgeSL(symbol,hedgeType,sl))
+   if(!STB_ProtectionCalculateHedgeSL(symbol,hedgeType,sl))
    {
       Print("STB HEDGE: could not calculate a broker-valid SL on ",symbol);
       return false;
@@ -3503,6 +3479,14 @@ bool OneClickHedge()
       
    
 
+   int hedgeDirection=(hedgeType==POSITION_TYPE_BUY ? 1:-1);
+
+   if(!STB_RiskAuthorizeMarketHedge(symbol,hedgeDirection,volume,sl))
+   {
+      Print("STB HEDGE rejected by centralized risk/safety gate symbol=",symbol);
+      return false;
+   }
+
    trade.SetExpertMagicNumber(InpMagic);
    if(!STB_ConfigureMarketFilling(symbol))
       return false;
@@ -3523,9 +3507,11 @@ bool OneClickHedge()
       return false;
    }
 
-   if(!TradeRetcodeModifySucceeded())
+   if(!TradeRetcodePlacementSucceeded() || trade.ResultDeal()<=0)
    {
-      Print("STB HEDGE server rejected symbol=",symbol,
+      Print("STB HEDGE server did not confirm a market deal symbol=",symbol,
+            " deal=",trade.ResultDeal(),
+            " order=",trade.ResultOrder(),
             " ret=",trade.ResultRetcode()," ",
             trade.ResultRetcodeDescription());
       return false;
@@ -6926,4 +6912,3 @@ void OnChartEvent(const int id,
       return;
    }
 }
-
