@@ -260,3 +260,84 @@ The job is complete only when:
 - [ ] SECTION 18 — OnTradeTransaction
 - [ ] SECTION 19 — OnChartEvent
 - [ ] SECTION 20 — Final Integration / Runtime
+
+
+## RULE 31A — PRE-FLIGHT BEFORE MT5 AGENT
+
+Every Section must be fully prepared and pre-validated before the MetaTrader Agent receives it.
+
+### PRE-FLIGHT — OUR SIDE
+
+1. Read the complete Section and dependencies.
+2. Inspect relevant Git history and baseline.
+3. Check official MQL5/MetaEditor semantics where required.
+4. Prepare the complete intended patch or explicitly confirm NO CODE CHANGE.
+5. Validate identifiers, call paths, state ownership, event flow and affected includes.
+6. Review the final diff for unintended changes.
+7. Compile the prepared Section/change in an authorized compile-capable environment when available.
+
+Do not state that a compile occurred if no compiler actually ran.
+
+### HANDOFF — META TRADER AGENT
+
+Only after PRE-FLIGHT passes, send the Agent Work Order.
+
+The MetaTrader Agent must then:
+- apply the approved change to the existing SmartTradingBot only,
+- compile in the actual MetaEditor environment,
+- rebuild the EX5,
+- load/reload the same Expert,
+- run the required runtime/UI tests,
+- inspect Experts/Journal/TradeTransaction evidence,
+- complete the Section checklist.
+
+### ACCEPTANCE IS TWO-SIDED
+
+A Section is not complete until BOTH are satisfied:
+
+OUR SIDE:
+- [ ] Source/history precheck
+- [ ] Static validation
+- [ ] Diff validation
+- [ ] Preflight compile when technically available
+
+META TRADER SIDE:
+- [ ] Active source confirmed
+- [ ] MetaEditor compile executed
+- [ ] 0 errors
+- [ ] 0 warnings
+- [ ] EX5 rebuilt/loaded
+- [ ] Required runtime tests passed
+- [ ] Evidence recorded
+- [ ] Section checklist completed
+
+Failure on either side means:
+STATUS: NOT COMPLETE
+
+### IMPORTANT
+
+Git history, static checks, CI results, or prior MetaEditor builds are evidence only. They must never be presented as a fresh MetaEditor compile when MetaEditor did not actually execute.
+
+## RULE 32A — INSTALL / RUN / COMPILE AFTER HANDOFF
+
+After receiving the approved Section work order, the MetaTrader Agent owns the environment-specific execution:
+- installation/reload on the existing Expert
+- MetaEditor compile
+- EX5 rebuild
+- attachment/reload on the existing chart
+- runtime validation
+- journal/log capture
+
+Do not create another Expert or parallel runtime environment.
+
+## RULE 33A — THREE-STAGE STATUS
+
+Every Section report must show three distinct states:
+
+PRE-FLIGHT — OUR SIDE
+MT5 EXECUTION — META TRADER AGENT
+FINAL ACCEPTANCE — COMBINED
+
+A Section may only receive:
+SECTION XX — COMPLETE ✅
+when all three stages pass.
