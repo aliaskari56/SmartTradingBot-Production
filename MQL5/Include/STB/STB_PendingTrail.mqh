@@ -103,7 +103,7 @@ string STB_PendingTrailTypeName(const long orderType)
 
 //--- Register a real terminal pending order --------------------------
 // Called ONLY after the terminal confirmed the ticket. The anchor uses
-// the CURRENT M15 extreme (Low[0] for buy / High[0] for sell).
+// the latest CLOSED M15 extreme (Low[1] for buy / High[1] for sell).
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
 {
    if(ticket==0)
@@ -148,8 +148,8 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    int direction=STB_PendingTrailDirection(orderType);
 
    double extreme=(direction>0)
-                  ? iLow(symbol,PERIOD_M15,0)
-                  : iHigh(symbol,PERIOD_M15,0);
+                  ? iLow(symbol,PERIOD_M15,1)
+                  : iHigh(symbol,PERIOD_M15,1);
 
    if(extreme<=0.0)
       return false;
@@ -205,7 +205,7 @@ void STB_PendingTrailLogNoNewExtreme(const ulong ticket,
                                      const string symbol,
                                      const int logIdx)
 {
-   datetime bar=iTime(symbol,PERIOD_M15,0);
+   datetime bar=iTime(symbol,PERIOD_M15,1);
 
    if(bar<=0)
       bar=TimeCurrent();
@@ -271,8 +271,8 @@ bool STB_PendingTrailManageOne(const ulong ticket)
 
    // 1) Read terminal / bar extreme.
    double extreme=(direction>0)
-                  ? iLow(symbol,PERIOD_M15,0)
-                  : iHigh(symbol,PERIOD_M15,0);
+                  ? iLow(symbol,PERIOD_M15,1)
+                  : iHigh(symbol,PERIOD_M15,1);
 
    if(extreme<=0.0)
       return true;
@@ -297,7 +297,7 @@ bool STB_PendingTrailManageOne(const ulong ticket)
 
    if(!STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) || !res.valid)
    {
-      datetime bar=iTime(symbol,PERIOD_M15,0);
+      datetime bar=iTime(symbol,PERIOD_M15,1);
 
       if(bar<=0)
          bar=TimeCurrent();
@@ -377,6 +377,23 @@ bool STB_PendingTrailManageOne(const ulong ticket)
 
    double confirmedEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double confirmedSL=OrderGetDouble(ORDER_SL);
+
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tolerance=MathMax(point*0.5,
+                            tickSize>0.0 ? tickSize*0.5 : point*0.5);
+
+   if(MathAbs(confirmedEntry-res.entry)>tolerance ||
+      MathAbs(confirmedSL-res.sl)>tolerance)
+   {
+      Print("PENDING_TRAIL_MODIFY_NOT_CONFIRMED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " requestedEntry=",DoubleToString(res.entry,digits),
+            " actualEntry=",DoubleToString(confirmedEntry,digits),
+            " requestedSL=",DoubleToString(res.sl,digits),
+            " actualSL=",DoubleToString(confirmedSL,digits),
+            " ret=",trade.ResultRetcode());
+      return true;
+   }
 
    // 7) Commit internal state ONLY after terminal confirmation.
    g_stbPendingTrail[idx].trackedExtreme=extreme;
