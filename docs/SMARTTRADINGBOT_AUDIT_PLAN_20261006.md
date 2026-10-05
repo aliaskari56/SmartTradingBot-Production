@@ -215,3 +215,110 @@ Record:
 ## Git history requirement
 
 This plan is intentionally stored on the repository's main branch so the audit/repair process has a durable, dated reference in Git history. Future implementation commits should reference this plan and preserve a traceable sequence of source changes, compile validation, and runtime validation.
+
+
+## Operational rules — mandatory execution contract
+
+These rules apply to every MetaTrader/Agent audit, repair, compile and runtime-validation step associated with this plan.
+
+### Rule 01 — One production Expert only
+Work only on the existing `SmartTradingBot` Expert. Never create a second Expert, alternate EA, test EA, parallel production path or replacement project.
+
+### Rule 02 — No new backups
+Do not create a new backup, snapshot copy, temporary duplicate source or alternate EX5 as part of the work. Existing historical files may be inspected when needed for recovery or comparison.
+
+### Rule 03 — Same active path
+The MetaTrader/MetaEditor active source path must be discovered and verified before editing. Changes must be made to that active Expert, not to an unrelated copy.
+
+### Rule 04 — Read before write
+Before modifying any section, read the entire relevant section and its directly connected functions/includes. Never patch from an isolated snippet when the surrounding contract is required.
+
+### Rule 05 — Section gate
+Do not move to the next audit section until the current section is:
+1. fully reviewed,
+2. real defects identified,
+3. required fixes applied,
+4. compiled,
+5. verified at 0 errors and 0 warnings.
+
+### Rule 06 — Minimal behavioral diff
+Do not refactor, rename, reorder or cosmetically clean code unless there is a demonstrated functional, safety, correctness, maintainability or compile reason.
+
+### Rule 07 — No invented version
+Never change the version label merely to claim a newer release. Version identity must come from the real source contents/history.
+
+### Rule 08 — Existing history is authoritative
+When versions conflict, compare the actual source, Git history and available file history. Do not assume that the latest filename or EX5 timestamp proves the source version.
+
+### Rule 09 — Compile after every corrective unit
+Every corrective change must be compiled before proceeding. Record the compiler result and affected section.
+
+### Rule 10 — Zero warning target
+The acceptance target is:
+`Result: 0 errors, 0 warnings`
+Warnings must not be ignored merely because the Expert compiles.
+
+### Rule 11 — Safety gates cannot be bypassed
+UI/manual commands, diagnostics, emergency paths or test hooks must not bypass existing risk, safety, broker-distance, SL or execution validation.
+
+### Rule 12 — SL is mandatory
+No supported order/pending path may intentionally submit without a valid initial SL. Any fallback SL must remain within the existing safety contract.
+
+### Rule 13 — Broker geometry is authoritative
+Pending entry, SL and TP must respect tick size, stops level, freeze level, direction and other broker constraints actually exposed by the terminal.
+
+### Rule 14 — Execution must be verified
+Do not treat a trade request as successful merely because a function returned. Inspect the applicable result/retcode and verify the terminal state.
+
+### Rule 15 — No duplicate decision execution
+Tick, Timer, chart events and other event sources must not cause the same logical trading decision to execute twice.
+
+### Rule 16 — Learning cannot see the future
+Adaptive learning must use only permitted historical/closed outcomes. No future candle, future PnL or post-decision information may leak into the decision path.
+
+### Rule 17 — Outcome deduplication
+A closed trade/outcome must not be counted more than once because of repeated transactions, restart, retry or duplicated event delivery.
+
+### Rule 18 — State survives restart correctly
+Restart recovery must restore the required live state without creating duplicate positions, duplicate pending orders, duplicate learning outcomes or stale ownership.
+
+### Rule 19 — Ownership must remain singular
+Scanner, strategy, BPB, execution, pending trail, diagnostics and UI must have clear ownership boundaries. Adding a second execution owner is prohibited.
+
+### Rule 20 — UI must be observable
+Every supported dashboard command must have a traceable path:
+click/event -> command recognition -> handler -> result -> reject reason when applicable.
+
+### Rule 21 — UI test safety
+BUY, SELL and HEDGE may be runtime-tested only through the real safety/risk/broker pipeline. Do not weaken gates merely to prove the button works.
+
+### Rule 22 — Runtime evidence matters
+0/0 compilation is necessary but not sufficient. Final acceptance also requires runtime evidence for initialization, UI events, timer/tick processing and relevant trade-transaction paths.
+
+### Rule 23 — No false completion
+Do not label a section "clean", "safe" or "fully verified" solely from compilation. Distinguish:
+- compile correctness,
+- static logic correctness,
+- runtime verification,
+- broker/execution verification.
+
+### Rule 24 — Preserve forensic evidence
+When a defect, version conflict or accidental corruption is discovered, record its exact path, relevant line/range, observed symptom, cause and resulting correction in the audit history.
+
+### Rule 25 — Git traceability
+All intentional repository changes associated with this plan must have a clear commit message and remain on the designated main branch unless an explicitly authorized project workflow requires otherwise.
+
+### Rule 26 — Production source remains canonical
+Do not silently replace the active source with a different historical version. Any recovery from Git/history must first establish which version is intended and why.
+
+### Rule 27 — No destructive cleanup during audit
+Do not delete existing source/history artifacts merely because they are old, duplicated or inconvenient. Report them unless deletion is explicitly authorized.
+
+### Rule 28 — Final acceptance
+The work is complete only when:
+- the intended source version is identified,
+- every planned section has passed its gate,
+- final compile is 0 errors/0 warnings,
+- EX5 rebuild is confirmed,
+- relevant runtime/UI tests are evidenced,
+- remaining issues are explicitly recorded.
