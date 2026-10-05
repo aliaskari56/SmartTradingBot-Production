@@ -322,3 +322,179 @@ The work is complete only when:
 - EX5 rebuild is confirmed,
 - relevant runtime/UI tests are evidenced,
 - remaining issues are explicitly recorded.
+
+
+## Delivery, checklist and quality-gate protocol — mandatory
+
+### Rule 29 — Section completion checklist must be explicitly ticked
+At the end of every completed Section, maintain a visible checklist and tick every item that was actually completed.
+
+Required checklist:
+
+- [ ] Section fully read from source
+- [ ] Connected functions/includes reviewed
+- [ ] Static logic audit completed
+- [ ] Defects classified by severity
+- [ ] Required fixes applied
+- [ ] Behavioral impact reviewed
+- [ ] Compile executed
+- [ ] 0 errors confirmed
+- [ ] 0 warnings confirmed
+- [ ] Runtime evidence collected where applicable
+- [ ] Section acceptance criteria passed
+- [ ] Section marked COMPLETE
+
+No checkbox may be ticked by assumption. A box is checked only when evidence exists.
+
+### Rule 30 — Section status must be persisted
+After each Section reaches COMPLETE, update the audit record/history so the completed Section remains visibly marked.
+
+Use a status block such as:
+
+`SECTION 01 — COMPLETE ✅`
+
+and retain:
+- exact source line range
+- date/time of completion
+- defects found
+- fixes
+- compiler result
+- runtime result when applicable
+- residual issues, if any
+
+### Rule 31 — Every delivered file/instruction must state its governing rules
+Whenever a file, patch, instruction block or Agent task is sent for execution, prepend a compact compliance header:
+
+`RULES APPLIED: Rule XX, Rule YY, ...`
+
+Also state:
+- target Expert
+- target file/path
+- target Section
+- allowed scope of change
+- compile requirement
+- runtime requirement when applicable
+
+This prevents a file from being executed without its corresponding contract.
+
+### Rule 32 — All Agent-facing files must be MetaTrader-Agent-ready
+Any file intended for the MetaTrader Agent must be written as an executable, unambiguous work order for that Agent.
+
+It must contain, where applicable:
+1. objective
+2. target path
+3. exact scope
+4. exact constraints
+5. inspection requirements
+6. repair requirements
+7. compile command/acceptance criteria
+8. runtime test requirements
+9. evidence to report
+10. completion checklist
+
+No vague prose such as "fix this" without acceptance criteria is permitted.
+
+### Rule 33 — Advanced professional quality standard
+Every Section must be audited to a professional production standard, not merely compiled.
+
+For each Section evaluate, as relevant:
+- correctness
+- safety
+- determinism
+- state integrity
+- ownership boundaries
+- event ordering
+- failure handling
+- broker compatibility
+- restart behavior
+- observability
+- performance
+- maintainability
+- edge cases
+- regression risk
+
+Improvements must be technically justified and must preserve intended trading semantics.
+
+### Rule 34 — "Upgrade" means verified engineering improvement
+The instruction to make every Section "very precise, professional, advanced and beautiful" means:
+- improve clarity of control flow where safe
+- strengthen validation where a real gap exists
+- improve diagnostics and observability
+- remove ambiguity in state transitions
+- harden edge-case handling
+- preserve clean naming and structure when modifying code
+- keep comments/contracts accurate
+
+It does NOT authorize cosmetic rewrites, unnecessary abstraction, behavior changes without evidence, or risky refactors.
+
+### Rule 35 — Evidence-first acceptance
+A Section is COMPLETE only when the Agent can show evidence for the claims made.
+
+Minimum evidence:
+- source/version identification
+- relevant line range
+- compile result
+- exact errors/warnings if any occurred
+- fix summary
+- runtime evidence for runtime-sensitive behavior
+
+### Rule 36 — No hidden work
+The Agent must not silently skip an item because it appears difficult or because the compiler is already clean.
+
+Skipped checks must be explicitly listed as:
+`NOT VERIFIED`
+with the reason and required next action.
+
+### Rule 37 — One Section, one gate
+Do not batch multiple Sections into one unverified "global pass". Each Section must receive its own status and acceptance gate.
+
+### Rule 38 — Final master checklist
+At final completion, all planned Sections must appear in one master checklist:
+
+- [ ] SECTION 01 — Header / Inputs / Globals
+- [ ] SECTION 02 — Structs / Identity / State
+- [ ] SECTION 03 — Adaptive Learning
+- [ ] SECTION 04 — Persistence / Restart
+- [ ] SECTION 05 — Utility / Broker Helpers
+- [ ] SECTION 06 — Swing / Closed-Bar
+- [ ] SECTION 07 — Pending Setup / SL / TP / RR
+- [ ] SECTION 08 — Trend / Structure / FVG / OB
+- [ ] SECTION 09 — Signal / Strategy / Gates
+- [ ] SECTION 10 — Exposure / Position State
+- [ ] SECTION 11 — Hedge / Emergency SL
+- [ ] SECTION 12 — Trailing / Pending Lifetime
+- [ ] SECTION 13 — OrderCheck / Execution
+- [ ] SECTION 14 — Scanner
+- [ ] SECTION 15 — Dashboard / UI
+- [ ] SECTION 16 — OnInit / OnDeinit
+- [ ] SECTION 17 — OnTick / OnTimer
+- [ ] SECTION 18 — OnTradeTransaction
+- [ ] SECTION 19 — OnChartEvent
+- [ ] SECTION 20 — Final Integration / Runtime
+
+Only checked items count as completed.
+
+### Rule 39 — File delivery format
+Every Agent-facing file should begin with:
+
+`SMARTTRADINGBOT — AGENT WORK ORDER`
+`TARGET: SmartTradingBot`
+`SECTION: <section number and name>`
+`RULES APPLIED: <rule numbers>`
+`TARGET PATH: <exact active path>`
+
+and end with:
+
+`ACCEPTANCE: 0 errors, 0 warnings + required runtime evidence`
+
+### Rule 40 — Visual/professional documentation standard
+Audit documents, checklists and Agent work orders must be structured, readable and consistent:
+- clear section numbering
+- explicit acceptance gates
+- compact evidence tables where useful
+- no ambiguous wording
+- no contradictory instructions
+- no missing paths
+- no unsupported completion claims
+
+The documentation itself is part of the engineering audit trail and must remain production-quality.
