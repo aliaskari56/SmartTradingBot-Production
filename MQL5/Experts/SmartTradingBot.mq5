@@ -3722,6 +3722,8 @@ int STB_ExecutionHedgeCommand()
          " position=",positionTicket);
 
    return STB_HEDGE_EXECUTED;
+}
+
 //==================================================================
 // STOP VALIDATION
 //==================================================================
