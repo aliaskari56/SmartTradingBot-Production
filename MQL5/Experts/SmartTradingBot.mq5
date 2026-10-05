@@ -4627,19 +4627,27 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 
 
 bool STB_RiskAuthorizePending(Setup &s,
-                                  const bool manual,
-                                  double &volume,
-                                  ENUM_ORDER_TYPE_TIME &typeTime,
-                                  datetime &expiration)
+                               const bool manual,
+                               double &volume,
+                               ENUM_ORDER_TYPE_TIME &typeTime,
+                               datetime &expiration,
+                               int &pendingMaxBars,
+                               double &entryBufferPips,
+                               double &slBufferPips)
 {
    volume=0.0;
    typeTime=ORDER_TIME_GTC;
    expiration=0;
+   pendingMaxBars=MathMax(0,InpMaxPendingBars);
+   entryBufferPips=MathMax(0.0,InpEntryBufferPips);
+   slBufferPips=MathMax(0.0,InpSLBufferPips);
 
    if(!s.valid)
       return STB_LogPlaceReject(s,"INVALID_CANDIDATE");
-   if(!g_autoTrading && !manual)
-      return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
+
+   if(!manual &&
+      (!InpAutoTrading || InpDiagnosticM15Mode || !g_autoTrading))
+      return STB_LogPlaceReject(s,"AUTO_TRADING_LOCKED");
    if(!IsDirectionTradable(s.symbol,s.direction))
       return STB_LogPlaceReject(s,"DIRECTION_NOT_TRADABLE");
    if(!IsSpreadAcceptable(s.symbol))
@@ -4653,9 +4661,21 @@ bool STB_RiskAuthorizePending(Setup &s,
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
       return STB_LogPlaceReject(s,"ACCOUNT_ORDER_LIMIT");
 
-   STB_AP_SetActive(s.adaptiveProfile);
+   bool profileActive=
+      s.adaptiveProfile>=0 &&
+      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT;
+
+   if(profileActive)
+      STB_AP_SetActive(s.adaptiveProfile);
+
+   pendingMaxBars=STB_EffectiveMaxPendingBars();
+   entryBufferPips=STB_EffectiveEntryBuffer();
+   slBufferPips=STB_EffectiveSLBuffer();
+
    bool normalized=PreparePendingSetup(s);
-   STB_AP_ClearActive();
+
+   if(profileActive)
+      STB_AP_ClearActive();
 
    if(!normalized)
       return STB_LogPlaceReject(s,"BROKER_STOP_NORMALIZATION_FAILED");
@@ -4674,7 +4694,9 @@ bool STB_RiskAuthorizePending(Setup &s,
       TimeCurrent()-(datetime)lastSetup<InpSetupCooldownMinutes*60)
       return STB_LogPlaceReject(s,"SETUP_COOLDOWN");
 
-   STB_AP_SetActive(s.adaptiveProfile);
+   if(profileActive)
+      STB_AP_SetActive(s.adaptiveProfile);
+
    if(InpUseRiskSizing)
       volume=CalculateOrderVolumeByRisk(s);
    else
@@ -4682,7 +4704,9 @@ bool STB_RiskAuthorizePending(Setup &s,
                              InpBaseLots*(s.trendAligned ?
                              InpTrendLotMultiplier:
                              InpUniversalLotMultiplier));
-   STB_AP_ClearActive();
+
+   if(profileActive)
+      STB_AP_ClearActive();
 
    if(volume<=0.0)
       return STB_LogPlaceReject(s,
@@ -4696,9 +4720,17 @@ bool STB_RiskAuthorizePending(Setup &s,
       volumeLimit+1e-9)
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
 
-   STB_AP_SetActive(s.adaptiveProfile);
+   if(profileActive)
+      STB_AP_SetActive(s.adaptiveProfile);
+
+   pendingMaxBars=STB_EffectiveMaxPendingBars();
+   entryBufferPips=STB_EffectiveEntryBuffer();
+   slBufferPips=STB_EffectiveSLBuffer();
+
    bool lifetimeOK=GetPendingLifetime(s.symbol,typeTime,expiration);
-   STB_AP_ClearActive();
+
+   if(profileActive)
+      STB_AP_ClearActive();
 
    if(!lifetimeOK)
       return STB_LogPlaceReject(s,"PENDING_EXPIRATION_UNSUPPORTED");
@@ -4719,15 +4751,28 @@ bool ExecuteSetup(Setup &s,const bool manual)
    double volume=0.0;
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
+   int pendingMaxBars=MathMax(0,InpMaxPendingBars);
+   double entryBufferPips=MathMax(0.0,InpEntryBufferPips);
+   double slBufferPips=MathMax(0.0,InpSLBufferPips);
 
-   if(!STB_RiskAuthorizePending(s,manual,volume,typeTime,expiration))
+   if(!STB_RiskAuthorizePending(s,manual,volume,typeTime,expiration,
+                                pendingMaxBars,entryBufferPips,slBufferPips))
       return false;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
    trade.SetAsyncMode(false);
 
-   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile);
+   string comment="STB|"+(s.direction>0 ? "B":"S");
+   if(s.adaptiveProfile>=0 &&
+      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
+      comment+="|P"+IntegerToString(s.adaptiveProfile);
+   else
+      comment+="|M";
+
+   comment+="|L"+IntegerToString(pendingMaxBars)+
+            "|EB"+DoubleToString(entryBufferPips,8)+
+            "|SB"+DoubleToString(slBufferPips,8);
 
    bool ok=(s.direction>0)
            ? trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment)
@@ -4752,12 +4797,17 @@ bool ExecuteSetup(Setup &s,const bool manual)
    }
 
    SetLastSetupTime(s.symbol,s.direction,s.setupTime);
-   STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
+
+   if(s.adaptiveProfile>=0 &&
+      s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
+      STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
 
    ulong placedOrder=trade.ResultOrder();
    if(placedOrder>0)
    {
-      STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
+      if(s.adaptiveProfile>=0 &&
+         s.adaptiveProfile<STB_ADAPTIVE_PROFILE_COUNT)
+         STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
 
       double orderRiskMoney=0.0;
       ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
