@@ -3587,7 +3587,7 @@ bool STB_ExecuteMarketHedge(const STB_MarketHedgeRequest &request,
    return true;
 }
 
-bool OneClickHedge()
+bool STB_ExecutionHedgeCommand()
 {
    if(!InpAllowOneClickHedge)
    {
@@ -5048,14 +5048,11 @@ bool ExecuteSetup(Setup &s,const bool manual)
    return true;
 }
 
-//==================================================================
-// WATCHLIST SCANNER
-//==================================================================
 
-//--- Manual BUY STOP / SELL STOP UI command ----------------------
-// Button -> UI event -> command -> existing risk -> existing safety
-// -> existing execution -> terminal pending -> PendingTrail.Register
-bool STB_ManualPendingCommand(const string symbol,const int direction)
+//--- Manual BUY STOP / SELL STOP request -> Execution -------------
+// UI provides only symbol + direction. Request construction belongs to the
+// Execution request coordinator; actual creation remains ExecuteSetup().
+bool STB_ExecutionManualPendingCommand(const string symbol,const int direction)
 {
    if(symbol=="" || direction==0)
       return false;
@@ -5104,6 +5101,11 @@ bool STB_ManualPendingCommand(const string symbol,const int direction)
 
    return ExecuteSetup(s,true);
 }
+
+//==================================================================
+// WATCHLIST SCANNER
+//==================================================================
+
 
 
 bool STB_IsDuplicateSymbol(const string &symbols[],
@@ -7320,7 +7322,7 @@ void OnChartEvent(const int id,
 
    if(sparam==g_prefix+"BUYSTOP")
    {
-      bool ok=STB_ManualPendingCommand(_Symbol,1);
+      bool ok=STB_ExecutionManualPendingCommand(_Symbol,1);
       Print("STB UI RESULT command=BUY_STOP status=",
             ok ? "EXECUTED":"REJECTED");
       return;
@@ -7328,7 +7330,7 @@ void OnChartEvent(const int id,
 
    if(sparam==g_prefix+"SELLSTOP")
    {
-      bool ok=STB_ManualPendingCommand(_Symbol,-1);
+      bool ok=STB_ExecutionManualPendingCommand(_Symbol,-1);
       Print("STB UI RESULT command=SELL_STOP status=",
             ok ? "EXECUTED":"REJECTED");
       return;
@@ -7367,7 +7369,7 @@ void OnChartEvent(const int id,
 
    if(sparam==hedgeName)
    {
-      bool ok=OneClickHedge();
+      bool ok=STB_ExecutionHedgeCommand();
       Print("STB UI RESULT command=HEDGE status=",
             ok ? "EXECUTED":"REJECTED");
       return;
