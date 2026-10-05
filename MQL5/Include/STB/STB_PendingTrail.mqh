@@ -211,8 +211,20 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
 
    // PENDING_DISTANCE: resolved offsets and broker minimum distance.
    STBPendingResolution res;
+   bool profileActivated=
+      st.profileId>=0 &&
+      st.profileId<STB_ADAPTIVE_PROFILE_COUNT;
 
-   if(STB_ResolvePendingDistance(symbol,direction,extreme,0.0,res) && res.valid)
+   if(profileActivated)
+      STB_AP_SetActive(st.profileId);
+
+   bool distanceOK=
+      STB_ResolvePendingDistance(symbol,direction,st.trackedExtreme,0.0,res);
+
+   if(profileActivated)
+      STB_AP_ClearActive();
+
+   if(distanceOK && res.valid)
    {
       Print("PENDING_DISTANCE ticket=",IntegerToString((int)ticket),
             " symbol=",symbol,
