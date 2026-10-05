@@ -1037,7 +1037,10 @@ void STB_AdaptiveRecordClosedDeal(const string symbol,
                                   const int profileId,
                                   const double rMultiple)
 {
-   if(!InpAdaptiveLearning || direction==0)
+   if(!InpAdaptiveLearning ||
+      direction==0 ||
+      profileId<0 ||
+      profileId>=STB_ADAPTIVE_PROFILE_COUNT)
       return;
 
    if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
