@@ -2817,28 +2817,6 @@ bool BuildSetup(const string symbol,
    STB_AP_SelectActive(symbol,direction);
    s.adaptiveProfile=g_activeAdaptiveProfileId;
 
-   if(!IsDirectionTradable(symbol,direction))
-   {
-      long tradeMode=SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE);
-      long orderMode=SymbolInfoInteger(symbol,SYMBOL_ORDER_MODE);
-      long stops=SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL);
-      long freeze=SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
-      long expiration=SymbolInfoInteger(symbol,SYMBOL_EXPIRATION_MODE);
-
-      Print("STB CONTRACT REJECT symbol=",symbol,
-            " dir=",(direction>0 ? "BUY":"SELL"),
-            " tradeMode=",tradeMode,
-            " orderMode=",orderMode,
-            " stopsPts=",stops,
-            " freezePts=",freeze,
-            " expirationMode=",expiration);
-
-      return STB_BuildReject(symbol,direction,"DIRECTION_NOT_TRADABLE");
-   }
-
-   if(!IsSpreadAcceptable(symbol))
-      return STB_BuildReject(symbol,direction,"SPREAD_FILTER");
-
    OscillatorState osc;
    ZeroMemory(osc);
 
@@ -2855,13 +2833,6 @@ bool BuildSetup(const string symbol,
       if(direction<0 && !osc.sellConfirmed)
          return STB_BuildReject(symbol,direction,"OSCILLATOR_SELL_NOT_CONFIRMED");
    }
-
-   datetime lastSetup=GetLastSetupTime(symbol,direction);
-
-   if(InpSetupCooldownMinutes>0 &&
-      lastSetup>0 &&
-      TimeCurrent()-(datetime)lastSetup<InpSetupCooldownMinutes*60)
-      return STB_BuildReject(symbol,direction,"SETUP_COOLDOWN");
 
    TrendInfo ti=GetH4Trend(symbol);
 
@@ -4628,12 +4599,18 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 }
 
 
-bool ExecuteSetup(Setup &s,const bool manual)
+bool STB_RiskAuthorizePending(Setup &s,
+                                  const bool manual,
+                                  double &volume,
+                                  ENUM_ORDER_TYPE_TIME &typeTime,
+                                  datetime &expiration)
 {
-   // EXECUTION OWNER CONTRACT: new pending exposure only.
-   if(!s.valid)
-      return false;
+   volume=0.0;
+   typeTime=ORDER_TIME_GTC;
+   expiration=0;
 
+   if(!s.valid)
+      return STB_LogPlaceReject(s,"INVALID_CANDIDATE");
    if(!g_autoTrading && !manual)
       return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
    if(!IsDirectionTradable(s.symbol,s.direction))
@@ -4670,9 +4647,7 @@ bool ExecuteSetup(Setup &s,const bool manual)
       TimeCurrent()-(datetime)lastSetup<InpSetupCooldownMinutes*60)
       return STB_LogPlaceReject(s,"SETUP_COOLDOWN");
 
-   double volume=0.0;
    STB_AP_SetActive(s.adaptiveProfile);
-
    if(InpUseRiskSizing)
       volume=CalculateOrderVolumeByRisk(s);
    else
@@ -4680,7 +4655,6 @@ bool ExecuteSetup(Setup &s,const bool manual)
                              InpBaseLots*(s.trendAligned ?
                              InpTrendLotMultiplier:
                              InpUniversalLotMultiplier));
-
    STB_AP_ClearActive();
 
    if(volume<=0.0)
@@ -4695,9 +4669,6 @@ bool ExecuteSetup(Setup &s,const bool manual)
       volumeLimit+1e-9)
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
 
-   ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
-   datetime expiration=0;
-
    STB_AP_SetActive(s.adaptiveProfile);
    bool lifetimeOK=GetPendingLifetime(s.symbol,typeTime,expiration);
    STB_AP_ClearActive();
@@ -4707,6 +4678,23 @@ bool ExecuteSetup(Setup &s,const bool manual)
 
    if(!STB_OrderCheckDiagnoseAndCheck(s,volume,typeTime,expiration))
       return STB_LogPlaceReject(s,"ORDERCHECK_REJECT");
+
+   return true;
+}
+
+// EXECUTION OWNER CONTRACT:
+// Creates NEW pending exposure only. It does not discover candidates.
+bool ExecuteSetup(Setup &s,const bool manual)
+{
+   if(!s.valid)
+      return false;
+
+   double volume=0.0;
+   ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
+   datetime expiration=0;
+
+   if(!STB_RiskAuthorizePending(s,manual,volume,typeTime,expiration))
+      return false;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
@@ -4720,7 +4708,6 @@ bool ExecuteSetup(Setup &s,const bool manual)
 
    if(!ok)
       return STB_LogPlaceReject(s,"PLACEMENT_REQUEST_REJECTED");
-
    if(!TradeRetcodePlacementSucceeded())
       return STB_LogPlaceReject(s,"PLACEMENT_RETCODE_REJECT");
 
@@ -4728,14 +4715,12 @@ bool ExecuteSetup(Setup &s,const bool manual)
    STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
 
    ulong placedOrder=trade.ResultOrder();
-
    if(placedOrder>0)
    {
       STB_AdaptiveRememberOrderProfile(placedOrder,s.adaptiveProfile);
 
       double orderRiskMoney=0.0;
       ENUM_ORDER_TYPE calcType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
-
       if(OrderCalcProfit(calcType,s.symbol,volume,s.entry,s.sl,orderRiskMoney))
          STB_AdaptiveRememberOrderRisk(placedOrder,MathAbs(orderRiskMoney));
 
@@ -4744,14 +4729,8 @@ bool ExecuteSetup(Setup &s,const bool manual)
 
    STB_AdaptiveRecordSetup(s,true);
 
-   Print("STB ORDER CREATED symbol=",s.symbol," ",
-         (s.direction>0 ? "BUY_STOP":"SELL_STOP"),
-         " owner=EXECUTION order=",IntegerToString((int)trade.ResultOrder()),
-         " entry=",DoubleToString(s.entry,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-         " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-         " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-         " RR=",DoubleToString(s.rr,2));
-
+   Print("STB ORDER CREATED symbol=",s.symbol,
+         " owner=EXECUTION order=",IntegerToString((int)trade.ResultOrder()));
    return true;
 }
 
