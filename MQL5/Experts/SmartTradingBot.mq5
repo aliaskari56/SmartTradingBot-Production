@@ -3254,43 +3254,45 @@ bool IsManagedOrder(const ulong ticket)
    return false;
 }
 
-bool HasManagedExposure(const string symbol)
+// EXECUTION exposure predicate.
+// Intentionally independent of Management enable/disable inputs.
+// A position/order owned by this EA or explicitly manual-owned still blocks
+// the one-setup-per-symbol execution invariant even when management is off.
+bool STB_HasExecutionExposure(const string symbol)
 {
-   if(InpOneSetupPerSymbol)
+   if(!InpOneSetupPerSymbol || symbol=="")
+      return false;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
    {
-      for(int i=PositionsTotal()-1;i>=0;i--)
-      {
-         ulong ticket=PositionGetTicket(i);
+      ulong ticket=PositionGetTicket(i);
 
-         if(ticket==0)
-            continue;
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
 
-         if(!PositionSelectByTicket(ticket))
-            continue;
+      if(PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
 
-         if(PositionGetString(POSITION_SYMBOL)!=symbol)
-            continue;
+      STB_OWNER_CLASS owner=STB_GetPositionOwner(ticket);
 
-         if(IsManagedPosition(ticket))
-            return true;
-      }
+      if(owner==STB_OWNER_EA || owner==STB_OWNER_MANUAL)
+         return true;
+   }
 
-      for(int i=OrdersTotal()-1;i>=0;i--)
-      {
-         ulong ticket=OrderGetTicket(i);
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong ticket=OrderGetTicket(i);
 
-         if(ticket==0)
-            continue;
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
 
-         if(!OrderSelect(ticket))
-            continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol)
+         continue;
 
-         if(OrderGetString(ORDER_SYMBOL)!=symbol)
-            continue;
+      STB_OWNER_CLASS owner=STB_GetOrderOwner(ticket);
 
-         if(IsManagedOrder(ticket))
-            return true;
-      }
+      if(owner==STB_OWNER_EA || owner==STB_OWNER_MANUAL)
+         return true;
    }
 
    return false;
@@ -4861,7 +4863,7 @@ bool STB_RiskAuthorizePending(Setup &s,
       return STB_LogPlaceReject(s,"DIRECTION_NOT_TRADABLE");
    if(!IsSpreadAcceptable(s.symbol))
       return STB_LogPlaceReject(s,"SPREAD_FILTER");
-   if(HasManagedExposure(s.symbol))
+   if(STB_HasExecutionExposure(s.symbol))
       return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_EXISTS");
    if(!STB_TradeEnvironmentAllowed())
       return STB_LogPlaceReject(s,"TRADE_PERMISSION");
@@ -5279,7 +5281,7 @@ int STB_ProcessExecutionCandidates(Setup &candidates[])
          !STB_MarkExecutionSymbol(processedSymbols,symbol))
          continue;
 
-      if(HasManagedExposure(symbol))
+      if(STB_HasExecutionExposure(symbol))
          continue;
 
       int buyIndex=STB_FindCandidateIndex(candidates,ArraySize(candidates),symbol,1);
