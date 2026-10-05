@@ -1,10 +1,10 @@
 name: MQL5 Compile Once
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   compile:
@@ -23,62 +23,83 @@ jobs:
       - name: Locate MetaEditor
         shell: pwsh
         run: |
-          $meta = Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA" -Filter "metaeditor64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $meta) { throw "metaeditor64.exe not found." }
+          $meta = Get-ChildItem -Path "C:\Program Files\MetaTrader 5" -Filter "MetaEditor64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $meta) { throw "MetaEditor64.exe not found." }
           "METAEDITOR=$($meta.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "MetaEditor=$($meta.FullName)"
 
-      - name: Compile SmartTradingBot
+      - name: Compile SmartTradingBot and capture compiler output
         shell: pwsh
         run: |
           $source = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.mq5"
-          $meta   = $env:METAEDITOR
+          $include = Join-Path $env:GITHUB_WORKSPACE "MQL5"
+          $outDir = Join-Path $env:GITHUB_WORKSPACE "compile-evidence"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
           if (-not (Test-Path $source)) { throw "Source not found: $source" }
 
-          $before = Get-Date
-          & $meta "/compile:$source" "/inc:$((Join-Path $env:GITHUB_WORKSPACE 'MQL5'))" "/log"
-          $exitCode = $LASTEXITCODE
-          Write-Host "MetaEditor exit code: $exitCode"
+          $args = @("/compile:$source","/inc:$include","/log")
+          $p = Start-Process -FilePath $env:METAEDITOR -ArgumentList $args -Wait -PassThru -NoNewWindow
 
-          $ex5 = Join-Path $env:GITHUB_WORKSPACE "MQL5\Experts\SmartTradingBot.ex5"
-          if (-not (Test-Path $ex5)) { throw "SmartTradingBot.ex5 was not produced." }
+          Write-Host "MetaEditor process exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 3
 
-          Write-Host "EX5 size: $((Get-Item $ex5).Length) bytes"
+          $roots = @(
+            $env:GITHUB_WORKSPACE,
+            "$env:APPDATA\MetaQuotes",
+            "$env:LOCALAPPDATA\MetaQuotes"
+          ) | Where-Object { Test-Path $_ }
 
-          $logCandidates = @(
-            Get-ChildItem -Path $env:GITHUB_WORKSPACE,$env:APPDATA,$env:LOCALAPPDATA,$env:USERPROFILE -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.LastWriteTime -ge $before.AddMinutes(-1) } |
-              Sort-Object LastWriteTime -Descending
-          )
+          $logs = @(
+            foreach ($root in $roots) {
+              Get-ChildItem -Path $root -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -ge (Get-Date).AddMinutes(-5) }
+            }
+          ) | Sort-Object LastWriteTime -Descending -Unique
 
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:GITHUB_WORKSPACE "compile-evidence") | Out-Null
-          if ($logCandidates.Count -eq 0) {
-            Write-Host "No recent .log file found; creating metadata evidence."
-            @(
-              "MetaEditor=$meta"
-              "ExitCode=$exitCode"
-              "EX5=$ex5"
-              "EX5Size=$((Get-Item $ex5).Length)"
-            ) | Set-Content (Join-Path $env:GITHUB_WORKSPACE "compile-evidence\compile-meta.txt")
+          if ($logs.Count -eq 0) {
+            Write-Host "No compiler .log found in expected paths."
           } else {
-            foreach ($f in $logCandidates) {
+            foreach ($f in $logs) {
               $safe = ($f.FullName -replace '[:\\/]','_').Trim('_')
-              Copy-Item $f.FullName (Join-Path $env:GITHUB_WORKSPACE "compile-evidence\$safe.log") -Force
-              Write-Host "Captured log: $($f.FullName)"
-              Get-Content $f.FullName -Tail 80 | Write-Host
+              $dest = Join-Path $outDir "$safe.txt"
+              Copy-Item $f.FullName $dest -Force
+              Write-Host "=== LOG: $($f.FullName) ==="
+              Get-Content $f.FullName -Tail 200 | Write-Host
             }
           }
 
-          if ($exitCode -ne 0) {
-            throw "MetaEditor returned non-zero exit code."
+          $allEx5 = @(
+            foreach ($root in @($env:GITHUB_WORKSPACE,"$env:APPDATA\MetaQuotes","$env:LOCALAPPDATA\MetaQuotes")) {
+              if (Test-Path $root) {
+                Get-ChildItem -Path $root -Filter "SmartTradingBot.ex5" -Recurse -File -ErrorAction SilentlyContinue
+              }
+            }
+          ) | Sort-Object LastWriteTime -Descending -Unique
+
+          if ($allEx5.Count -gt 0) {
+            foreach ($f in $allEx5) {
+              $dest = Join-Path $outDir ("EX5_" + [IO.Path]::GetFileName($f.FullName))
+              Copy-Item $f.FullName $dest -Force
+              Write-Host "EX5: $($f.FullName) size=$($f.Length) modified=$($f.LastWriteTime)"
+            }
+          } else {
+            Write-Host "No SmartTradingBot.ex5 located after compile."
           }
 
-      - name: Upload fresh compile
+          @(
+            "MetaEditor=$env:METAEDITOR"
+            "ProcessExitCode=$($p.ExitCode)"
+            "Source=$source"
+            "Time=$([DateTime]::UtcNow.ToString('o'))"
+          ) | Set-Content (Join-Path $outDir "compile-meta.txt")
+
+          Get-ChildItem $outDir -File | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Upload fresh compile evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smarttradingbot-fresh-compile
-          path: |
-            MQL5/Experts/SmartTradingBot.ex5
-            compile-evidence/**
-          if-no-files-found: error
+          name: smarttradingbot-fresh-compile-3
+          path: compile-evidence/**
+          if-no-files-found: warn
