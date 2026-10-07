@@ -104,8 +104,7 @@ input double  InpTrendlineTolerancePips = 10.0;
 input group "=== TRAILING ==="
 input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
 input double  InpTrailStartPips         = 150.0;
-input int     InpTrailCandleShift       = 5;
-input double  InpTrailBufferPips        = 1.0;
+input double  InpTrailDistancePips      = 30.0;  // live trailing distance from Bid/Ask
 
 input group "=== PENDING TRAIL (SAFE INTEGRATION) ==="
 input bool    InpPendingTrail           = true;  // STB_PendingTrail + STB_PendingDistanceResolver services
@@ -3978,30 +3977,137 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips)
 }
 
 //==================================================================
-// AUTO +50 -> +30
 //==================================================================
-
-void AutoProfitProtection()
+// UNIFIED LIVE POSITION PROTECTION
+//==================================================================
+//
+// Single owner for automatic Position SL management:
+//
+//   profit < +50  : no automatic profit-lock move
+//   profit >= +50 : lock +30 pips from Entry
+//   profit >= +150: live trailing at 30 pips from Bid/Ask
+//
+// BUY  : trailing SL = Bid - distance
+// SELL : trailing SL = Ask + distance
+//
+// The SL may ONLY move in the profitable direction.
+// No M15 candle, GlobalVariable trail timestamp, or candle-shift state
+// participates in this decision.
+//
+bool ManagePositionProtection(const ulong ticket)
 {
-   for(int i=PositionsTotal()-1;i>=0;i--)
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+
+   if(!IsManagedPosition(ticket))
+      return false;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long type=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+
+   double pip=PipSize(symbol);
+   if(pip<=0.0 || entry<=0.0)
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return false;
+
+   double profit=0.0;
+   if(type==POSITION_TYPE_BUY)
+      profit=(tick.bid-entry)/pip;
+   else if(type==POSITION_TYPE_SELL)
+      profit=(entry-tick.ask)/pip;
+   else
+      return false;
+
+   // Below +50 the automatic profit lock/trailing engine does not move SL.
+   // If the position has no SL at all, the structural/emergency protection
+   // remains responsible for the initial safety SL.
+   if(profit < InpAutoTriggerPips)
    {
-      ulong ticket=PositionGetTicket(i);
+      if(currentSL<=0.0)
+         return EnsureInitialSL(ticket);
 
-      if(ticket==0 || !IsManagedPosition(ticket))
-         continue;
-
-      PositionSelectByTicket(ticket);
-
-      string symbol=PositionGetString(POSITION_SYMBOL);
-      long type=PositionGetInteger(POSITION_TYPE);
-      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-
-      double profit=PositionProfitPips(symbol,type,entry);
-      double locked=GetLockedPips(ticket);
-
-      if(profit>=InpAutoTriggerPips && locked<InpAutoLockPips)
-         ApplyProfitLock(ticket,InpAutoLockPips);
+      return true;
    }
+
+   double desiredSL=0.0;
+   string mode="LOCK";
+
+   if(profit >= InpTrailStartPips)
+   {
+      double distancePips=MathMax(InpAutoLockPips,InpTrailDistancePips);
+      double distance=distancePips*pip;
+
+      if(type==POSITION_TYPE_BUY)
+         desiredSL=NormalizePrice(symbol,tick.bid-distance);
+      else
+         desiredSL=NormalizePrice(symbol,tick.ask+distance);
+
+      mode="LIVE_TRAIL";
+   }
+   else
+   {
+      double lockPips=InpAutoLockPips;
+
+      if(type==POSITION_TYPE_BUY)
+         desiredSL=NormalizePrice(symbol,entry+lockPips*pip);
+      else
+         desiredSL=NormalizePrice(symbol,entry-lockPips*pip);
+   }
+
+   if(desiredSL<=0.0)
+      return false;
+
+   // Never move the SL backwards.
+   if(currentSL>0.0)
+   {
+      if(type==POSITION_TYPE_BUY && desiredSL<=currentSL)
+         return true;
+
+      if(type==POSITION_TYPE_SELL && desiredSL>=currentSL)
+         return true;
+   }
+
+   // Align with the broker's minimum tick size and avoid sending a request
+   // for a numerically unchanged SL.
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize>0.0 && currentSL>0.0)
+   {
+      if(MathAbs(desiredSL-currentSL)<tickSize)
+         return true;
+   }
+
+   if(!IsValidSLForPosition(symbol,type,desiredSL))
+   {
+      Print("STB AUTO SL broker geometry rejected ticket=",ticket,
+            " symbol=",symbol,
+            " mode=",mode,
+            " profitPips=",DoubleToString(profit,1),
+            " desiredSL=",DoubleToString(desiredSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " bid=",DoubleToString(tick.bid,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " ask=",DoubleToString(tick.ask,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
+   }
+
+   bool result=ModifyPositionSL(ticket,desiredSL);
+
+   if(result)
+   {
+      Print("STB AUTO SL UPDATED ticket=",ticket,
+            " symbol=",symbol,
+            " mode=",mode,
+            " type=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " profitPips=",DoubleToString(profit,1),
+            " desiredSL=",DoubleToString(desiredSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " bid=",DoubleToString(tick.bid,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " ask=",DoubleToString(tick.ask,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+   }
+
+   return result;
 }
 
 //==================================================================
@@ -4041,127 +4147,6 @@ int STB_ManagementSavePlus20Command()
    return completed;
 }
 
-
-//==================================================================
-// M15 CLOSED-CANDLE TRAILING
-//==================================================================
-
-bool TrailPositionOnClosedCandle(const ulong ticket)
-{
-   // Trailing is intentionally disabled until the position reaches
-   // +InpTrailStartPips profit. Before that point the +50 -> +30
-   // profit lock is the only automatic SL movement.
-   if(ticket==0 || !PositionSelectByTicket(ticket))
-      return false;
-
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   long type=PositionGetInteger(POSITION_TYPE);
-   double currentSL=PositionGetDouble(POSITION_SL);
-   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-
-   double profit=PositionProfitPips(symbol,type,entry);
-
-   if(profit < InpTrailStartPips)
-      return false;
-
-   double pip=PipSize(symbol);
-
-   if(pip<=0.0)
-      return false;
-
-   // Use the 5th CLOSED candle on the configured trailing timeframe.
-   // Shift 1 = latest closed candle, therefore shift 5 is the fifth
-   // closed candle and never the still-forming candle.
-   int shift=MathMax(1,InpTrailCandleShift);
-   datetime closedBar=iTime(symbol,InpTrailTF,shift);
-
-   if(closedBar==0)
-      return false;
-
-   string key=ScopedStateName("TRAIL_"+(string)ticket);
-   datetime lastDone=0;
-
-   if(GlobalVariableCheck(key))
-      lastDone=(datetime)GlobalVariableGet(key);
-
-   if(lastDone==closedBar)
-      return false;
-
-   double candidate=0.0;
-   double buffer=InpTrailBufferPips*pip;
-   double locked=GetLockedPips(ticket);
-
-   if(type==POSITION_TYPE_BUY)
-   {
-      double candleLow=iLow(symbol,InpTrailTF,shift);
-
-      if(candleLow<=0.0)
-         return false;
-
-      // BUY: SL goes immediately below the LOW of candle 5.
-      candidate=NormalizePrice(symbol,candleLow-buffer);
-
-      // Never give back an already locked profit level.
-      if(locked>0.0)
-      {
-         double lockSL=entry+locked*pip;
-         candidate=MathMax(candidate,NormalizePrice(symbol,lockSL));
-      }
-
-      // Trailing may only move the SL upward.
-      if(currentSL>0.0 && candidate<=currentSL)
-      {
-         GlobalVariableSet(key,(double)closedBar);
-         return false;
-      }
-   }
-   else if(type==POSITION_TYPE_SELL)
-   {
-      double candleHigh=iHigh(symbol,InpTrailTF,shift);
-
-      if(candleHigh<=0.0)
-         return false;
-
-      // SELL: SL goes immediately above the HIGH of candle 5.
-      candidate=NormalizePrice(symbol,candleHigh+buffer);
-
-      // Never give back an already locked profit level.
-      if(locked>0.0)
-      {
-         double lockSL=entry-locked*pip;
-         candidate=MathMin(candidate,NormalizePrice(symbol,lockSL));
-      }
-
-      // Trailing may only move the SL downward.
-      if(currentSL>0.0 && candidate>=currentSL)
-      {
-         GlobalVariableSet(key,(double)closedBar);
-         return false;
-      }
-   }
-   else
-      return false;
-
-   if(!IsValidSLForPosition(symbol,type,candidate))
-      return false;
-
-   bool result=ModifyPositionSL(ticket,candidate);
-
-   if(result)
-   {
-      GlobalVariableSet(key,(double)closedBar);
-
-      Print("STB TRAILING updated ticket=",ticket,
-            " symbol=",symbol,
-            " type=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-            " profitPips=",DoubleToString(profit,1),
-            " candleShift=",shift,
-            " candleTime=",TimeToString(closedBar),
-            " SL=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-   }
-
-   return result;
-}
 
 //==================================================================
 // PROTECTION SERVICE — structural/fallback SL calculation
@@ -4466,7 +4451,9 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // Structural SL calculation is delegated to STB_Protection* services.
 void ManagePositions()
 {
-   // First pass: immediately protect every managed position that has no SL.
+   // SINGLE POSITION MANAGEMENT OWNER.
+   // This engine is called from OnTick and OnTimer. It is deliberately
+   // independent of candle formation and therefore reacts to live Bid/Ask.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -4474,22 +4461,7 @@ void ManagePositions()
       if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
-      EnsureInitialSL(ticket);
-   }
-
-   AutoProfitProtection();
-
-   for(int i=PositionsTotal()-1;i>=0;i--)
-   {
-      ulong ticket=PositionGetTicket(i);
-
-      if(ticket==0)
-         continue;
-
-      if(!IsManagedPosition(ticket))
-         continue;
-
-      TrailPositionOnClosedCandle(ticket);
+      ManagePositionProtection(ticket);
    }
 }
 
@@ -7124,9 +7096,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       trans.deal==0 ||
       !HistoryDealSelect(trans.deal))
       return;
-
-   if(trans.position>0)
-      EnsureInitialSL(trans.position);
 
    string comment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
    long magic=HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
