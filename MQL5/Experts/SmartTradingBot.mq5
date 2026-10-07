@@ -109,6 +109,7 @@ input double  InpTrailBufferPips        = 1.0;
 
 input group "=== PENDING TRAIL (SAFE INTEGRATION) ==="
 input bool    InpPendingTrail           = true;  // STB_PendingTrail + STB_PendingDistanceResolver services
+input double InpManualPendingRatchetExtraPips = 0.0;  // 0 = nearest broker-valid price; manual pending only
 
 input group "=== SMART STRUCTURE (ACSS - ANALYSIS ONLY) ==="
 input bool                InpSmartStructureEnabled      = true;  // Enable ACSS (read-only analysis+visualization)
