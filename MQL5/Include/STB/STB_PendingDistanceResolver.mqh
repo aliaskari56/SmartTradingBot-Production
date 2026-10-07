@@ -54,7 +54,7 @@ bool STB_ReadBrokerLimits(const string symbol, STBBrokerLimits &bl)
    bl.freezeLevel= (long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
    bl.minDistance= TradeMinDistance(symbol);
 
-   bl.valid=(bl.point>0.0 && bl.minDistance>0.0);
+   bl.valid=(bl.point>0.0 && bl.tickSize>0.0 && bl.minDistance>=0.0);
    return bl.valid;
 }
 
@@ -207,6 +207,149 @@ bool STB_ResolvePendingDistance(const string symbol,
    r.entryOffset=entryOffsetPips*pip;
    r.slBuffer=slBufferPips*pip;
    r.brokerMinDistance=bl.minDistance;
+   r.valid=true;
+   r.reason="OK";
+   return true;
+}
+
+
+//--- Manual current-price BUY_STOP / SELL_STOP resolver ---------------
+// Returns the nearest broker-valid Entry/SL around the live quote.
+// BUY_STOP : Entry above Ask, SL below Bid.
+// SELL_STOP: Entry below Bid, SL above Ask.
+// No structural/swing dependency.
+bool STB_ResolveManualPendingPriceRatchet(const string symbol,
+                                          const int direction,
+                                          const double extraPips,
+                                          STBPendingResolution &r)
+{
+   ZeroMemory(r);
+   r.valid=false;
+   r.reason="UNRESOLVED";
+
+   if(symbol=="" || direction==0)
+   {
+      r.reason="IDENTITY_INVALID";
+      return false;
+   }
+
+   STBBrokerLimits bl;
+   if(!STB_ReadBrokerLimits(symbol,bl))
+   {
+      r.reason="BROKER_LIMITS_UNAVAILABLE";
+      return false;
+   }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+   {
+      r.reason="NO_TICK";
+      return false;
+   }
+
+   double pip=PipSize(symbol);
+   if(pip<=0.0)
+   {
+      r.reason="PIP_SIZE_INVALID";
+      return false;
+   }
+
+   double tickSize=bl.tickSize;
+   if(tickSize<=0.0)
+      tickSize=bl.point;
+
+   double extra=MathMax(0.0,extraPips)*pip;
+   double minDist=MathMax(0.0,bl.minDistance);
+
+   double rawEntry=0.0;
+   double rawSL=0.0;
+   double entry=0.0;
+   double sl=0.0;
+
+   if(direction>0)
+   {
+      rawEntry=tick.ask+minDist+extra;
+      rawSL=tick.bid-minDist-extra;
+
+      entry=NormalizePrice(symbol,
+                           MathCeil(rawEntry/tickSize)*tickSize);
+      sl=NormalizePrice(symbol,
+                        MathFloor(rawSL/tickSize)*tickSize);
+
+      if(entry<=tick.ask+minDist)
+         entry=NormalizePrice(symbol,
+                              MathCeil((tick.ask+minDist)/tickSize)*tickSize);
+
+      if(sl>tick.bid-minDist)
+         sl=NormalizePrice(symbol,
+                           MathFloor((tick.bid-minDist)/tickSize)*tickSize);
+
+      if(sl>=entry-minDist)
+      {
+         r.reason="BUY_SL_TOO_CLOSE_TO_ENTRY";
+         return false;
+      }
+
+      if(entry<=tick.ask+minDist)
+      {
+         r.reason="BUY_ENTRY_INSIDE_BROKER_ZONE";
+         return false;
+      }
+
+      if(sl>tick.bid-minDist)
+      {
+         r.reason="BUY_SL_INSIDE_BROKER_ZONE";
+         return false;
+      }
+   }
+   else
+   {
+      rawEntry=tick.bid-minDist-extra;
+      rawSL=tick.ask+minDist+extra;
+
+      entry=NormalizePrice(symbol,
+                           MathFloor(rawEntry/tickSize)*tickSize);
+      sl=NormalizePrice(symbol,
+                        MathCeil(rawSL/tickSize)*tickSize);
+
+      if(entry>=tick.bid-minDist)
+         entry=NormalizePrice(symbol,
+                              MathFloor((tick.bid-minDist)/tickSize)*tickSize);
+
+      if(sl<tick.ask+minDist)
+         sl=NormalizePrice(symbol,
+                           MathCeil((tick.ask+minDist)/tickSize)*tickSize);
+
+      if(sl<=entry+minDist)
+      {
+         r.reason="SELL_SL_TOO_CLOSE_TO_ENTRY";
+         return false;
+      }
+
+      if(entry>=tick.bid-minDist)
+      {
+         r.reason="SELL_ENTRY_INSIDE_BROKER_ZONE";
+         return false;
+      }
+
+      if(sl<tick.ask+minDist)
+      {
+         r.reason="SELL_SL_INSIDE_BROKER_ZONE";
+         return false;
+      }
+   }
+
+   if(entry<=0.0 || sl<=0.0)
+   {
+      r.reason="PRICE_INVALID";
+      return false;
+   }
+
+   r.entry=entry;
+   r.sl=sl;
+   r.entryOffset=MathAbs(entry-(direction>0 ? tick.ask:tick.bid));
+   r.slBuffer=MathAbs(sl-(direction>0 ? tick.bid:tick.ask));
+   r.brokerMinDistance=minDist;
    r.valid=true;
    r.reason="OK";
    return true;
