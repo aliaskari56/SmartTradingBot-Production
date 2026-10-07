@@ -37,6 +37,7 @@ struct STBPendingTrailState
    int      lastProcessedCycle;
    double   entryBufferPips;
    double   slBufferPips;
+   bool     initialAlignmentPending;
    bool     active;
 };
 
@@ -170,6 +171,8 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.lastProcessedCycle=-1;
    st.entryBufferPips=entryBufferPips;
    st.slBufferPips=slBufferPips;
+   st.initialAlignmentPending=(source=="TRADE_TRANSACTION" &&
+                               STB_GetOrderOwner(ticket)==STB_OWNER_MANUAL);
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
@@ -276,6 +279,189 @@ bool STB_PendingTrailOrderCheckModify(const ulong ticket,
    return true;
 }
 
+//--- Manual BUY_STOP/SELL_STOP price-anchored ratchet -----------------
+// Manual only:
+//   BUY_STOP  -> Entry + SL follow current price downward only.
+//   SELL_STOP -> Entry + SL follow current price upward only.
+// The initial creation alignment may tighten SL once to the broker-nearest
+// current-price level. After that, Entry/SL are one-way ratchets.
+// This path does NOT use M15 swing structure.
+bool STB_PendingTrailManageManualPriceRatchet(const ulong ticket)
+{
+   int idx=STB_PendingTrailFind(ticket);
+
+   if(idx<0 || !g_stbPendingTrail[idx].active)
+      return false;
+
+   if(!OrderSelect(ticket))
+   {
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   if(STB_GetOrderOwner(ticket)!=STB_OWNER_MANUAL)
+      return false;
+
+   long orderType=OrderGetInteger(ORDER_TYPE);
+   if(!STB_PendingTrailIsStopType(orderType))
+      return false;
+
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   int direction=STB_PendingTrailDirection(orderType);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+
+   if(symbol=="" || direction==0 || point<=0.0)
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return true;
+
+   STBPendingResolution res;
+   if(!STB_ResolveManualPendingPriceRatchet(
+         symbol,
+         direction,
+         InpManualPendingRatchetExtraPips,
+         res))
+   {
+      datetime stamp=TimeCurrent();
+      if(g_stbPendingTrail[idx].lastFailLogBar!=stamp)
+      {
+         g_stbPendingTrail[idx].lastFailLogBar=stamp;
+         Print("PENDING_TRAIL_MANUAL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+               " symbol=",symbol,
+               " stage=RESOLVE",
+               " reason=",res.reason);
+      }
+      return true;
+   }
+
+   double curEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double curSL=OrderGetDouble(ORDER_SL);
+
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tolerance=MathMax(point*0.5,
+                            tickSize>0.0 ? tickSize*0.5 : point*0.5);
+
+   bool moveEntry=(direction>0 ?
+                   res.entry<curEntry-tolerance :
+                   res.entry>curEntry+tolerance);
+
+   bool moveSL=false;
+
+   if(curSL<=0.0)
+      moveSL=true;
+   else if(g_stbPendingTrail[idx].initialAlignmentPending)
+      moveSL=MathAbs(res.sl-curSL)>tolerance;
+   else
+      moveSL=(direction>0 ?
+              res.sl<curSL-tolerance :
+              res.sl>curSL+tolerance);
+
+   if(!moveEntry && !moveSL)
+      return true;
+
+   double targetEntry=(moveEntry ? res.entry : curEntry);
+   double targetSL=(moveSL ? res.sl : curSL);
+
+   double tp=OrderGetDouble(ORDER_TP);
+   ENUM_ORDER_TYPE_TIME typeTime=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
+   datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
+   double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+
+   int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+   string checkReason;
+
+   if(!STB_PendingTrailOrderCheckModify(ticket,
+                                        symbol,
+                                        targetEntry,
+                                        targetSL,
+                                        tp,
+                                        typeTime,
+                                        expiration,
+                                        stopLimit,
+                                        checkReason))
+   {
+      Print("PENDING_TRAIL_MANUAL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " stage=ORDERCHECK",
+            " reason=",checkReason,
+            " requestedEntry=",DoubleToString(targetEntry,digits),
+            " requestedSL=",DoubleToString(targetSL,digits));
+      return true;
+   }
+
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetAsyncMode(false);
+
+   if(!trade.OrderModify(ticket,
+                         targetEntry,
+                         targetSL,
+                         tp,
+                         typeTime,
+                         expiration,
+                         stopLimit))
+   {
+      Print("PENDING_TRAIL_MANUAL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " stage=MODIFY_REQUEST",
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
+      return true;
+   }
+
+   if(!TradeRetcodeModifySucceeded())
+   {
+      Print("PENDING_TRAIL_MANUAL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " stage=SERVER_REJECT",
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
+      return true;
+   }
+
+   if(!OrderSelect(ticket))
+   {
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   double confirmedEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double confirmedSL=OrderGetDouble(ORDER_SL);
+
+   if(MathAbs(confirmedEntry-targetEntry)>tolerance ||
+      MathAbs(confirmedSL-targetSL)>tolerance)
+   {
+      Print("PENDING_TRAIL_MANUAL_MODIFY_NOT_CONFIRMED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " requestedEntry=",DoubleToString(targetEntry,digits),
+            " actualEntry=",DoubleToString(confirmedEntry,digits),
+            " requestedSL=",DoubleToString(targetSL,digits));
+      return true;
+   }
+
+   g_stbPendingTrail[idx].trackedExtreme=
+      (direction>0 ? tick.bid : tick.ask);
+   g_stbPendingTrail[idx].lastEntry=confirmedEntry;
+   g_stbPendingTrail[idx].lastSL=confirmedSL;
+   g_stbPendingTrail[idx].lastModifyTime=TimeCurrent();
+   g_stbPendingTrail[idx].initialAlignmentPending=false;
+
+   Print("PENDING_MANUAL_PRICE_RATCHET ticket=",IntegerToString((int)ticket),
+         " symbol=",symbol,
+         " type=",STB_PendingTrailTypeName(orderType),
+         " entry ",DoubleToString(curEntry,digits)," -> ",
+         DoubleToString(confirmedEntry,digits),
+         " sl ",DoubleToString(curSL,digits)," -> ",
+         DoubleToString(confirmedSL,digits),
+         " bid=",DoubleToString(tick.bid,digits),
+         " ask=",DoubleToString(tick.ask,digits),
+         " extraPips=",DoubleToString(InpManualPendingRatchetExtraPips,2),
+         " mode=PRICE_RATCHET_CONFIRMED");
+
+   return true;
+}
+
 //--- Atomic modify pipeline for ONE ticket ---------------------------
 bool STB_PendingTrailManageOne(const ulong ticket)
 {
@@ -333,6 +519,11 @@ bool STB_PendingTrailManageOne(const ulong ticket)
 
    if(direction==0 || point<=0.0)
       return true;
+
+   // MANUAL ownership uses the current-price one-way ratchet.
+   // EA-owned pending orders retain the existing structural/M15 lifecycle.
+   if(STB_GetOrderOwner(ticket)==STB_OWNER_MANUAL)
+      return STB_PendingTrailManageManualPriceRatchet(ticket);
 
    // 1) Read terminal / bar extreme.
    double extreme=(direction>0)
