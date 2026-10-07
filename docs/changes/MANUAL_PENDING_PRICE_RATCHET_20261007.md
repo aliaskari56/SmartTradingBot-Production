@@ -11,11 +11,11 @@ Manual ownership is the existing Magic == 0 ownership class and remains governed
 - BUY_STOP: live Ask/Bid are used every processing cycle.
   - Entry moves downward only.
   - SL moves downward only after initial alignment.
-  - Initial creation alignment may tighten SL once to the nearest broker-valid level below Bid.
+  - Initial synchronization aligns SL once to the nearest broker-valid level below Bid; after that, SL is downward-only.
 - SELL_STOP: live Bid/Ask are used every processing cycle.
   - Entry moves upward only.
   - SL moves upward only after initial alignment.
-  - Initial creation alignment may tighten SL once to the nearest broker-valid level above Ask.
+  - Initial synchronization aligns SL once to the nearest broker-valid level above Ask; after that, SL is upward-only.
 - No M15 swing/structural anchor is used by the manual path.
 - After activation, STB_PendingTrailOnOrderFilled() disables PendingTrail for that ticket.
 
