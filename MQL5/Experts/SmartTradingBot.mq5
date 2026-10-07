@@ -4399,7 +4399,7 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       return true;
 
    string symbol=OrderGetString(ORDER_SYMBOL);
-   long orderType=OrderGetInteger(ORDER_TYPE);
+   ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
    double entry=OrderGetDouble(ORDER_PRICE_OPEN);
 
    long direction=-1;
@@ -7006,7 +7006,7 @@ bool STB_RecoverPositionAdaptiveState(const ulong positionId,
       if(STB_AdaptiveIsHedgeComment(comment))
          continue;
 
-      long dealType=HistoryDealGetInteger(deal,DEAL_TYPE);
+      ENUM_DEAL_TYPE dealType=(ENUM_DEAL_TYPE)HistoryDealGetInteger(deal,DEAL_TYPE);
       int dealDirection=(dealType==DEAL_TYPE_BUY ? 1 :
                          dealType==DEAL_TYPE_SELL ? -1 : 0);
 
