@@ -5041,7 +5041,9 @@ bool ExecuteSetup(Setup &s,const bool manual)
                                 pendingMaxBars,entryBufferPips,slBufferPips))
       return false;
 
-   trade.SetExpertMagicNumber(InpMagic);
+   // Manual UI pending orders are deliberately manual-owned (Magic=0).
+   // EA scanner/strategy pending orders retain the EA Magic number.
+   trade.SetExpertMagicNumber(manual ? 0UL : InpMagic);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
    trade.SetAsyncMode(false);
 
@@ -5095,8 +5097,9 @@ bool ExecuteSetup(Setup &s,const bool manual)
    long expectedType=(s.direction>0 ?
                       ORDER_TYPE_BUY_STOP:
                       ORDER_TYPE_SELL_STOP);
+   long expectedMagic=(manual ? 0 : (long)InpMagic);
 
-   if(OrderGetInteger(ORDER_MAGIC)!=(long)InpMagic ||
+   if(OrderGetInteger(ORDER_MAGIC)!=expectedMagic ||
       OrderGetString(ORDER_SYMBOL)!=s.symbol ||
       OrderGetInteger(ORDER_TYPE)!=expectedType ||
       OrderGetDouble(ORDER_SL)<=0.0 ||
