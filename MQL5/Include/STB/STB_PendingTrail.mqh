@@ -105,8 +105,9 @@ string STB_PendingTrailTypeName(const long orderType)
 }
 
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. The anchor uses
-// the latest CLOSED M15 extreme (Low[1] for buy / High[1] for sell).
+// Called ONLY after the terminal confirmed the ticket.
+// EA-owned pending trail uses a closed M15 extreme; manual pending trail
+// uses the live quote path in STB_PendingTrailManageManualPriceRatchet().
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
 {
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
@@ -171,8 +172,7 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.lastProcessedCycle=-1;
    st.entryBufferPips=entryBufferPips;
    st.slBufferPips=slBufferPips;
-   st.initialAlignmentPending=(source=="TRADE_TRANSACTION" &&
-                               STB_GetOrderOwner(ticket)==STB_OWNER_MANUAL);
+   st.initialAlignmentPending=(STB_GetOrderOwner(ticket)==STB_OWNER_MANUAL);
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
@@ -359,7 +359,10 @@ bool STB_PendingTrailManageManualPriceRatchet(const ulong ticket)
               res.sl>curSL+tolerance);
 
    if(!moveEntry && !moveSL)
+   {
+      g_stbPendingTrail[idx].initialAlignmentPending=false;
       return true;
+   }
 
    double targetEntry=(moveEntry ? res.entry : curEntry);
    double targetSL=(moveSL ? res.sl : curSL);
