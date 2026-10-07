@@ -4039,7 +4039,9 @@ bool ManagePositionProtection(const ulong ticket)
 
    if(profit >= InpTrailStartPips)
    {
-      double distancePips=MathMax(InpAutoLockPips,InpTrailDistancePips);
+      double distancePips=InpTrailDistancePips;
+      if(distancePips<=0.0)
+         return false;
       double distance=distancePips*pip;
 
       if(type==POSITION_TYPE_BUY)
