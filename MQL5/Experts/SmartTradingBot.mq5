@@ -1609,17 +1609,26 @@ bool PreparePendingSetup(Setup &s)
    double oldSL=s.sl;
    double oldTP=s.tp;
 
+   double pip=PipSize(s.symbol);
+   double pendingDistance=MathMax(0.0,InpTrailDistancePips)*pip;
+
+   if(pip<=0.0 || pendingDistance<=0.0)
+      return false;
+
    if(s.direction>0)
    {
       double minEntry=tick.ask+minDist;
       if(s.entry<minEntry) s.entry=minEntry;
+
+      // Pending BUY STOP protection is always measured from the final Entry.
+      s.sl=s.entry-pendingDistance;
 
       double maxSL=tick.bid-minDist;
       double entrySL=s.entry-minDist;
       if(s.sl>maxSL) s.sl=maxSL;
       if(s.sl>entrySL) s.sl=entrySL;
 
-      if(s.sl>=s.entry || s.tp<=s.entry)
+      if(s.sl>=s.entry)
          return false;
    }
    else if(s.direction<0)
@@ -1627,12 +1636,15 @@ bool PreparePendingSetup(Setup &s)
       double maxEntry=tick.bid-minDist;
       if(s.entry>maxEntry) s.entry=maxEntry;
 
+      // Pending SELL STOP protection is always measured from the final Entry.
+      s.sl=s.entry+pendingDistance;
+
       double minSL=tick.ask+minDist;
       double entrySL=s.entry+minDist;
       if(s.sl<minSL) s.sl=minSL;
       if(s.sl<entrySL) s.sl=entrySL;
 
-      if(s.sl<=s.entry || s.tp>=s.entry)
+      if(s.sl<=s.entry)
          return false;
    }
    else
@@ -1640,7 +1652,27 @@ bool PreparePendingSetup(Setup &s)
 
    s.entry=NormalizePrice(s.symbol,s.entry);
    s.sl=NormalizePrice(s.symbol,s.sl);
-   s.tp=NormalizePrice(s.symbol,s.tp);
+
+   // The SL geometry changed the risk distance, so TP must be recalculated
+   // against the final Entry/SL before the RR validation below.
+   SwingPoint highs[];
+   SwingPoint lows[];
+   if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+      return false;
+
+   double minimumRRForTP=MathMax(0.0,s.minimumRR);
+   if(minimumRRForTP<=0.0)
+      minimumRRForTP=InpMinimumRR;
+
+   if(!STB_CalculateTakeProfit(s.symbol,
+                               s.direction,
+                               s.entry,
+                               s.sl,
+                               minimumRRForTP,
+                               highs,
+                               lows,
+                               s.tp))
+      return false;
 
    double risk=MathAbs(s.entry-s.sl);
    double reward=MathAbs(s.tp-s.entry);
@@ -2977,13 +3009,12 @@ bool BuildSetup(const string symbol,
       return STB_BuildReject(symbol,direction,"PIP_SIZE_INVALID");
 
    double entryBuffer=STB_EffectiveEntryBuffer();
-   double slBuffer=STB_EffectiveSLBuffer();
    double minimumRR=STB_EffectiveMinimumRR();
 
    if(direction>0)
    {
       s.entry=NormalizePrice(symbol,originHigh + entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,breakSwing.price - slBuffer*pip);
+      s.sl=NormalizePrice(symbol,s.entry - MathMax(0.0,InpTrailDistancePips)*pip);
 
       double risk=MathAbs(s.entry-s.sl);
 
@@ -3000,7 +3031,7 @@ bool BuildSetup(const string symbol,
    else
    {
       s.entry=NormalizePrice(symbol,originLow - entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,breakSwing.price + slBuffer*pip);
+      s.sl=NormalizePrice(symbol,s.entry + MathMax(0.0,InpTrailDistancePips)*pip);
 
       double risk=MathAbs(s.entry-s.sl);
 
@@ -4408,25 +4439,60 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       return false;
 
    double candidate=0.0;
-   if(!STB_ProtectionCalculateNearestStructuralSL(symbol,direction,entry,candidate))
-      return false;
 
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
    double minDist=TradeMinDistance(symbol);
-   if(direction==POSITION_TYPE_BUY)
+   double pip=PipSize(symbol);
+   if(minDist<=0.0 || pip<=0.0)
+      return false;
+
+   bool isStopOrder=(orderType==ORDER_TYPE_BUY_STOP ||
+                     orderType==ORDER_TYPE_SELL_STOP);
+
+   if(isStopOrder)
    {
-      double maxSL=MathMin(entry-minDist,tick.bid-minDist);
-      if(candidate>=maxSL)
+      double pendingDistance=MathMax(0.0,InpTrailDistancePips)*pip;
+      if(pendingDistance<=0.0)
          return false;
+
+      candidate=(direction==POSITION_TYPE_BUY)
+                ? entry-pendingDistance
+                : entry+pendingDistance;
+
+      if(direction==POSITION_TYPE_BUY)
+      {
+         double maxSL=MathMin(entry-minDist,tick.bid-minDist);
+         if(candidate>maxSL)
+            candidate=maxSL;
+      }
+      else
+      {
+         double minSL=MathMax(entry+minDist,tick.ask+minDist);
+         if(candidate<minSL)
+            candidate=minSL;
+      }
    }
    else
    {
-      double minSL=MathMax(entry+minDist,tick.ask+minDist);
-      if(candidate<=minSL)
+      // Preserve the existing structural recovery for LIMIT orders.
+      if(!STB_ProtectionCalculateNearestStructuralSL(symbol,direction,entry,candidate))
          return false;
+
+      if(direction==POSITION_TYPE_BUY)
+      {
+         double maxSL=MathMin(entry-minDist,tick.bid-minDist);
+         if(candidate>=maxSL)
+            return false;
+      }
+      else
+      {
+         double minSL=MathMax(entry+minDist,tick.ask+minDist);
+         if(candidate<=minSL)
+            return false;
+      }
    }
 
    candidate=NormalizePrice(symbol,candidate);
@@ -4484,7 +4550,7 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
    Print("STB pending initial SL set and CONFIRMED ticket=",ticket,
          " symbol=",symbol,
          " side=",(direction==POSITION_TYPE_BUY ? "BUY":"SELL"),
-         " nearestSwingBufferPips=",DoubleToString(InpInitialSLBufferPips,1),
+         " standardPendingDistancePips=",DoubleToString(InpTrailDistancePips,1),
          " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
 
    return true;
