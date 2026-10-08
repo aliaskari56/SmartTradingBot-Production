@@ -104,8 +104,9 @@ string STB_PendingTrailTypeName(const long orderType)
 }
 
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. The anchor uses
-// the latest CLOSED M15 extreme (Low[1] for buy / High[1] for sell).
+// Called ONLY after the terminal confirmed the ticket. The state anchor is
+// derived from the current pending-order geometry; subsequent live Bid/Ask
+// extremes can only move the pending order in the requested one-way path.
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
 {
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
@@ -334,10 +335,18 @@ bool STB_PendingTrailManageOne(const ulong ticket)
    if(direction==0 || point<=0.0)
       return true;
 
-   // 1) Read terminal / bar extreme.
+   // 1) Read the LIVE favorable-side market extreme.
+   // BUY STOP : falling Bid creates a new lower extreme.
+   // SELL STOP: rising Ask creates a new higher extreme.
+   // This is intentionally live, not candle-close based, so the pending
+   // entry and its SL follow a new favorable pre-trigger extreme immediately.
+   MqlTick liveTick;
+   if(!SymbolInfoTick(symbol,liveTick))
+      return true;
+
    double extreme=(direction>0)
-                  ? iLow(symbol,PERIOD_M15,1)
-                  : iHigh(symbol,PERIOD_M15,1);
+                  ? liveTick.bid
+                  : liveTick.ask;
 
    if(extreme<=0.0)
       return true;
