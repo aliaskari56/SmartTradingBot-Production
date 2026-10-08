@@ -2782,6 +2782,85 @@ bool FindOriginCandle(const string symbol,
 }
 
 //==================================================================
+// TAKE-PROFIT ENGINE
+//==================================================================
+
+// TP ENGINE OWNER CONTRACT:
+// Calculates the exact existing structural RR-qualified target.
+// No order execution, no entry/SL mutation, no scanner side effects.
+bool STB_CalculateTakeProfit(const string symbol,
+                             const int direction,
+                             const double entry,
+                             const double sl,
+                             const double minimumRR,
+                             const SwingPoint &highs[],
+                             const SwingPoint &lows[],
+                             double &tp)
+{
+   tp=0.0;
+
+   if(symbol=="" || direction==0 || entry<=0.0 || sl<=0.0 ||
+      minimumRR<0.0)
+      return false;
+
+   double risk=MathAbs(entry-sl);
+
+   if(risk<=0.0)
+      return false;
+
+   if(direction>0)
+   {
+      double target=DBL_MAX;
+
+      for(int i=0;i<ArraySize(highs);i++)
+      {
+         double candidate=highs[i].price;
+
+         if(candidate<=entry)
+            continue;
+
+         double reward=candidate-entry;
+
+         if(reward+1e-12 < risk*minimumRR)
+            continue;
+
+         if(candidate<target)
+            target=candidate;
+      }
+
+      if(target==DBL_MAX)
+         return false;
+
+      tp=NormalizePrice(symbol,target);
+      return tp>entry;
+   }
+
+   double target=-DBL_MAX;
+
+   for(int i=0;i<ArraySize(lows);i++)
+   {
+      double candidate=lows[i].price;
+
+      if(candidate>=entry)
+         continue;
+
+      double reward=entry-candidate;
+
+      if(reward+1e-12 < risk*minimumRR)
+         continue;
+
+      if(candidate>target)
+         target=candidate;
+   }
+
+   if(target==-DBL_MAX)
+      return false;
+
+   tp=NormalizePrice(symbol,target);
+   return tp<entry;
+}
+
+//==================================================================
 // SETUP BUILDER
 //==================================================================
 
@@ -2907,31 +2986,13 @@ bool BuildSetup(const string symbol,
       s.sl=NormalizePrice(symbol,breakSwing.price - slBuffer*pip);
 
       double risk=MathAbs(s.entry-s.sl);
-      double target=DBL_MAX;
 
       if(risk<=0.0 || s.sl>=s.entry)
          return STB_BuildReject(symbol,direction,"BUY_GEOMETRY_INVALID");
 
-      for(int i=0;i<nh;i++)
-      {
-         double candidate=highs[i].price;
-
-         if(candidate<=s.entry)
-            continue;
-
-         double reward=candidate-s.entry;
-
-         if(reward+1e-12 < risk*minimumRR)
-            continue;
-
-         if(candidate<target)
-            target=candidate;
-      }
-
-      if(target==DBL_MAX)
+      if(!STB_CalculateTakeProfit(symbol,direction,s.entry,s.sl,
+                                  minimumRR,highs,lows,s.tp))
          return STB_BuildReject(symbol,direction,"BUY_NO_RR_TARGET");
-
-      s.tp=NormalizePrice(symbol,target);
 
       if(s.entry<=tick.ask)
          return STB_BuildReject(symbol,direction,"BUY_ENTRY_NOT_ABOVE_ASK");
@@ -2942,31 +3003,13 @@ bool BuildSetup(const string symbol,
       s.sl=NormalizePrice(symbol,breakSwing.price + slBuffer*pip);
 
       double risk=MathAbs(s.entry-s.sl);
-      double target=-DBL_MAX;
 
       if(risk<=0.0 || s.sl<=s.entry)
          return STB_BuildReject(symbol,direction,"SELL_GEOMETRY_INVALID");
 
-      for(int i=0;i<nl;i++)
-      {
-         double candidate=lows[i].price;
-
-         if(candidate>=s.entry)
-            continue;
-
-         double reward=s.entry-candidate;
-
-         if(reward+1e-12 < risk*minimumRR)
-            continue;
-
-         if(candidate>target)
-            target=candidate;
-      }
-
-      if(target==-DBL_MAX)
+      if(!STB_CalculateTakeProfit(symbol,direction,s.entry,s.sl,
+                                  minimumRR,highs,lows,s.tp))
          return STB_BuildReject(symbol,direction,"SELL_NO_RR_TARGET");
-
-      s.tp=NormalizePrice(symbol,target);
 
       if(s.entry>=tick.bid)
          return STB_BuildReject(symbol,direction,"SELL_ENTRY_NOT_BELOW_BID");
