@@ -139,10 +139,11 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
 
    double entryBufferPips=
       STB_ParsePendingEntryBufferPips(comment,InpEntryBufferPips);
-   double slBufferPips=
-      STB_ParsePendingSLBufferPips(comment,InpSLBufferPips);
 
-   if(entryBufferPips<0.0 || slBufferPips<0.0)
+   // Pending SL is strategy-independent: one source for every BUY/SELL STOP.
+   double slBufferPips=MathMax(0.0,InpTrailDistancePips);
+
+   if(entryBufferPips<0.0 || slBufferPips<=0.0)
       return false;
 
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
@@ -185,7 +186,7 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
          " source=",source,
          " trackedExtreme=",DoubleToString(st.trackedExtreme,digits),
          " entryBufferPips=",DoubleToString(st.entryBufferPips,4),
-         " slBufferPips=",DoubleToString(st.slBufferPips,4),
+         " standardPendingDistancePips=",DoubleToString(st.slBufferPips,4),
          " entry=",DoubleToString(st.lastEntry,digits),
          " sl=",DoubleToString(st.lastSL,digits));
 
@@ -510,7 +511,7 @@ bool STB_PendingTrailManageOne(const ulong ticket)
          " entry ",DoubleToString(oldEntry,digits)," -> ",DoubleToString(confirmedEntry,digits),
          " sl ",DoubleToString(oldSL,digits)," -> ",DoubleToString(confirmedSL,digits),
          " entryOffset=",DoubleToString(res.entryOffset,digits),
-         " slBuffer=",DoubleToString(res.slBuffer,digits),
+         " standardPendingDistance=",DoubleToString(res.slBuffer,digits),
          " brokerMin=",DoubleToString(res.brokerMinDistance,digits));
 
    return true;
