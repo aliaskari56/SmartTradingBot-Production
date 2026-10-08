@@ -139,12 +139,14 @@ bool STB_ResolvePendingDistance(const string symbol,
    if(direction>0)
    {
       rawEntry=extreme+entryOffsetPips*pip;
-      rawSL   =extreme-slBufferPips*pip;
+      // Pending SL distance is measured from the pending Entry itself.
+      rawSL   =rawEntry-slBufferPips*pip;
    }
    else
    {
       rawEntry=extreme-entryOffsetPips*pip;
-      rawSL   =extreme+slBufferPips*pip;
+      // Pending SL distance is measured from the pending Entry itself.
+      rawSL   =rawEntry+slBufferPips*pip;
    }
 
    MqlTick tick;

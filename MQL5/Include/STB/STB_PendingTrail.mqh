@@ -1,3 +1,15 @@
+double STB_ParsePendingEntryBufferPips(const string comment,const double fallback)
+{
+   int pos=StringFind(comment,"|EB");
+   if(pos<0) return fallback;
+   int start=pos+3;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                      : StringSubstr(comment,start));
+   double value=StringToDouble(raw);
+   return (MathIsValidNumber(value) && value>=0.0) ? value:fallback;
+}
+
 //+------------------------------------------------------------------+
 //| STB_PendingTrail.mqh                                             |
 //| Safe-integration Pending Trail service for SmartTradingBot.      |
@@ -11,8 +23,10 @@
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
 //|   - multi-ticket isolation                                       |
-//|   - atomic modify pipeline (read->calc->validate->align->diff->  |
-//|     modify once->read->confirm->commit)                          |
+//|   - P4: this module only PROPOSES geometry. The single pending   |
+//|     geometry writer is STB_ModifyPendingOrderGeometry() (EA).    |
+//|   - P4: bounded time throttle + failure backoff per ticket.      |
+//|   - P4: entry Step + monotonic trackedExtreme.                   |
 //|   - trigger handoff: PENDING_TRIGGERED then                      |
 //|     PENDING_TRAIL_STOPPED handoff=TRADE_MANAGEMENT               |
 //|                                                                  |
@@ -20,6 +34,43 @@
 //+------------------------------------------------------------------+
 #ifndef _STB_PENDING_TRAIL_MQH
 #define _STB_PENDING_TRAIL_MQH
+
+//--- P4: proposal source + modify result classification -------------
+enum ENUM_STB_PENDING_SRC
+{
+   STB_PEND_SRC_INITIAL=0,
+   STB_PEND_SRC_TRAIL=1
+};
+
+enum ENUM_STB_PENDING_RESULT
+{
+   STB_PEND_RES_SUCCESS=0,
+   STB_PEND_RES_NO_CHANGE=1,
+   STB_PEND_RES_TEMPORARY_FAILURE=2,
+   STB_PEND_RES_INVALID_STOPS=3,
+   STB_PEND_RES_INVALID_PRICE=4,
+   STB_PEND_RES_FREEZE_LEVEL=5,
+   STB_PEND_RES_TOO_MANY_REQUESTS=6,
+   STB_PEND_RES_ORDER_GONE=7,
+   STB_PEND_RES_OTHER_FAILURE=8
+};
+
+//--- P4: bounded retry policy (never retry every tick) --------------
+#define STB_PEND_TRAIL_COOLDOWN_SEC   2
+#define STB_PEND_BACKOFF_1_SEC        5
+#define STB_PEND_BACKOFF_2_SEC        15
+#define STB_PEND_BACKOFF_3_SEC        60
+
+//--- P4: pending geometry proposal (Entry and SL resolved apart) ----
+struct STBPendingGeometryProposal
+{
+   bool   valid;
+   double entry;
+   double sl;
+   double tp;
+   int    source;
+   string reason;
+};
 
 //--- Ticket-based pending trail state --------------------------------
 struct STBPendingTrailState
@@ -37,6 +88,8 @@ struct STBPendingTrailState
    int      lastProcessedCycle;
    double   entryBufferPips;
    double   slBufferPips;
+   int      failureCount;   // P4 failure backoff counter
+   datetime nextRetryTime;  // P4 earliest next modify attempt
    bool     active;
 };
 
@@ -103,9 +156,38 @@ string STB_PendingTrailTypeName(const long orderType)
    return "UNKNOWN";
 }
 
+//--- P4: classify the last modify outcome (policy only, no new logs) -
+int STB_PendingClassifyResult(const bool ok)
+{
+   if(ok)
+      return STB_PEND_RES_SUCCESS;
+
+   uint ret=(uint)trade.ResultRetcode();
+
+   switch(ret)
+   {
+      case TRADE_RETCODE_DONE:
+      case TRADE_RETCODE_DONE_PARTIAL:
+         return STB_PEND_RES_SUCCESS;
+      case TRADE_RETCODE_NO_CHANGES:
+         return STB_PEND_RES_NO_CHANGE;
+      case TRADE_RETCODE_INVALID_STOPS:
+         return STB_PEND_RES_INVALID_STOPS;
+      case TRADE_RETCODE_INVALID_PRICE:
+         return STB_PEND_RES_INVALID_PRICE;
+      case TRADE_RETCODE_TOO_MANY_REQUESTS:
+         return STB_PEND_RES_TOO_MANY_REQUESTS;
+      case TRADE_RETCODE_MARKET_CLOSED:
+         return STB_PEND_RES_TEMPORARY_FAILURE;
+   }
+
+   return STB_PEND_RES_OTHER_FAILURE;
+}
+
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. The anchor uses
-// the latest CLOSED M15 extreme (Low[1] for buy / High[1] for sell).
+// Called ONLY after the terminal confirmed the ticket. The state anchor is
+// derived from the current pending-order geometry; subsequent live Bid/Ask
+// extremes can only move the pending order in the requested one-way path.
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
 {
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
@@ -136,15 +218,31 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
 
    string comment=OrderGetString(ORDER_COMMENT);
 
-   double entryBufferPips=
-      STB_ParsePendingEntryBufferPips(comment,InpEntryBufferPips);
-   double slBufferPips=
-      STB_ParsePendingSLBufferPips(comment,InpSLBufferPips);
-
-   if(entryBufferPips<0.0 || slBufferPips<0.0)
+   // P4 EB contract: the creator stores the effective entry buffer in the
+   // order comment ("|EB<value>"); fall back to the configured input only
+   // for legacy/manual orders created before the contract existed.
+   double entryBufferPips=STB_ParsePendingEntryBufferPips(comment,InpEntryBufferPips);
+   if(entryBufferPips<0.0)
       return false;
 
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double currentSL=OrderGetDouble(ORDER_SL);
+
+   // P4 STB-002: the pending SL distance is the STRUCTURAL risk of the order
+   // (|Entry-SL|), never an arbitrary constant. A constant could otherwise
+   // expand risk beyond the structural floor. If the order has no SL yet the
+   // trail may create the initial structural SL using the configured fallback.
+   double structuralRiskPips=(currentEntry>0.0 && currentSL>0.0)
+                             ? MathAbs(currentEntry-currentSL)/pip
+                             : 0.0;
+
+   double slBufferPips=(structuralRiskPips>0.0)
+                        ? structuralRiskPips
+                        : MathMax(0.0,InpLiveTrailDistancePips);
+
+   if(slBufferPips<=0.0)
+      return false;
+
    int direction=STB_PendingTrailDirection(orderType);
 
    double inferredExtreme=(direction>0)
@@ -163,13 +261,15 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.source=source;
    st.trackedExtreme=inferredExtreme;
    st.lastEntry=currentEntry;
-   st.lastSL=OrderGetDouble(ORDER_SL);
+   st.lastSL=currentSL;
    st.lastModifyTime=0;
    st.lastNoNewExtremeLogBar=0;
    st.lastFailLogBar=0;
    st.lastProcessedCycle=-1;
    st.entryBufferPips=entryBufferPips;
    st.slBufferPips=slBufferPips;
+   st.failureCount=0;
+   st.nextRetryTime=0;
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
@@ -184,7 +284,7 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
          " source=",source,
          " trackedExtreme=",DoubleToString(st.trackedExtreme,digits),
          " entryBufferPips=",DoubleToString(st.entryBufferPips,4),
-         " slBufferPips=",DoubleToString(st.slBufferPips,4),
+         " structuralRiskPips=",DoubleToString(st.slBufferPips,4),
          " entry=",DoubleToString(st.lastEntry,digits),
          " sl=",DoubleToString(st.lastSL,digits));
 
@@ -230,53 +330,91 @@ void STB_PendingTrailLogNoNewExtreme(const ulong ticket,
          " symbol=",symbol);
 }
 
-//--- Preflight broker check for one pending-order modification --------
-bool STB_PendingTrailOrderCheckModify(const ulong ticket,
-                                      const string symbol,
-                                      const double entry,
-                                      const double sl,
-                                      const double tp,
-                                      const ENUM_ORDER_TYPE_TIME typeTime,
-                                      const datetime expiration,
-                                      const double stopLimit,
-                                      string &reason)
+//--- P4 central submit gate: throttle + backoff + Step + state --------
+// This gate NEVER talks to the broker. It applies the time throttle, the
+// failure backoff and the meaningful Step gate, then forwards the proposal
+// to the single pending geometry writer STB_ModifyPendingOrderGeometry().
+// Returns true only when the writer confirmed the change.
+bool STB_SubmitPendingTrailGeometry(const ulong ticket,
+                                    const double propEntry,
+                                    const double propSL,
+                                    const double propTP)
 {
-   reason="";
+   int idx=STB_PendingTrailFind(ticket);
 
-   MqlTradeRequest req;
-   MqlTradeCheckResult chk;
-   ZeroMemory(req);
-   ZeroMemory(chk);
+   if(idx<0 || !g_stbPendingTrail[idx].active)
+      return false;
 
-   req.action=TRADE_ACTION_MODIFY;
-   req.order=ticket;
-   req.symbol=symbol;
-   req.price=entry;
-   req.sl=sl;
-   req.tp=tp;
-   req.type_time=typeTime;
-   req.expiration=expiration;
-   req.stoplimit=stopLimit;
+   string symbol=g_stbPendingTrail[idx].symbol;
+   double pip=PipSize(symbol);
+   datetime now=TimeCurrent();
 
-   if(!OrderCheck(req,chk))
+   // Time throttle: at most one modification per cooldown window.
+   if(g_stbPendingTrail[idx].nextRetryTime>0 &&
+      now<g_stbPendingTrail[idx].nextRetryTime)
+      return false;
+
+   if(g_stbPendingTrail[idx].lastModifyTime>0 &&
+      now<g_stbPendingTrail[idx].lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC)
+      return false;
+
+   // Step gate: skip a proposal whose protection improvement is below the
+   // configured meaningful step (existing input, no new input introduced).
+   if(OrderSelect(ticket) && pip>0.0)
    {
-      reason="OrderCheck API failed err="+IntegerToString(GetLastError());
+      double step=MathMax(0.0,InpTrailStepPips)*pip;
+      double curEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+      double curSL=OrderGetDouble(ORDER_SL);
+
+      if(step>0.0 &&
+         MathAbs(propEntry-curEntry)<step &&
+         MathAbs(propSL-curSL)<step)
+         return false;
+   }
+
+   // Forward to the ONE central pending geometry writer.
+   bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP);
+   int cls=STB_PendingClassifyResult(ok);
+
+   if(ok)
+   {
+      // SUCCESS (or broker NO_CHANGE accepted): reset failure backoff.
+      g_stbPendingTrail[idx].failureCount=0;
+      g_stbPendingTrail[idx].nextRetryTime=0;
+      g_stbPendingTrail[idx].lastModifyTime=TimeCurrent();
+
+      if(OrderSelect(ticket))
+      {
+         g_stbPendingTrail[idx].lastEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+         g_stbPendingTrail[idx].lastSL=OrderGetDouble(ORDER_SL);
+      }
+
+      return true;
+   }
+
+   if(cls==STB_PEND_RES_ORDER_GONE)
+   {
+      g_stbPendingTrail[idx].active=false;
       return false;
    }
 
-   if(chk.retcode!=TRADE_RETCODE_DONE &&
-      chk.retcode!=TRADE_RETCODE_DONE_PARTIAL &&
-      chk.retcode!=TRADE_RETCODE_NO_CHANGES)
-   {
-      reason="ret="+IntegerToString((int)chk.retcode)+
-             " comment="+chk.comment;
-      return false;
-   }
+   // Failure: bounded exponential-ish backoff. Never retry every tick.
+   g_stbPendingTrail[idx].failureCount++;
 
-   return true;
+   int fc=g_stbPendingTrail[idx].failureCount;
+   int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
+                         : (fc==2 ? STB_PEND_BACKOFF_2_SEC
+                                  : STB_PEND_BACKOFF_3_SEC));
+
+   g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
+
+   return false;
 }
 
-//--- Atomic modify pipeline for ONE ticket ---------------------------
+//--- Proposal-only pipeline for ONE ticket ---------------------------
+// Reads, verifies ownership, reads geometry, reads the tracked extreme,
+// calculates a candidate, validates it and returns a PROPOSAL. It never
+// calls the broker itself.
 bool STB_PendingTrailManageOne(const ulong ticket)
 {
    int idx=STB_PendingTrailFind(ticket);
@@ -334,14 +472,23 @@ bool STB_PendingTrailManageOne(const ulong ticket)
    if(direction==0 || point<=0.0)
       return true;
 
-   // 1) Read terminal / bar extreme.
+   // 1) Read the LIVE favorable-side market extreme.
+   // BUY STOP : falling Bid creates a new lower extreme.
+   // SELL STOP: rising Ask creates a new higher extreme.
+   // This is intentionally live, not candle-close based, so the pending
+   // entry and its SL follow a new favorable pre-trigger extreme immediately.
+   MqlTick liveTick;
+   if(!SymbolInfoTick(symbol,liveTick))
+      return true;
+
    double extreme=(direction>0)
-                  ? iLow(symbol,PERIOD_M15,1)
-                  : iHigh(symbol,PERIOD_M15,1);
+                  ? liveTick.bid
+                  : liveTick.ask;
 
    if(extreme<=0.0)
       return true;
 
+   // P4 monotonic trackedExtreme: BUY only moves down, SELL only moves up.
    bool isNewExtreme=false;
 
    if(direction>0)
@@ -357,7 +504,7 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return true;
    }
 
-   // 3) Calculate + validate + tick align via immutable order metadata.
+   // 3) Build a PROPOSAL: resolve entry + SL via the immutable metadata.
    STBPendingResolution res;
 
    bool resolved=
@@ -390,119 +537,41 @@ bool STB_PendingTrailManageOne(const ulong ticket)
       return true;
    }
 
-   double curEntry=OrderGetDouble(ORDER_PRICE_OPEN);
-   double curSL=OrderGetDouble(ORDER_SL);
+   STBPendingGeometryProposal prop;
+   ZeroMemory(prop);
+   prop.valid=true;
+   prop.entry=res.entry;
+   prop.sl=res.sl;
+   prop.tp=OrderGetDouble(ORDER_TP);
+   prop.source=STB_PEND_SRC_TRAIL;
+   prop.reason=res.reason;
 
-   // 4) Check actual difference: skip a broker no-op modify.
-   bool meaningfulChange=
-      MathAbs(res.entry-curEntry)>point*0.5 ||
-      MathAbs(res.sl-curSL)>point*0.5;
-
-   if(!meaningfulChange)
-   {
-      STB_PendingTrailLogNoNewExtreme(ticket,symbol,
-                                      STB_PendingTrailFind(ticket));
-      return true;
-   }
-
-   double tp=OrderGetDouble(ORDER_TP);
-   ENUM_ORDER_TYPE_TIME typeTime=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
-   datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
-   double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
-
-   double oldEntry=curEntry;
-   double oldSL=curSL;
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
 
-   // 5) Preflight the exact modify request against the terminal/broker.
-   string checkReason;
-   if(!STB_PendingTrailOrderCheckModify(ticket,
-                                        symbol,
-                                        res.entry,
-                                        res.sl,
-                                        tp,
-                                        typeTime,
-                                        expiration,
-                                        stopLimit,
-                                        checkReason))
+   // 4) Forward the proposal to the central submit gate. The gate applies
+   //    throttle / backoff / Step and then calls the single writer.
+   bool committed=STB_SubmitPendingTrailGeometry(ticket,
+                                                 prop.entry,
+                                                 prop.sl,
+                                                 prop.tp);
+
+   if(committed)
    {
-      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+      // P4: trackedExtreme advances only in the favorable direction.
+      if(direction>0)
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMin(g_stbPendingTrail[idx].trackedExtreme,extreme);
+      else
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMax(g_stbPendingTrail[idx].trackedExtreme,extreme);
+
+      Print("PENDING_TRAIL_UPDATE ticket=",IntegerToString((int)ticket),
             " symbol=",symbol,
-            " stage=ORDERCHECK",
-            " reason=",checkReason,
-            " requestedEntry=",DoubleToString(res.entry,digits),
-            " requestedSL=",DoubleToString(res.sl,digits));
-      return true;
+            " type=",STB_PendingTrailTypeName(orderType),
+            " entry=",DoubleToString(prop.entry,digits),
+            " sl=",DoubleToString(prop.sl,digits),
+            " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,digits));
    }
-
-   // 6) Modify once, synchronously.
-   trade.SetExpertMagicNumber(InpMagic);
-   trade.SetAsyncMode(false);
-
-   if(!trade.OrderModify(ticket,res.entry,res.sl,tp,typeTime,expiration,stopLimit))
-   {
-      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
-            " symbol=",symbol,
-            " stage=MODIFY_REQUEST",
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return true;
-   }
-
-   if(!TradeRetcodeModifySucceeded())
-   {
-      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
-            " symbol=",symbol,
-            " stage=SERVER_REJECT",
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return true;
-   }
-
-   // 7) Read terminal again and confirm.
-   if(!OrderSelect(ticket))
-   {
-      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
-            " symbol=",symbol,
-            " reason=ORDER_NOT_ON_TERMINAL_AFTER_MODIFY");
-      g_stbPendingTrail[idx].active=false;
-      return false;
-   }
-
-   double confirmedEntry=OrderGetDouble(ORDER_PRICE_OPEN);
-   double confirmedSL=OrderGetDouble(ORDER_SL);
-
-   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   double tolerance=MathMax(point*0.5,
-                            tickSize>0.0 ? tickSize*0.5 : point*0.5);
-
-   if(MathAbs(confirmedEntry-res.entry)>tolerance ||
-      MathAbs(confirmedSL-res.sl)>tolerance)
-   {
-      Print("PENDING_TRAIL_MODIFY_NOT_CONFIRMED ticket=",IntegerToString((int)ticket),
-            " symbol=",symbol,
-            " requestedEntry=",DoubleToString(res.entry,digits),
-            " actualEntry=",DoubleToString(confirmedEntry,digits),
-            " requestedSL=",DoubleToString(res.sl,digits),
-            " actualSL=",DoubleToString(confirmedSL,digits),
-            " ret=",trade.ResultRetcode());
-      return true;
-   }
-
-   // 8) Commit internal state ONLY after terminal confirmation.
-   g_stbPendingTrail[idx].trackedExtreme=extreme;
-   g_stbPendingTrail[idx].lastEntry=confirmedEntry;
-   g_stbPendingTrail[idx].lastSL=confirmedSL;
-   g_stbPendingTrail[idx].lastModifyTime=TimeCurrent();
-
-   Print("PENDING_TRAIL_UPDATE ticket=",IntegerToString((int)ticket),
-         " symbol=",symbol,
-         " type=",STB_PendingTrailTypeName(orderType),
-         " entry ",DoubleToString(oldEntry,digits)," -> ",DoubleToString(confirmedEntry,digits),
-         " sl ",DoubleToString(oldSL,digits)," -> ",DoubleToString(confirmedSL,digits),
-         " entryOffset=",DoubleToString(res.entryOffset,digits),
-         " slBuffer=",DoubleToString(res.slBuffer,digits),
-         " brokerMin=",DoubleToString(res.brokerMinDistance,digits));
 
    return true;
 }
@@ -573,6 +642,9 @@ void STB_PendingTrailOnOrderFilled(const ulong ticket)
 }
 
 //--- Restart recovery -------------------------------------------------
+// Registers / reconstructs state from terminal orders. It NEVER modifies an
+// order by itself: a proposal is only produced when the live market creates
+// a new favorable extreme (see STB_PendingTrailManageOne).
 int STB_PendingTrailRebuildFromTerminal()
 {
    STB_PendingTrailClear();
