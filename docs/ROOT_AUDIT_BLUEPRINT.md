@@ -476,3 +476,50 @@ This section forecasts failure classes that must be covered before any claim of 
 ### Remaining limits of this audit
 
 This pass is a static source and architecture review based on the browsable repository branch. It does not have access to the user's terminal, account, local files or physical backup media; it does not run MetaEditor, a runtime, or a simulator. It cannot prove absence of all defects. The appropriate conclusion is a bounded evidence statement, not “everything is guaranteed to work.”
+
+
+## Architecture decision — origin-agnostic coverage, explicit capabilities (2026-10-09)
+
+### Objective
+The default architecture must discover and reconcile every in-scope platform object without branching on the interface or actor that created it (mobile, desktop, EA, or another tool). “No scattered conditions” means centralizing variation behind contracts; it does **not** mean pretending positions, pending orders, and other object types have identical legal operations.
+
+### Required shape
+1. **One authoritative inventory/reconciliation boundary.** Build the managed view from current platform state and reconcile it on startup, on relevant events, and on a bounded periodic pass. Events are hints that trigger reconciliation, not the sole source of truth.
+2. **One normalized identity and snapshot contract.** Each observed object carries its platform identity, object kind, symbol, current state, last-observed version/time, and provenance only where useful for audit—not as a gate to discovery. Treat identifiers with different lifetimes as distinct; never use a list index as identity.
+3. **Capability-based dispatch.** Route by the operation the object supports, not by who created it or which UI created it. Put the unavoidable differences between object kinds in a small, reviewed adapter layer.
+4. **One mutation gateway per external-state domain.** All writes go through a common request/result contract. No manager calls platform mutation APIs directly. The gateway validates current identity and state, authorization, platform constraints, and request freshness immediately before writing.
+5. **Proposal-first managers.** Managers read normalized snapshots and emit typed proposals. They do not mutate shared state or each other’s private memory. A coordinator resolves incompatible proposals deterministically and returns an explicit outcome.
+6. **Truth-based completion.** A local function return is not sufficient evidence of completion. Reconcile with authoritative platform state and classify the result as confirmed, rejected, still pending/unknown, or inconsistent.
+7. **Recovery is a first-class path.** Restart, reconnect, missed events, partial operations, and externally changed objects must converge through the same reconciliation contract used during normal operation.
+8. **Explicit authority boundaries.** Discovery coverage and mutation authority are separate concepts. Seeing an object does not automatically grant permission to modify it. Unknown ownership or stale identity must produce a safe, visible refusal—not a silent skip or guessed authority.
+9. **One policy source.** Shared invariants and validation rules are defined once. Object-specific rules live in adapters; UI/source-specific exceptions are prohibited unless a documented platform constraint requires them.
+10. **Observable outcomes.** Every attempted operation has a correlation ID, object identity, requested action, precondition result, platform response, final reconciliation result, and bounded diagnostic context. Never report success before confirmation.
+
+### Anti-patterns to remove during any future refactor
+- “Created by mobile/manual/EA” checks used to decide whether an object is discovered or managed.
+- Repeated permission and state checks copied across managers with subtly different behavior.
+- Direct mutation calls from feature modules.
+- Last-writer-wins arbitration for conflicting proposals.
+- Treating an event callback or cached snapshot as authoritative final state.
+- Treating discovery as proof of ownership or authorization.
+- Reporting a missing capability as if it were implemented; do not infer independent break-even or live TP management from adjacent profit-protection or SL code.
+
+### Contract-level acceptance matrix
+| Scenario | Required invariant | Evidence needed |
+|---|---|---|
+| Object created through any interface | Discovered without source-specific opt-in | Controlled test fixture per supported source |
+| Object changed outside the EA | Internal view converges to platform state | External-change reconciliation test |
+| Duplicate or out-of-order events | No duplicate side effect; state converges | Event replay/reordering test |
+| Restart or reconnect | Inventory and owned state are rebuilt | Restart/reconnect test |
+| Two managers propose incompatible changes | Explicit deterministic conflict outcome | Arbitration unit test |
+| Object identity changes or becomes stale | Write is refused and state is re-read | Stale-identity negative test |
+| Platform rejects a request | Rejection is distinguished from success | Rejection-path test |
+| Operation has uncertain outcome | Mark unknown, reconcile, and avoid blind duplicate write | Ambiguous-result test |
+| Unsupported object capability | Clear unsupported result; no guessed operation | Capability-contract test |
+| Diagnostic path fails | Core state remains safe; failure is observable where possible | Fault-injection test |
+
+### Current source assessment
+This is a target architecture and acceptance contract, not a claim that the current EA satisfies it. Existing static findings still include multiple order-creation call families, a pending-delete authorization gap at the writer boundary, and serial one-proposal-at-a-time SL resolution rather than proven cross-manager arbitration. Logical houses remain largely inside one EA translation unit. No source-code behavior was changed by adding this section.
+
+### Non-goals and proof boundary
+This section does not claim compile success, runtime correctness, complete defect elimination, or any financial outcome. The contract can be accepted only after source-wide call-site review, build evidence, controlled non-live tests, and independent review.
