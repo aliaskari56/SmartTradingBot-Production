@@ -828,3 +828,23 @@ A comparison of `main` to `audit/expose-cleaned-source-20261009` reports the aud
 `BACKUP_MANIFEST.txt` claims a cleaned source and corresponding EX5, `0 errors, 0 warnings`, an include-file count, and a list of removed functions. The manifest also explicitly says runtime status is not proven. The manifest and EX5 file are present in the repository, but this review did not independently verify the local path, source/binary provenance, MetaEditor version/configuration, or raw compiler report. The Git blob SHA of the source must not be directly compared to the manifest's raw-file SHA-256; they are different hash constructions.
 
 **Evidence classification:** manifest compilation status = **claimed, not independently verified for this audit**; EX5 presence = **verified**, reproducible build provenance = **unknown**, runtime behavior = **not proven**. No executable source changed in this pass; documentation only.
+
+
+## Static pass 11 — Audit closeout gate (2026-10-09)
+
+This pass separates documentation completion from technical approval. Current evidence matrix:
+
+- **Primary source unchanged in recent documentation passes:** verified by re-fetch; blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`, 8,665 lines.
+- **Audit documentation retrievable:** verified by re-fetch of both report and blueprint.
+- **Static mutation/event findings documented:** completed for reviewed scope; this does not establish exhaustive coverage.
+- **Reproducible build from the exact audited source:** open; requires raw compiler output, tool version/configuration, exact dependencies, and source hash linkage.
+- **CI evidence for the exact audit-source commit:** open; historical runs on another branch/file do not transfer.
+- **Behavioral/recovery tests:** open; no inspectable results supplied.
+- **Independent review:** open.
+- **Release approval:** not granted.
+
+**Closeout decision:** documentation work for the declared scope is complete, but the technical audit remains open. No claims are made about runtime correctness, safety, profitability, or release readiness. This pass changed documentation only; it did not modify executable source or run a build/runtime test.
+
+Evidence required to close: (1) reproducible build from the exact source commit with raw logs and tool versions, (2) dependency and source/binary hash linkage, (3) repeatable event/state/failure-path test results, (4) independent review of mutation authorization boundaries, and (5) documented review of the full branch diff versus `main`.
+
+Final status remains: `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
