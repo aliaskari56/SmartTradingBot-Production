@@ -4629,13 +4629,47 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
   }
 
 //==================================================================
-// ONE MODIFY PER TICKET PER CYCLE (MASTER BLUEPRINT 8/33/39)
+// ONE MODIFY PER TICKET PER CYCLE + SAME-CYCLE SL ARBITRATION
 //==================================================================
+enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 };
+struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; };
+struct STBQueuedSLProposal
+  {
+   ulong ticket;
+   long cycle;
+   bool valid;
+   bool hasSL;
+   double sl;
+   int source;
+   string reason;
+  };
+STBQueuedSLProposal g_stbSLQueue[];
+bool g_stbCollectingSLProposals=false;
 long g_stbCycleId=0;
 
 void STB_BeginCycle()
   {
    g_stbCycleId++;
+   ArrayResize(g_stbSLQueue,0);
+   g_stbCollectingSLProposals=false;
+  }
+
+bool STB_QueuePositionSL(const ulong ticket,const double candidateSL,const int source,const string reason)
+  {
+   if(!g_stbCollectingSLProposals || ticket==0 || candidateSL<=0.0 ||
+      !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      return false;
+   int n=ArraySize(g_stbSLQueue);
+   if(ArrayResize(g_stbSLQueue,n+1)!=n+1)
+      return false;
+   g_stbSLQueue[n].ticket=ticket;
+   g_stbSLQueue[n].cycle=g_stbCycleId;
+   g_stbSLQueue[n].valid=true;
+   g_stbSLQueue[n].hasSL=true;
+   g_stbSLQueue[n].sl=candidateSL;
+   g_stbSLQueue[n].source=source;
+   g_stbSLQueue[n].reason=reason;
+   return true;
   }
 
 bool STB_CycleWriteAlreadyDone(const ulong ticket)
@@ -4655,7 +4689,45 @@ void STB_CycleMarkWritten(const ulong ticket)
       g_stbExposure[idx].lastWriteCycle=g_stbCycleId;
   }
 
-enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 }; struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; }; bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource){ finalSL=0.0; finalSource=-1; if(ticket==0||!PositionSelectByTicket(ticket)) return false; long ptype=PositionGetInteger(POSITION_TYPE); double currentSL=PositionGetDouble(POSITION_SL); bool found=false; for(int i=0;i<count;i++){ if(!props[i].valid||!props[i].hasSL) continue; double c=props[i].sl; if(c<=0.0) continue; if(ptype==POSITION_TYPE_BUY){ if(currentSL>0.0 && c<=currentSL) continue; if(!found||c>finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } else if(ptype==POSITION_TYPE_SELL){ if(currentSL>0.0 && c>=currentSL) continue; if(!found||c<finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } } return found; } bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return false; STBSLProposal props[]; ArrayResize(props,1); props[0].valid=true; props[0].hasSL=(candidateSL>0.0); props[0].sl=candidateSL; props[0].source=source; props[0].reason=reason; double finalSL=0.0; int finalSource=-1; if(!STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)) return false; return ModifyPositionSL(ticket,finalSL,isUserAction); } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
+bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource)
+  {
+   finalSL=0.0; finalSource=-1;
+   if(ticket==0 || count<=0 || !PositionSelectByTicket(ticket)) return false;
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long side=PositionGetInteger(POSITION_TYPE);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
+   bool found=false;
+   for(int i=0;i<count;i++)
+     {
+      if(!props[i].valid || !props[i].hasSL || props[i].sl<=0.0) continue;
+      double c=NormalizePrice(symbol,props[i].sl);
+      if(c<=0.0 || !IsValidSLForPosition(symbol,side,c)) continue;
+      if(side==POSITION_TYPE_BUY)
+        {
+         if(currentSL>0.0 && c<=currentSL) continue;
+         if(!found || c>finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
+           { finalSL=c; finalSource=props[i].source; found=true; }
+        }
+      else if(side==POSITION_TYPE_SELL)
+        {
+         if(currentSL>0.0 && c>=currentSL) continue;
+         if(!found || c<finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
+           { finalSL=c; finalSource=props[i].source; found=true; }
+        }
+     }
+   return found;
+  }
+
+bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket)) return false;
+   if(!isUserAction && g_stbCollectingSLProposals)
+      return STB_QueuePositionSL(ticket,candidateSL,source,reason);
+   // Explicit/manual and out-of-cycle calls remain synchronous.
+   return ModifyPositionSL(ticket,candidateSL,isUserAction);
+  } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
 
@@ -4786,6 +4858,59 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    return MathAbs(verified-newSL)<=tolerance;
   }
 
+// Resolve all automatic candidates after the three managers have run.
+// The selected write is revalidated by ModifyPositionSL against live terminal state.
+void STB_FlushPositionSLProposals()
+  {
+   g_stbCollectingSLProposals=false;
+   for(int i=0;i<ArraySize(g_stbSLQueue);i++)
+     {
+      ulong ticket=g_stbSLQueue[i].ticket;
+      if(ticket==0 || g_stbSLQueue[i].cycle!=g_stbCycleId) continue;
+      bool seen=false;
+      for(int j=0;j<i;j++)
+         if(g_stbSLQueue[j].ticket==ticket && g_stbSLQueue[j].cycle==g_stbCycleId) { seen=true; break; }
+      if(seen || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket)) continue;
+      STBSLProposal props[];
+      int count=0;
+      for(int j=i;j<ArraySize(g_stbSLQueue);j++)
+        {
+         if(g_stbSLQueue[j].ticket!=ticket || g_stbSLQueue[j].cycle!=g_stbCycleId) continue;
+         int n=ArraySize(props);
+         if(ArrayResize(props,n+1)!=n+1) continue;
+         props[n].valid=g_stbSLQueue[j].valid; props[n].hasSL=g_stbSLQueue[j].hasSL;
+         props[n].sl=g_stbSLQueue[j].sl; props[n].source=g_stbSLQueue[j].source;
+         props[n].reason=g_stbSLQueue[j].reason; count++;
+        }
+      double chosenSL=0.0; int chosenSource=-1;
+      if(count<=0 || !STB_ResolvePositionSL(ticket,props,count,chosenSL,chosenSource)) continue;
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      long side=PositionGetInteger(POSITION_TYPE);
+      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+      bool hasProfitCandidate=false;
+      for(int j=0;j<count;j++)
+         if(props[j].valid && props[j].hasSL && props[j].source==STB_SL_SRC_PROFIT_PROTECTION)
+            hasProfitCandidate=true;
+      if(!ModifyPositionSL(ticket,chosenSL,false) || !PositionSelectByTicket(ticket)) continue;
+      double actualSL=PositionGetDouble(POSITION_SL);
+      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+      double tolerance=MathMax(point*0.5,tickSize>0.0 ? tickSize*0.5:point*0.5);
+      if(side==POSITION_TYPE_BUY && actualSL+tolerance<chosenSL) continue;
+      if(side==POSITION_TYPE_SELL && actualSL-tolerance>chosenSL) continue;
+      if(hasProfitCandidate)
+        {
+         double pip=PipSize(symbol);
+         double achieved=(pip>0.0 ? (side==POSITION_TYPE_BUY ? (actualSL-entry)/pip:(entry-actualSL)/pip):0.0);
+         if(achieved>0.0) SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
+        }
+      Print("STB SL arbitration confirmed ticket=",ticket," source=",chosenSource,
+            " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " candidates=",count);
+     }
+   ArrayResize(g_stbSLQueue,0);
+  }
+
 //==================================================================
 // APPLY PROFIT LOCK//==================================================================
 // APPLY PROFIT LOCK
@@ -4856,7 +4981,8 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
    if(!STB_SubmitPositionSL(ticket,targetSL,STB_SL_SRC_PROFIT_PROTECTION,"PROFIT_PROTECTION",isUserAction))
       return false;
 
-   SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
+   if(!g_stbCollectingSLProposals || isUserAction)
+      SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
 
    return true;
 }
@@ -5043,7 +5169,7 @@ bool TrailPositionByLivePrice(const ulong ticket)
 
    bool result=STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL,"TRAIL");
 
-   if(result)
+   if(result && !g_stbCollectingSLProposals)
    {
       Print("STB LIVE TRAIL updated ticket=",ticket,
             " symbol=",symbol,
@@ -5668,7 +5794,8 @@ void STB_ReleaseAllSymbolManagement()
 
 void ManagePositions()
 {
-   // First pass: immediately protect every managed position that has no SL.
+   // Collect all automatic SL candidates before any broker write.
+   g_stbCollectingSLProposals=true;
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -5693,6 +5820,8 @@ void ManagePositions()
 
       TrailPositionByLivePrice(ticket);
    }
+
+   STB_FlushPositionSLProposals();
 }
 
 //==================================================================
