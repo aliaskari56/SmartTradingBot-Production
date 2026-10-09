@@ -783,3 +783,10 @@ This pass maps visible source anchors to logical houses and distinguishes confir
 ### Result
 
 The logical-house map now has source anchors for several major entry points, but it is not a complete dependency graph. H1/H2 ownership, full H4/H7 mutation-boundary coverage, H6 conflict handling, and H9 event convergence remain open. No source code was changed and no build or runtime evidence was generated.
+
+
+## Current-pass closure status
+
+The documentation pass is complete for its declared scope; the technical audit remains open. The current source reference was rechecked on this branch: `MQL5/Experts/SmartTradingBot_FINAL.mq5`, 8,665 lines, blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`.
+
+Still open: complete source-path coverage, confirmed exclusive ownership of shared state, event convergence/recovery evidence, build/runtime verification, and independent review. No compile, runtime, or Strategy Tester result is claimed. This closure note does not modify the EA and does not imply release readiness.
