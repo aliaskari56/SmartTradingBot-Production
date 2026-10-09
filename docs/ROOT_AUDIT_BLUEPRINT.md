@@ -230,3 +230,151 @@ The new source-neutral goal changes how the existing blueprint currently describ
 - Restart, duplicate/reordered trade events, partial fills, pending-to-position transition, and failed modification leave the registry consistent with observed terminal state.
 - A ticket outside the authorized scope is never modified, even if visible to the EA.
 - Explicit manual hold / AUTO resume semantics are deterministic and documented before implementation.
+
+
+## Precise contract map — ownership, interfaces, ordering, and invariants
+
+This section sharpens the target map into contracts that can be checked against source. It is intentionally a **code-audit specification**, not a claim of runtime correctness.
+
+### A. Canonical flow and permitted dependencies
+
+```mermaid
+flowchart LR
+  subgraph Inputs["Input adapters"]
+    EV["OnTradeTransaction / terminal scan"]
+    UI["Chart commands"]
+    SC["Scanner / setup builder"]
+    EXT["External terminal changes"]
+  end
+  EV --> IN["Intake + reconciler"]
+  UI --> CMD["Command validation"]
+  SC --> CREATE["Creation gate"]
+  EXT --> IN
+  CMD --> CREATE
+  CREATE --> BROKER["Terminal / trade server"]
+  BROKER --> IN
+  IN --> REG["Exposure registry"]
+  REG --> SNAP["Fresh per-ticket snapshot"]
+  SNAP --> SL["SL proposal"]
+  SNAP --> TP["TP proposal"]
+  SNAP --> PN["Pending geometry proposal"]
+  SL --> RES["Policy / conflict resolver"]
+  TP --> RES
+  PN --> RES
+  RES --> PW["Position geometry writer"]
+  RES --> QW["Pending geometry writer"]
+  RES --> DW["Pending delete writer"]
+  PW --> BROKER
+  QW --> BROKER
+  DW --> BROKER
+  BROKER --> VERIFY["Read-back + verify"]
+  VERIFY --> REG
+```
+
+Dependency direction is one-way: input adapters may submit commands/events; specialist managers may read snapshots and submit proposals; the resolver may approve/reject/merge proposals; only central writers may call broker mutation APIs. No manager or UI calls a broker mutation directly. A writer must not call back into a specialist to decide policy.
+
+### B. Ownership matrix
+
+| State / object | Sole logical owner | Other houses may do | Must never do |
+|---|---|---|---|
+| Live order/position facts | Terminal/server; registry mirrors observed facts | Read a fresh snapshot; request reconciliation | Treat a cached snapshot as authoritative after an external change |
+| Per-ticket observed geometry (entry, SL, TP, type, volume, symbol, lifecycle) | Exposure registry / reconciler | Propose a desired change | Write another ticket's record or fabricate a server-confirmed value |
+| Manual authority / scope / lease | Authority policy in H5 | Ask whether a command is allowed | Infer ownership from symbol alone or bypass the policy |
+| SL calculation/protection state | SL manager H6 | Submit candidate + reason + source | Call `trade.PositionModify` directly or change TP policy state |
+| TP calculation state | TP manager (target responsibility; current integration not yet proven) | Submit TP candidate + reason + source | Call `trade.PositionModify` directly or overwrite SL with stale data |
+| Pending trail anchor, retry/backoff, cooldown | Pending trail H7 | Submit a proposal for its own ticket | Manage a filled position or modify a different ticket |
+| Candidate/setup and scanner ranking | H1/H3 | Submit a new-order proposal to H4 | Manage existing exposure geometry |
+| Adaptive profile/outcome records | H2 | Consume confirmed lifecycle facts | Decide broker geometry or count every repeated reconciliation as a new event |
+| UI state and user intent | H8 | Issue validated commands through H4/H5/H6/H7 | Mutate order/position geometry directly |
+| Cycle sequencing and intake | H9 | Trigger one reconciliation/management pass | Run duplicate management engines from separate events |
+| Broker mutation | Central writers only | Receive an approved patch/delete request | Be called by scanner, UI, trail, or stats code directly |
+
+### C. Contract for every exposure
+
+Each order or position that is inside the explicitly authorized scope must be represented by a canonical record keyed by a stable ticket/position identity, not merely by symbol. The record should distinguish:
+
+- **Observed facts:** ticket, symbol, object kind, order/position type, current entry, current SL, current TP, volume, current lifecycle status, and last observed server state.
+- **Authority facts:** why the object is in scope, whether this instance owns the symbol lease, whether user manual hold is active, and which operations are permitted.
+- **Manager-private state:** SL calculation metadata, TP calculation metadata, pending trail anchor/retry state, and adaptive association. These remain in their owning house.
+- **Reconciliation metadata:** last event/scan time, last confirmed geometry, last requested patch, and result classification. A requested value must never be recorded as confirmed before terminal read-back.
+
+The registry is a read model of terminal truth, not a substitute for it. On conflict between cached and terminal values, terminal values win and the registry is reconciled.
+
+### D. Proposal and writer contracts
+
+**Position geometry.** In MQL5, `CTrade::PositionModify` takes both SL and TP values in one operation. Therefore the target architecture must not have independent SL and TP modules each write a full geometry pair from stale snapshots. Instead:
+
+1. SL and TP managers independently submit typed proposals against the same fresh ticket snapshot.
+2. The resolver merges the proposals into one final position geometry patch, preserving the observed value of any field with no approved proposal.
+3. The central position writer reselects the ticket, re-reads current SL/TP/type/symbol, checks authorization/lease and broker constraints, then issues one modification.
+4. It checks the trade-server retcode and re-reads the terminal values; it updates the registry only from observed values.
+5. If the object changed after the snapshot, reject/reconcile and recompute rather than blindly retrying stale geometry.
+
+**Pending geometry.** Entry, SL, TP, expiration, and (for STOP-LIMIT) stop-limit price form one coherent proposal for one order ticket. The resolver validates order type and the full geometry together. Only the pending writer can apply it; a trail module cannot write its own broker state.
+
+**Delete.** Delete is a distinct command, not a side effect of arbitrary state cleanup. The delete writer must reselect the exact active ticket, verify that it remains within authorized scope, check a narrow reason-specific permission, send the request, validate the server retcode, and verify the ticket is no longer active. Rollback of a just-created invalid order needs an explicit narrow authorization path; do not make a blanket exception for all deletes.
+
+**Creation.** New-order creation is separate from managing discovered exposures. The creation gate validates the command and permissions, creates the order, then sends the confirmed ticket through the same intake/registration/initial-protection path. The source of the command (automatic scan, chart action, or other terminal-side action) is metadata, not a reason to skip registry intake.
+
+Official MQL5 references confirm that `PositionModify` accepts both SL and TP and that its boolean return alone does not prove server execution; the result retcode must be checked. `OrderModify` has the same retcode requirement. See the official references below.
+
+### E. Deterministic management-cycle order
+
+1. **Intake/reconcile:** process pending transaction notifications quickly; rescan current terminal state to repair missed, delayed, duplicated, or reordered observations.
+2. **Freeze a fresh snapshot:** identify each in-scope ticket and record the geometry/authority version used for this pass.
+3. **Collect proposals:** managers calculate candidates without writing to the broker.
+4. **Resolve conflicts:** combine position SL/TP proposals and pending-field proposals; enforce priority, authority, directionality, broker constraints, and per-ticket write deduplication.
+5. **Authorize at the writer boundary:** reselect ticket and re-check scope, lease, object type, symbol permissions, current geometry and server constraints immediately before mutation.
+6. **Write once per ticket per cycle:** serialize writes and avoid two competing requests for the same object.
+7. **Verify server state:** inspect retcode and actual terminal state; do not assume a local `true` equals a completed server-side change.
+8. **Reconcile outcomes:** confirmed values update the registry; rejection or ambiguity records the failure and triggers a later fresh reconciliation, not an immediate unbounded retry.
+9. **Lifecycle accounting:** update adaptive/statistical state only from genuine confirmed lifecycle events, idempotently.
+
+MQL5 documents that multiple trade-transaction events can arise from a request, the account can change while `OnTradeTransaction` is running, and the event queue is bounded. Therefore transaction intake should be short, idempotent, and followed by reconciliation; it should not be treated as an atomic snapshot of account state.
+
+### F. Authority policy: origin-neutral, scope-bound
+
+- **Origin-neutral:** EA-created, chart-created, desktop/mobile-created, and externally changed objects are all eligible for discovery if they fall within the agreed scope.
+- **Scope-bound:** “manage everything visible” is not safe as a default. Scope must explicitly define account, symbol, magic/manual-trade policy, object types, and whether other EAs' or unrelated user trades are excluded. A visible object is not automatically an authorized object.
+- **Manual hold:** a user action can explicitly set a per-ticket hold. While held, automatic proposals are blocked for the fields covered by that hold; the UI must show the hold and the exact resume action.
+- **AUTO resume:** resume clears only the intended hold/override and re-reconciles current geometry before automated management resumes. It must not reset unrelated tickets or silently grant broad account scope.
+- **Lease:** a symbol lease coordinates cooperating instances, but it does not by itself prove that a ticket is in scope. Check both ticket scope and lease at each write door.
+- **External manual edit:** record the observed change as an event, classify it according to the explicit manual-hold policy, and refresh the baseline. Do not infer permanent manual authority merely from a geometry difference unless that is the confirmed product rule.
+
+**Open product decision:** the current code has manual-override checks in automatic position/pending modification paths. The user's origin-neutral goal needs a final explicit rule for whether manual edits automatically create MANUAL HOLD or merely update the baseline while auto-protection continues. Do not change that behavior until the rule is agreed.
+
+### G. Current-source mapping and exact known limits
+
+- H9 contains `STB_RunManagementCycle()`, called from `OnTick` and `OnTimer`; trade-transaction intake calls `STB_TradeIntakeFromTransaction()`. This is a recognizable orchestration starting point.
+- H5 contains ticket geometry tracking, manual-override detection, cycle write deduplication, and symbol-lease helpers.
+- H6 currently contains a central position-SL path and calls `trade.PositionModify(ticket,newSL,tp)`. A unified SL+TP proposal resolver is a target contract; the source inspected so far proves an SL proposal path, **not** a complete independently verified TP-manager integration.
+- H7's pending-trail include explicitly proposes geometry and delegates writes to `STB_ModifyPendingOrderGeometry()`; it stores per-ticket trail/retry state.
+- The central pending writer checks managed-order scope, manual override (for automatic requests), symbol lease, entry direction, risk floor, and stop-limit offset handling.
+- **H7-H5-001 remains open:** `STB_ExecuteOrderDelete()` does not enforce the symbol lease/authorization policy at its own boundary. The caller and rollback semantics must be reconciled before fixing it.
+- The primary source remains a large translation unit; these are logical contracts, not compiler-enforced module walls. Do not create a forest of new files just to make the diagram look modular.
+
+### H. Evidence-based acceptance checklist
+
+Mark each item only when a source trace or test result supports it:
+
+- [ ] Every input origin routes to intake/command validation; no origin gets an undocumented bypass.
+- [ ] The scope policy can distinguish managed manual trades from unrelated trades and other EA instances.
+- [ ] Registry facts are updated only from observed terminal state.
+- [ ] Position SL and TP proposals are merged against one fresh snapshot into one final write; absent fields preserve the actual current value.
+- [ ] Pending geometry changes preserve all relevant fields and order-type semantics, including STOP-LIMIT relationships.
+- [ ] Every writer checks ticket identity, scope, lease, permissions, current geometry, broker constraints, and server result itself.
+- [ ] Delete rollback is narrowly authorized without weakening normal delete ownership checks.
+- [ ] UI commands cannot reach broker mutation APIs directly.
+- [ ] Restart, partial fill, pending activation, duplicate/reordered transactions, manual edits, failed writes, and ticket disappearance converge to observed terminal state.
+- [ ] Per-ticket one-write-per-cycle and retry/backoff rules cannot be bypassed by alternate callers.
+- [ ] Adaptive/lifecycle stats are idempotent under repeated transaction delivery and reconciliation.
+- [ ] Each checked item links to evidence; compile/runtime-only items remain explicitly unverified until those tests are actually run.
+
+### I. Reference standards consulted
+
+- Microsoft Azure Architecture Center, design principles: https://learn.microsoft.com/en-us/azure/architecture/guide/design-principles/
+- AWS Prescriptive Guidance, hexagonal architecture and ports/adapters: https://docs.aws.amazon.com/en_en/prescriptive-guidance/latest/cloud-design-patterns/hexagonal-architecture.html
+- AWS Prescriptive Guidance, architecture overview / bounded contexts: https://docs.aws.amazon.com/prescriptive-guidance/latest/hexagonal-architectures/overview.html
+- MQL5 official `OnTradeTransaction`: https://www.mql5.com/en/docs/event_handlers/ontradetransaction
+- MQL5 official `CTrade::PositionModify`: https://www.mql5.com/en/docs/standardlibrary/tradeclasses/ctrade/ctradepositionmodify
+- MQL5 official `CTrade::OrderModify`: https://www.mql5.com/en/docs/standardlibrary/tradeclasses/ctrade/ctradeordermodify
