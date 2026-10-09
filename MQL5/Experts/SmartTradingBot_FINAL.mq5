@@ -2010,12 +2010,10 @@ bool PreparePendingSetup(Setup &s)
       double maxSL=tick.bid-minDist;
       double entrySL=s.entry-minDist;
 
+      // If the pattern-derived SL is too close to the live market, do not
+      // replace it with a broker-minimum-distance stop. Rebuild from confirmed
+      // structure; reject the setup if no valid structural stop exists.
       if(s.sl>maxSL)
-         s.sl=maxSL;
-
-      // Do not turn the broker minimum into the strategy SL.
-      // Recover with the same structural protection used by positions.
-      if(s.sl>=entrySL)
         {
          double structuralSL=0.0;
 
@@ -2023,6 +2021,7 @@ bool PreparePendingSetup(Setup &s)
                                            POSITION_TYPE_BUY,
                                            s.entry,
                                            structuralSL) ||
+            structuralSL>maxSL ||
             structuralSL>=entrySL)
            {
             Print("STB setup rejected: BUY structural SL unresolved symbol=",s.symbol);
@@ -2079,12 +2078,10 @@ bool PreparePendingSetup(Setup &s)
       double minSL=tick.ask+minDist;
       double entrySL=s.entry+minDist;
 
+      // If the pattern-derived SL is too close to the live market, do not
+      // replace it with a broker-minimum-distance stop. Rebuild from confirmed
+      // structure; reject the setup if no valid structural stop exists.
       if(s.sl<minSL)
-         s.sl=minSL;
-
-      // Do not turn the broker minimum into the strategy SL.
-      // Recover with the same structural protection used by positions.
-      if(s.sl<=entrySL)
         {
          double structuralSL=0.0;
 
@@ -2092,6 +2089,7 @@ bool PreparePendingSetup(Setup &s)
                                            POSITION_TYPE_SELL,
                                            s.entry,
                                            structuralSL) ||
+            structuralSL<minSL ||
             structuralSL<=entrySL)
            {
             Print("STB setup rejected: SELL structural SL unresolved symbol=",s.symbol);
@@ -2149,6 +2147,16 @@ bool PreparePendingSetup(Setup &s)
 
    if(risk<=0.0 || reward<=0.0)
       return false;
+
+   if(InpMaxInitialSLPips>0.0 &&
+      risk>InpMaxInitialSLPips*PipSize(s.symbol))
+     {
+      Print("STB setup rejected: structural risk exceeds InpMaxInitialSLPips symbol=",
+            s.symbol,
+            " riskPips=",DoubleToString(risk/PipSize(s.symbol),1),
+            " capPips=",DoubleToString(InpMaxInitialSLPips,1));
+      return false;
+     }
 
    s.rr=reward/risk;
 
@@ -4627,6 +4635,10 @@ bool CalculateNearestStructuralSL(const string symbol,
          if(candidate<=0.0 || candidate>=maxAllowed)
             continue;
 
+         // Cap the final Entry-to-SL distance, including the structural buffer.
+         if(strategyCap<DBL_MAX && referencePrice-candidate>strategyCap)
+            continue;
+
          if(swingLow>bestLow)
            {
             bestLow=swingLow;
@@ -4658,6 +4670,10 @@ bool CalculateNearestStructuralSL(const string symbol,
 
          double candidate=NormalizePrice(symbol,swingHigh+buffer);
          if(candidate<=minAllowed)
+            continue;
+
+         // Cap the final Entry-to-SL distance, including the structural buffer.
+         if(strategyCap<DBL_MAX && candidate-referencePrice>strategyCap)
             continue;
 
          if(swingHigh<bestHigh)
@@ -4710,7 +4726,10 @@ double CalculateReferenceCandleSL(const string symbol,
 
       candidate=NormalizePrice(symbol,candidate);
 
-      if(candidate>0.0 &&
+      bool withinStrategyCap=(InpMaxInitialSLPips<=0.0 ||
+                              MathAbs(referencePrice-candidate)<=InpMaxInitialSLPips*pip);
+
+      if(candidate>0.0 && withinStrategyCap &&
          IsValidSLForPosition(symbol,positionType,candidate))
         {
          sl=candidate;
@@ -4875,6 +4894,11 @@ bool CalculateBrokerFallbackSL(const string symbol,
          return false;
 
    sl=NormalizePrice(symbol,sl);
+
+   if(InpMaxInitialSLPips>0.0 &&
+      MathAbs(entryPrice-sl)>InpMaxInitialSLPips*pip)
+      return false;
+
    return IsValidSLForPosition(symbol,positionType,sl);
   }
 
