@@ -1509,26 +1509,35 @@ double NormalizeVolume(const string symbol,double volume)
    double maxLot = SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX);
    double step   = SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
 
-   if(step <= 0.0)
+   // Never turn a disabled/zero-volume request or an undersized request into
+   // the broker minimum. That can silently turn a 0x multiplier into a trade
+   // or increase the exposure beyond the configured fixed/risk volume.
+   if(!MathIsValidNumber(volume) || volume<=0.0 ||
+      minLot<=0.0 || maxLot<minLot || step<=0.0)
       return 0.0;
 
-   volume = MathMax(minLot,MathMin(maxLot,volume));
-   volume = MathFloor(volume / step + 1e-9) * step;
+   if(volume+1e-9<minLot)
+      return 0.0;
 
-// Flooring can push a value below the broker minimum when
-// minLot is not an exact multiple of step. Clamp again.
-   if(volume < minLot)
-      volume = minLot;
+   volume=MathMin(maxLot,volume);
+   volume=MathFloor(volume/step+1e-9)*step;
 
-   int digits = 2;
+   // Floating point flooring can dip just below a valid minimum. Use the
+   // broker minimum only when the original request already met that minimum.
+   if(volume<minLot)
+      volume=minLot;
 
-   if(step < 0.01)
-      digits = 3;
+   int digits=2;
+   if(step<0.01)
+      digits=3;
+   if(step<0.001)
+      digits=4;
 
-   if(step < 0.001)
-      digits = 4;
+   double normalized=NormalizeDouble(volume,digits);
+   if(normalized<minLot-1e-9 || normalized>maxLot+1e-9)
+      return 0.0;
 
-   return NormalizeDouble(volume,digits);
+   return normalized;
   }
 
 //+------------------------------------------------------------------+
