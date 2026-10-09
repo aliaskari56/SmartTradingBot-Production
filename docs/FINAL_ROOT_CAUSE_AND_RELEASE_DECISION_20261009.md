@@ -1,128 +1,144 @@
-# Final Integrated Root-Cause Review and Release Decision — 2026-10-09
+# Final Integrated Root-Cause Audit and Release Decision
 
-Branch: `audit/expose-cleaned-source-20261009`  
-Primary source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
-Current source Git blob: `fdce203d23a08eb4ca2966d4a09719c3e4a89397` (Git blob ID; not raw-file SHA-256)  
-Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`  
-Observed source size: 304,511 bytes; 9,156 lines  
-Static checker Git blob: `7f5092f1663f8a899449a16f3b6588df80c19bef`  
-Latest static run for this source/checker: [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138) — success, 26 checks passed.
+Last integrated review: 2026-10-09  
+Repository: aliaskari56/SmartTradingBot-Production  
+Audit branch: audit/expose-cleaned-source-20261009  
+Primary source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 
-## 1. Executive decision
+## 1. Final decision
 
-**Integration on the audit branch: COMPLETE. Static guardrails: PASS. MetaEditor compile/runtime acceptance: NOT RUN. Release: BLOCKED / NOT VERIFIED.**
+**Release status: BLOCKED / NOT VERIFIED.**
 
-This review consolidates the current branch state; it does not claim that this EA compiles, behaves correctly in a trading terminal, is profitable, or is ready for distribution. MetaEditor and Strategy Tester are not available in this execution environment. The PowerShell build procedure has been added to the existing `docs/EXACT_SOURCE_BUILD_PROVENANCE_CHECKLIST_PASS28_20261009.md`; it has not been executed here.
+The highest-priority source-structure findings tracked in earlier root-cause reports have been remediated on the audit branch in the areas of delete authorization, shared directional-volume preflight, and same-cycle SL arbitration. The latest associated GitHub Actions run, [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490), passed 24 static checks on the current source/checker content.
 
-No file or folder was added to the repository. Existing source, checker, issue and documentation paths were updated in-place. The `main` branch was not modified, and no merge into `main` was performed.
+That is not a compiler result or runtime test. MetaEditor is not available in this execution environment. No fresh compile, Strategy Tester run, demo test, broker compatibility test, package extraction, licensing decision, or independent release sign-off was performed in this pass. The checked-in EX5 is not proven to come from the source revision below.
 
-## 2. Source-level fixes now integrated
+No repository paths were added by this integration. The source and existing audit/checklist documents were updated on the audit branch only; main remains untouched.
 
-### RC-01 — Order-delete authorization at the write boundary
+## 2. Frozen revision and evidence
 
-The central `STB_ExecuteOrderDelete()` checks pending-order type, deletion reason, creator/source-to-comment family and freshness for immediate rollback. Server-expiry requests now additionally require source `ManagePendingOrders`, managed-symbol scope, and a verified symbol-management lease at the final writer boundary. This closes the observed gap where expiry was recalculated but its source/lease were not revalidated inside the writer.
+- Source file: MQL5/Experts/SmartTradingBot_FINAL.mq5
+- Current source Git blob: 17059923ccb18e1b717947e4581d9790df26a368 (Git blob identifier, not raw-file SHA-256)
+- Source-changing commit: d57b5c8c588a9cfa17e6a357d26ba2b87fd00155
+- Static checker: tools/audit_static_checks.py
+- Static checker Git blob: 179a6f2d05e75ea0a458ff72d1a2cf87aec0494d
+- Latest checked static run: [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490) — 24 PASS checks
+- Source tree reports 9,055 lines and 300,417 bytes. A Git blob identifier must not be reported as a raw SHA-256.
+- Existing tracked EX5: MQL5/Experts/SmartTradingBot_FINAL.ex5, blob 348bb13126ba73b9502f82466f2d1a2bea1e8f6f. Its source/build provenance is unknown; the compile runbook does not overwrite it.
 
-The rollback exception remains deliberately separate: a freshly created invalid order can require immediate rollback before the usual management lifecycle is established, so a blanket lease requirement would break that path.
+The source and checker checks establish only the properties encoded by the static checker. They do not execute functions in the EA, validate MQL compiler semantics, or establish account/server behavior.
 
-**Still required:** runtime tests for fresh creator rollback, wrong source/tag, stale rollback, foreign/unmanaged ticket, valid server expiry, local-age expiry, and a stale/competing lease. The static test confirms the intended guard is present; it does not execute the order writer.
+## 3. Root-cause findings and present disposition
 
-### RC-02 — Directional aggregate volume controls
+### RC-01 — SL proposals were previously resolved one at a time
+**Prior severity: HIGH | Source structure: REMEDIATED | Functional proof: OPEN**
 
-`STB_DirectionVolumeWithinLimit()` is used by all four identified creation families: automatic setup, manual pending stop, manual pending limit, and one-click hedge. The calculation includes same-symbol directional position volume and active pending exposure.
+The original flaw was not that a validator existed, but that callers submitted each management candidate in isolation. Initial protection, profit protection, and trailing therefore did not reach a single arbiter as a complete same-cycle set.
 
-**Boundary:** this is a point-in-time preflight, not an atomic reservation. Another actor can change exposure between the check and server submission. Broker validation and retcodes remain authoritative. Netting and hedging behavior still needs demo/runtime evidence.
+Current implementation:
+- Automatic candidates are queued by ticket and cycle.
+- The central flush gathers the full candidate set for each ticket.
+- BUY positions select the highest valid improving SL; SELL positions select the lowest valid improving SL.
+- Equal-price ties use stable source ordering.
+- Candidate geometry is tested against one shared tick/stops/freeze snapshot; the selected candidate and final broker write are validated again against live terminal state.
+- Queue-allocation failure aborts the whole automatic batch; per-ticket temporary-array failure skips that ticket rather than silently resolving a truncated candidate set.
+- Initial protection, profit protection, and trailing share one collection/flush path. Explicit user SAVE and the initial-protection lifecycle fallback remain deliberate synchronous exceptions.
 
-### RC-03 — Same-cycle SL proposal arbitration
+Functional permutation tests and BUY/SELL broker tests remain NOT RUN. Static structure does not prove the winner is correct in a live MQL runtime.
 
-Initial protection, automatic profit protection and live trailing collect candidates before the central flush. Proposals are grouped by ticket and cycle; the resolver receives the complete candidate set or skips the affected ticket if allocation fails. BUY positions select the highest valid improving SL; SELL positions select the lowest valid improving SL. Equal-price candidates use a deterministic source tie-break.
+### RC-02 — Aggregate directional volume was not guarded in every creator
+**Prior severity: HIGH | Source structure: REMEDIATED | Broker proof: OPEN**
 
-Candidate geometry uses one shared tick/stops/freeze snapshot. The chosen SL is revalidated against live terminal state and again at the writer boundary. If the market moved enough to invalidate the chosen candidate, the cycle fails closed instead of selecting a fallback against a different snapshot. Automatic profit-lock bookkeeping is deferred until the result can be confirmed; missing live SL is not credited as a successful protection stop.
+The shared STB_DirectionVolumeWithinLimit preflight is now present in four order-creation paths: PlaceSetup, PlaceManualPendingDirection, PlaceManualLimitDirection, and OneClickHedge. It considers same-direction position plus pending-order exposure against SYMBOL_VOLUME_LIMIT.
 
-**Still required:** candidate permutations, BUY/SELL monotonicity, initial+trail contention, profit-lock+trail contention, tick-size and stop/freeze boundaries, retcode failures, and broker runtime checks.
+This is a local snapshot check, not an atomic reservation. Another chart, EA, terminal, or server-side exposure change can race the check. Broker OrderCheck and the server result remain authoritative. Netting/hedging and concurrent exposure scenarios remain NOT RUN.
 
-### RC-04 — Stale SL/TP snapshot conflict
+### RC-03 — The final pending-delete writer lacked the complete authorization contract
+**Prior severity: HIGH | Source structure: REMEDIATED FOR CURRENT CALLERS | Runtime proof: OPEN**
 
-`ModifyPositionSL()` reselects the position and compares live side and TP against the earlier snapshot before sending the combined SL/TP modify request. It also rechecks monotonic SL validity and broker geometry.
+STB_ExecuteOrderDelete is the single direct OrderDelete writer. It validates pending-order type and validates rollback against creator source, ticket comment family, and freshness. Expiry requests are rechecked at the writer boundary against server expiration or the configured local age rule. It checks the server retcode and requires the ticket to disappear before logging confirmation.
 
-**Residual race:** MQL5 combined SL/TP modification is not an atomic compare-and-swap. A manual or other-instance TP edit can still race after the final read and before the server request. The implementation narrows this window; it does not eliminate it. Keep concurrent/manual TP tests in the acceptance suite.
+Current callers use creator rollback for OneClickHedge, PlaceSetup, and PlaceManual, plus server-expiration cleanup from ManagePendingOrders. The enum values for explicit-user-delete and explicit-cleanup are declared but have no current call sites and do not authorize a request by themselves. Do not assume a UI delete feature exists from those enum labels alone. Any future delete path must be explicitly authorized and tested. Runtime tests for wrong source/tag, stale rollback, manual/foreign order, and server response ambiguity remain NOT RUN.
 
-### RC-05 — Per-cycle versus cross-event idempotence
+### RC-04 — SL modification could restore a stale TP snapshot
+**Source mitigation: PRESENT | Atomicity: NOT AVAILABLE | Functional proof: OPEN**
 
-The one-write marker is scoped to one invocation of `STB_RunManagementCycle()`, which is called from lifecycle/tick/timer paths. A new invocation creates a new cycle ID, so the per-cycle limit does not prove that events close together cannot request successive changes to a ticket.
+The central position writer reselects the position before submission, rejects changed position side or TP relative to the earlier snapshot, and rechecks current SL monotonicity and SL validity immediately before PositionModify.
 
-**Still required:** tick/timer overlap, transaction bursts, delayed responses, restart/reconnect, manual edit, and multi-instance lease scenarios.
+This narrows the stale-TP window; it is not an atomic compare-and-swap. Another actor can still change TP between the final read and server request. This race must remain documented and tested rather than described as fully eliminated.
 
-### RC-06 — Partial-close lock-state lifecycle
+### RC-05 — Partial-close events could clear the position's stored profit-lock state
+**Source mitigation: PRESENT | Functional proof: OPEN**
 
-The close-deal cleanup runs before the deal-magic filter. Partial `OUT`/`OUT_BY` events preserve `LOCK_` and `MODFAIL_` state while the position remains; a full close clears it; `INOUT` reversal clears the old-direction state. This prevents an unrelated/manual-magic closing deal from bypassing cleanup and prevents partial exits from resetting a still-live position's earned-lock state.
+Per-ticket lock/failure cleanup now runs before filtering deal events by this EA's magic number. OUT/OUT_BY events preserve the stored lock while the position ticket still exists; a confirmed full close clears it. INOUT direction reversal clears the previous directional lock.
 
-**Still required:** runtime partial-close, full-close, reversal, netting and hedging tests. Current evidence is source-structural only.
+This fixes the prior unconditional-cleanup behavior structurally. MQL5 explicitly documents that trade-transaction notifications can arrive while account entities have already changed again, and event properties do not guarantee the current state of the position. Therefore partial close, full close, reversal, manual-close, netting, and hedging cases must still be exercised in the terminal. Reference: [MQL5 OnTradeTransaction documentation](https://www.mql5.com/en/docs/event_handlers/ontradetransaction).
 
-### RC-13 — Active profit-lock floor under same-cycle contention
+### RC-06 — Per-invocation cycle control is not cross-event proof
+**Residual severity: MEDIUM-HIGH | Runtime proof: OPEN**
 
-A final review found that a queued profit-protection proposal could pass producer-time validation, then fail the shared resolver snapshot while a weaker trailing candidate remained selectable. The flush previously used the presence of any queued profit candidate as a reason to persist the actual SL as locked pips, even when that actual stop did not reach the mandatory +20-pip target.
+OnInit, OnTick, and OnTimer route through STB_RunManagementCycle. The one-write marker is cycle-scoped, so it limits duplicate writes within a single cycle but is not a global "one write per ticket for all time" guarantee. Monotonic SL checks, writer ownership checks, state reconciliation and trade retcode verification are present, but tick/timer frequency, subsequent cycles, transaction bursts, and restart/reconnect behavior are not runtime-proven.
 
-The resolver now checks current net profit against the +50-pip trigger and enforces the normalized +20-pip target as a floor for automatic candidates whenever the position already has an SL. If no candidate satisfies that floor, it does not replace the existing stop with a weaker one. Only when the position has no SL at all may the resolver use the strongest valid non-profit-lock proposal as an emergency fallback; that fallback is not credited as a confirmed +20-pip lock. Lock-state persistence after the flush now requires the verified actual SL to satisfy the normalized policy target.
+### RC-07 — Source-to-EX5 provenance is not established
+**Severity: RELEASE BLOCKER | Status: OPEN**
 
-**Still required:** run SL-12 with BUY and SELL positions, competing trail/initial candidates, live stop/freeze constraints that reject the +20-pip target, and both existing-SL and no-SL cases. Static CI checks code structure only; it does not simulate broker behavior.
+The tracked EX5 was not built by this audit and has not been shown to correspond to the current source. The previously tracked backup manifest contains historical claimed hashes/compile output; those claims have not been independently recomputed for this exact source and toolchain.
 
-## 3. Remaining root causes and release blockers
+The existing build-provenance document now contains a PowerShell function that:
+- checks the branch, clean working tree and exact source blob;
+- stages a byte-identical source copy outside the repository;
+- passes the reviewed MQL5 tree as the include root;
+- invokes MetaEditor with compile/log arguments;
+- reports the raw source and EX5 SHA-256, exit code, compiler summary, and full log;
+- preserves the isolated build directory for inspection and never overwrites the tracked EX5.
 
-| ID | Area | Current status | What closes the gap |
-|---|---|---|---|
-| RC-07 | Exact source-to-EX5 provenance | OPEN | Freeze local commit; record raw SHA-256, MetaEditor/compiler version, full log, exit code and new EX5 SHA-256 from the same build |
-| RC-08 | Package and dependency provenance | OPEN | Extract the actual release ZIP using a binary-capable checkout; inventory all members/hashes and compare against the release manifest |
-| RC-09 | Source attribution / distribution rights | OPEN | Confirm actual rights-holder details and source/license provenance for the EA and both custom STB includes; do not invent attribution |
-| RC-10 | End-to-end runtime correctness | OPEN | Execute acceptance matrix and independent review; static CI cannot establish trading correctness or profitability |
-| RC-11 | Cross-event/instance lifecycle | OPEN | Execute overlap, restart, reconnect, transaction-order and multi-chart tests |
-| RC-12 | Swing/scanner algorithm parity | DEFERRED BY DESIGN | Preserve current EA logic; use fixed fixtures and regression evidence before any pivot tie-policy change |
+This is a procedure for the user's Windows/MetaEditor environment, not evidence that a compile has already passed. Runbook: [Exact-source build and PowerShell compile procedure](EXACT_SOURCE_BUILD_PROVENANCE_CHECKLIST_PASS28_20261009.md). Official command-line reference: [MetaQuotes MetaEditor integration](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide).
 
-The current EA header still contains generic `ProjectName`, `CompanyName` and `companyname.net` placeholders. They must not be replaced until the owner confirms accurate attribution. The repository also contains ALGLIB-family headers with GPL v2-or-later notices, but the traced EA include closure did not show ALGLIB use. Repository presence alone does not prove that those files are shipped or compiled into the EA. Actual ZIP membership and distribution rights remain to be established.
+### RC-08 — Package, third-party license, and source attribution remain unresolved
+**Severity: RELEASE BLOCKER | Status: OPEN**
 
-Other configuration caveats remain: `InpUseRiskSizing` defaults to `false`; the fixed-lot mode is the default. No independent evidence establishes an account-wide daily-loss/max-drawdown circuit breaker or strategy profitability. Do not claim these controls/outcomes without locating and testing them.
+The current EA visibly includes Trade.mqh and the two STB pending-trail modules. ALGLIB was not observed in the traced direct EA include closure, but the repository contains ALGLIB-family headers with GPL v2-or-later notices. The actual release ZIP has not been extracted and compared to an exact package manifest, so repository presence alone cannot determine whether those files are distributed.
 
-## 4. Verification evidence
+The EA source header still has generic ProjectName / CompanyName / companyname.net placeholders. The inspected STB module headers do not establish the rights holder or redistribution terms. Do not invent attribution or replace those fields without confirmed owner information. Package inventory, origin/ownership confirmation, notice review and a qualified compliance decision remain required.
 
-The latest static run [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138) completed successfully with 26 passing source-structure checks, including:
+### RC-09 — Strategy and operational safety are not verified by static checks
+**Severity: RELEASE BLOCKER | Status: OPEN**
 
-- one central order-delete writer and one central position-modify writer;
-- all four order-creation paths using shared directional-volume preflight;
-- rollback source/comment checks and the final expiry writer source/scope/lease gate;
-- TP snapshot conflict check;
-- complete per-ticket SL proposal collection, shared tick snapshot, deterministic tie-break, fail-closed allocation handling and final SL confirmation;
-- deferred/confirmed profit-lock bookkeeping;
-- partial-exit lock-state lifecycle; and
-- lexical balance.
+- InpUseRiskSizing defaults to false; fixed-lot behavior is the default unless the input is enabled.
+- No verified account-wide daily-loss or maximum-drawdown circuit breaker was established by this bounded review. Do not advertise one without finding and testing its implementation.
+- The EA's swing tie-handling differs from the separate BrokerStructureScanner in some equal-pivot cases. That is an algorithmic difference, not proof of a defect; avoid a broad strategy rewrite without fixed fixtures and shadow comparisons.
+- No Strategy Tester, demo, long-duration soak, profitability, spread/slippage sensitivity, or independent review evidence is available.
 
-The CI output explicitly does **not** cover MetaEditor compilation, Strategy Tester, demo/broker compatibility, EX5 provenance, package/license review, or profitability.
+## 4. Unified compile and release workflow
 
-## 5. Prepared compile procedure
+1. Sync the local checkout to audit branch audit/expose-cleaned-source-20261009 and ensure the working tree is clean.
+2. Open the PowerShell runbook linked above; paste its function into a PowerShell session and invoke it with the actual local checkout and MetaEditor path. Do not add a new script file to the repository.
+3. Review the complete compiler log. A clean build check requires process exit code 0, an output EX5, and a parsed summary of 0 errors and 0 warnings. If any warning exists, review it explicitly; the current runbook fails closed on warnings.
+4. Preserve the returned raw source SHA-256, Git blob, compiler path/version, complete log, process exit code, and EX5 SHA-256. The staged EX5 is a build candidate only; do not install it into a live terminal as part of the compile check.
+5. Execute acceptance tests SL-01 through SL-11, including source permutations, BUY/SELL monotonicity, initial+trailing and profit-lock+trailing contention, TP change races, partial closes, full close, reversal, manual override, restart/reconnect, netting/hedging and multi-instance ownership.
+6. Execute the order-volume and delete authorization matrices; retain the tester configuration, reports, journal, trade history and observed expected-versus-actual outcomes.
+7. Extract and inventory the intended release package, record every shipped file/hash/license, resolve source ownership/attribution, and obtain independent review before release.
 
-The existing build provenance checklist now contains a copy/paste PowerShell procedure that:
-1. requires the designated audit branch and the expected Git blobs for the EA plus all traced direct/transitive compile includes;
-2. refuses a local modification of any checked compile input;
-3. finds MetaEditor or stops for an explicit path if multiple installations are present;
-4. stages the exact source outside the repository and confirms raw SHA-256 equality;
-5. calls MetaEditor with the documented `/compile`, `/include`, and `/log` options;
-6. checks the compiler summary and EX5 existence; and
-7. prints source hash, commit, editor version, compiler result, log path, staging path and EX5 SHA-256.
+## 5. Gate matrix
 
-This is preparation only. No PowerShell or MetaEditor execution occurred in this environment. An actual Windows run and a human review of compiler warnings/log are still required. The source's raw SHA-256 cannot be inferred from its Git blob SHA.
+| Gate | Current status | Closure evidence |
+|---|---|---|
+| Static structural checks | PASS — 24 checks in run 37936060490 | Checks only the encoded source properties |
+| Exact-source MetaEditor compile | NOT RUN HERE | Full local log, toolchain identity, exit code, raw source and EX5 hashes |
+| SL arbitration runtime suite | NOT RUN | SL-01 through SL-11 results, including permutation and lifecycle tests |
+| Shared volume limit | STRUCTURALLY PRESENT; NOT RUN | All four creation paths under netting/hedging and race scenarios |
+| Pending delete authorization | STRUCTURALLY PRESENT FOR CURRENT CALLERS; NOT RUN | Creator rollback, expiry, stale/mismatched/foreign-ticket scenarios |
+| SL/TP concurrency and event lifecycle | NOT RUN | TP race window, tick/timer, transaction bursts, reconnect/restart |
+| Package / dependency / license / attribution | OPEN | Exact ZIP manifest, source provenance, ownership and qualified review |
+| EX5 provenance | OPEN | Exact source/toolchain/log/EX5 chain of custody |
+| Strategy Tester and demo | NOT RUN | Reproducible test configurations, reports and journals |
+| Independent release review | OPEN | Reviewer sign-off tied to frozen revision |
 
-## 6. Required acceptance before release
+## 6. Final decision
 
-1. Run the prepared PowerShell preflight/build from the exact checkout and preserve the complete compiler log, raw source SHA-256, raw EX5 SHA-256, toolchain version and process/compiler result.
-2. Review every compiler warning; do not treat merely producing EX5 as a pass.
-3. Execute the SL, delete authorization, volume guard, lifecycle, restart/reconnect, manual override, partial-close, netting/hedging and multi-instance tests in `docs/RELEASE_ACCEPTANCE_TEST_MATRIX_20261009.md`.
-4. Extract and inventory the actual distributable ZIP; determine dependency membership, notices, ownership and license status.
-5. Obtain independent review against the frozen source and evidence bundle.
-6. Keep Issue #5 open until functional SL acceptance and the build gate have evidence.
+The original same-cycle SL root cause has a structural implementation on the audit branch, and the partial-exit state-lifecycle edge was also addressed. The shared volume preflight and delete authorization controls are present at the source level. These improvements reduce the known gaps but do not establish compiler validity or safe runtime behavior.
 
-## Final conclusion
+**Final audit status: STATIC STRUCTURAL CHECKS PASS; TECHNICAL VERIFICATION OPEN.**  
+**Final release status: BLOCKED / NOT VERIFIED.**
 
-The same-cycle SL arbitration, shared directional-volume guard, final expiry-delete ownership check and partial-close lock-state handling are integrated in the audit branch and covered by 26 passing static checks. That is a material source-level improvement, but not a compiler/runtime certification.
-
-**Final static status: PASS FOR THE CHECKS ENCODED.**  
-**Final technical status: OPEN.**  
-**Final release status: BLOCKED / NOT VERIFIED.**  
-`main` remains untouched.
+Do not merge this status into a production-release claim, do not replace the tracked EX5 with an unverified binary, and do not touch main as part of this audit.
