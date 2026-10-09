@@ -7796,6 +7796,12 @@ int OnInit()
 // first cycle from registering/trailing recovered orders before a clean rebuild.
    STB_PendingTrailRebuildFromTerminal();
 
+// Seed the per-ticket geometry/override registry before any write is attempted.
+// This closes the attach/restart window in which a manual SL/TP edit could be
+// mistaken for an unknown baseline because the first timer reconciliation had
+// not yet run.
+   STB_ReconcileTradeRegistry();
+
 // Harden restart/reattach protection: do not wait for the first Tick/Timer.
 // Every currently open position is checked immediately through the one cycle.
    STB_RunManagementCycle(); // Blueprint 30/33: enter management through the single cycle
