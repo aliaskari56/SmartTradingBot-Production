@@ -90,8 +90,9 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary
 
-- Static guardrail CI run `37925611744`: success. This verifies only the checks encoded in `tools/audit_static_checks.py`.
-- The source still submits SL proposals one at a time to `STB_ResolvePositionSL`; there is no proven cross-source same-cycle arbitration.
+- Earlier static guardrail CI run `37925611744`: success on the prior checker version; it verified only the checks encoded at that revision.
+- Latest fail-closed run `37927127485`: **FAIL as intended** because the source still resolves SL proposals one at a time. All other static checks and lexical balance passed. This is a source blocker, not a compiler failure. The CI is now configured to prevent a green status while this known blocker remains.
+- The source still submits SL proposals one at a time to `STB_ResolvePositionSL`; there is no proven cross-source same-cycle arbitration. A regression gate now fails CI on that exact pattern; the gate is not itself a code fix.
 - The position modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
 - MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
 - Release decision: **BLOCKED / NOT VERIFIED**.
