@@ -119,6 +119,18 @@ def main() -> int:
              "g_stbSLQueue[n].ticket=ticket",
              "g_stbSLQueue[n].cycle=g_stbCycleId",
              "STB_QueuePositionSL(ticket,candidateSL,source,reason)"))),
+        ("queue allocation failure aborts the incomplete arbitration batch",
+         all(token in source for token in (
+             "bool g_stbSLCollectionFaulted=false;",
+             "g_stbSLCollectionFaulted=true;",
+             "bool collectionFault=g_stbSLCollectionFaulted;",
+             "if(collectionFault)",
+             "incomplete proposal queue; no automatic SL writes"))),
+        ("per-ticket resolver receives the full candidate set or skips that ticket",
+         all(token in source for token in (
+             "if(ArrayResize(props,count)!=count)",
+             "never arbitrate a silently truncated candidate set",
+             "props[propIndex].reason=g_stbSLQueue[j].reason; propIndex++"))),
         ("management collects before a single central flush",
          source.count("STB_FlushPositionSLProposals();") == 1 and
          "g_stbCollectingSLProposals=true;" in source and
