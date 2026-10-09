@@ -10,7 +10,7 @@ EA source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 - Reviewed source Git blob: 6bca33bc8e0c961f317b0828e46faf7a6b9929b4 (Git blob ID, **not** raw-file SHA-256)
 - Source-changing commit: 30d683029158bc4a1cab64e8d3d190af04b07479
 - Static checker blob: 7f5092f1663f8a899449a16f3b6588df80c19bef
-- Static CI run for this source/checker combination: [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269) — 26 structural checks passed.
+- Static CI run for this source/checker combination: [37950552410](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37950552410) — 26 structural checks passed.
 - The current resolver also enforces the active profit-lock floor and only persists lock-pips after the final terminal SL meets the normalized target. The current delete writer rechecks expiry source, managed-order scope and symbol lease at the final writer boundary.
 - The previously tracked MQL5/Experts/SmartTradingBot_FINAL.ex5 is **not** proven to correspond to this source. Do not treat it as the output of the build below.
 
