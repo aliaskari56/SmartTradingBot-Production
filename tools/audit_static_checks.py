@@ -113,6 +113,23 @@ def main() -> int:
         ("SL submit does not force single-proposal arbitration",
          "ArrayResize(props,1)" not in source and
          "STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)" not in source),
+        ("automatic SL proposals are queued with ticket and cycle",
+         all(token in source for token in (
+             "STBQueuedSLProposal g_stbSLQueue[]",
+             "g_stbSLQueue[n].ticket=ticket",
+             "g_stbSLQueue[n].cycle=g_stbCycleId",
+             "STB_QueuePositionSL(ticket,candidateSL,source,reason)"))),
+        ("management collects before a single central flush",
+         source.count("STB_FlushPositionSLProposals();") == 1 and
+         "g_stbCollectingSLProposals=true;" in source and
+         source.index("g_stbCollectingSLProposals=true;") < source.index("STB_FlushPositionSLProposals();")),
+        ("resolver has deterministic source tie-break and revalidates SL",
+         "props[i].source<finalSource" in source and
+         "IsValidSLForPosition(symbol,side,c)" in source),
+        ("automatic profit-lock state is deferred during collection",
+         "if(!g_stbCollectingSLProposals || isUserAction)" in source),
+        ("trail success log is not emitted for queued proposals",
+         'if(result && !g_stbCollectingSLProposals)' in source),
     ]
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
