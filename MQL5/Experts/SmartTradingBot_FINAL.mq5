@@ -3639,23 +3639,10 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
       trans.deal>0 &&
       HistoryDealSelect(trans.deal))
      {
-      // Manual authority belongs to the exposure, not the pending-order ticket.
-      // When an overridden pending fills, transfer that authority to the
-      // resulting position ticket before the expired order record is pruned.
-      bool inheritedManualOverride=false;
-
+      // Pending-order override applies only while the order is pending.
+// The resulting open position always enters the protection manager.
       if(trans.order>0)
-        {
-         int orderExposureIdx=STB_ExposureFind(trans.order);
-
-         if(orderExposureIdx>=0)
-            inheritedManualOverride=g_stbExposure[orderExposureIdx].manualOverride;
-
-         if(!inheritedManualOverride && trans.symbol!="")
-            inheritedManualOverride=STB_OverridePersistOn(trans.order,trans.symbol);
-
          STB_PendingTrailOnOrderFilled(trans.order);
-        }
 
       if(trans.position>0 && PositionSelectByTicket(trans.position))
         {
@@ -3670,14 +3657,11 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
             STB_GeomStore(trans.position,true,
                           positionEntry,positionSL,positionTP);
 
-            if(inheritedManualOverride)
-              {
-               STB_ManualOverrideSet(trans.position);
-               Print("STB MANUAL_OVERRIDE TRANSFERRED order=",
-                     IntegerToString((int)trans.order),
-                     " position=",IntegerToString((int)trans.position),
-                     " symbol=",positionSymbol);
-              }
+            Print("STB POSITION PROTECTION ACTIVE after fill ticket=",
+                   IntegerToString((int)trans.position),
+                   " symbol=",positionSymbol,
+                   " SL=",DoubleToString(positionSL,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)),
+                   " TP=",DoubleToString(positionTP,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)));
            }
 
          // SIMPLIFIED: origin registry call removed.
@@ -4280,11 +4264,10 @@ double PositionNetProfitPips(const ulong ticket)
 //==================================================================
 // MANUAL_OVERRIDE (minimal per-ticket user authority)
 //==================================================================
-// Rule: any user change to SL / TP / pending entry marks that ticket
-// MANUAL_OVERRIDE = ON. The auto engines (Profit Lock / Live Trail /
-// Pending Trail) must not modify it until the user presses AUTO.
-// The single position / pending writers skip the modify only for automatic
-// calls (manual user commands pass isUserAction=true).
+// Position protection remains active, including after manual SL/TP edits.
+// MANUAL_OVERRIDE is retained only for pending-order lifecycle/trailing behavior.
+// It never suppresses an open position's initial SL, profit lock, or live trail.
+// User-issued modify actions still pass through the same broker validation.
 
 
 //==================================================================
@@ -4499,8 +4482,7 @@ bool STB_ManualOverrideIs(const ulong ticket)
    int idx=STB_ExposureFind(ticket);
    if(idx>=0)
       return g_stbExposure[idx].manualOverride;
-   // Not yet in the Runtime registry: consult persistent storage (backing
-   // only). Safe direction: a true here only blocks auto writes.
+   // Persistent override is consulted by pending-order managers only;\n   // open-position protection deliberately ignores this flag.
    return STB_OverridePersistOn(ticket,STB_ExposureSymbolOf(ticket));
   }
 
@@ -4599,7 +4581,11 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
       double sl=PositionGetDouble(POSITION_SL);
       double tp=PositionGetDouble(POSITION_TP);
       if(!STB_GeomIsKnown(ticket,true,e,sl,tp,symbol))
-         STB_ManualOverrideSet(ticket);
+         Print("STB POSITION GEOMETRY UPDATED ticket=",ticket,
+               " symbol=",symbol,
+               " SL=",DoubleToString(sl,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " TP=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " automaticProtection=ACTIVE");
       STB_GeomStore(ticket,true,e,sl,tp);
       return;
      }
@@ -4912,7 +4898,6 @@ void STB_ProfitProtectionOne(const ulong ticket)
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
    double currentSL=PositionGetDouble(POSITION_SL);
    double priceMovePips=STB_PositionPriceMovePips(ticket);
-   double netProfitPips=PositionNetProfitPips(ticket);
    double locked=GetLockedPips(ticket);
    double triggerPips=STB_ProfitLockTriggerPips();
    double lockPips=STB_ProfitLockLockPips();
@@ -4936,6 +4921,7 @@ void STB_ProfitProtectionOne(const ulong ticket)
      }
    if(priceMovePips>=triggerPips && (locked<lockPips || !liveStopSatisfiesPolicy))
      {
+      double netProfitPips=PositionNetProfitPips(ticket);
       Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
             " symbol=",symbol,
             " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
@@ -5334,9 +5320,8 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 //+------------------------------------------------------------------+
 void AutoProfitProtection()
 {
-   // One implementation owns trigger, lock policy and manual-override gating.
-   // This avoids duplicate logic and prevents repeated logs for user-controlled
-   // positions whose automatic writes are intentionally paused.
+   // One implementation owns the universal trigger and lock policy.
+   // Open-position management remains active regardless of manual SL/TP edits.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
@@ -5374,9 +5359,8 @@ void ManualSavePlus20()
       double currentLock=GetLockedPips(ticket);
       double requested=currentLock+InpManualSaveStepPips;
 
-      if(profit>=requested && ApplyProfitLock(ticket,requested,true))
-         STB_ManualOverrideSet(ticket); // MANUAL_OVERRIDE: only a confirmed successful SAVE grants user authority
-      // (removed) unconditional STB_ManualOverrideSet - override now causal on confirmed save
+      if(profit>=requested)
+          ApplyProfitLock(ticket,requested,true);
      }
 
    Print("STB SAVE +20 executed for managed positions count=",managed);
