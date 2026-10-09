@@ -378,3 +378,47 @@ Mark each item only when a source trace or test result supports it:
 - MQL5 official `OnTradeTransaction`: https://www.mql5.com/en/docs/event_handlers/ontradetransaction
 - MQL5 official `CTrade::PositionModify`: https://www.mql5.com/en/docs/standardlibrary/tradeclasses/ctrade/ctradepositionmodify
 - MQL5 official `CTrade::OrderModify`: https://www.mql5.com/en/docs/standardlibrary/tradeclasses/ctrade/ctradeordermodify
+
+
+## Whole-building coverage audit — static pass (2026-10-09)
+
+**Purpose:** test whether the existing house map leaves required rooms, services, or doors unassigned. This is a source-coverage audit, not a runtime/release sign-off. The main branch and source code are unchanged by this audit note.
+
+### Whole-building capability coverage matrix
+
+| Capability / room | Current code evidence | Coverage status | Unresolved proof / gap |
+|---|---|---|---|
+| Host lifecycle, configuration, common utilities | OnInit line 7883; ValidateInputs near 7780; OnDeinit line 8073; shared price/volume/symbol helpers | Located; static evidence only | Input-boundary and lifecycle tests not run |
+| Market/setup analysis | BuildSetup near 3083; scanner near 7090; setup validation and revalidation call paths | Located; static evidence only | No compile, deterministic bar-by-bar tests, or data-leakage test evidence |
+| Scanner and candidate ranking | STB_ScannerRun and symbol/quote checks | Located; static evidence only | Multi-symbol scheduling, stale quotes, empty/invalid watchlists and repeated scans need test evidence |
+| Adaptive state and lifecycle outcomes | Profile persistence and outcome functions near 288–1260; transaction-driven lifecycle processing near 8301 onward; CSV logging | Located; static evidence only | Restart persistence, duplicate/reordered transactions, partial closes and exactly-once outcome accounting not runtime-proven |
+| Order creation / execution gate | Creation call sites in OneClickHedge (~4035), PlaceSetup (~6139), PlaceManualPendingDirection (~6492), PlaceManualLimitDirection (~6590) | Four separate creation doors located | No single central creation writer/gateway is established; prove each door applies the same scope, permission, geometry, retcode, intake and rollback contract |
+| Exposure registry and authority | Ticket geometry tracking, manual override, symbol lease and cycle write tracking | Located; static evidence only | Scope policy for all manual/mobile/foreign-magic/other-EA objects needs a single explicit product rule and tests |
+| Initial protection | EnsureInitialSL and EnsureInitialSLForPendingOrder; management cycle calls position and pending protection | Located; static evidence only | Failure/retry behavior and broker-specific constraints are not runtime-proven |
+| Position profit protection | AutoProfitProtection, STB_ProfitProtectionOne, ApplyProfitLock; fixed source policy constants for trigger/lock; ManualSavePlus20 | Located; static evidence only | The named automatic rule is a profit-lock policy, not a separately identified break-even manager. No runtime proof of edge cases or server behavior |
+| Position live trailing | TrailPositionByLivePrice; called after initial protection and automatic profit protection in ManagePositions | Located; static evidence only | Closed-bar/live-price policy, step gates, stop/freeze behavior and interaction with other SL requests need tests |
+| Position TP management | Current TP is read/preserved by the central PositionModify call; setup creation can provide TP | **No separate live TP manager/resolver found in the inspected source** | If independent TP management is required, it is a missing/unverified room, not a capability to assume from the presence of TP fields |
+| Pending-order trail | STB_PendingTrail.mqh; ticket state, supported pending types, restart rebuild, retry/backoff, proposal-only contract | Located; static evidence only | Activation/handoff, all six order types, manual edits, and failure/restart paths need deterministic tests |
+| Pending modification writer | STB_ModifyPendingOrderGeometry near 1868; one trade.OrderModify call | Single modify writer located | Must keep scope, lease, retcode, read-back, full-field and STOP-LIMIT contracts proven by tests |
+| Pending deletion / rollback | STB_ExecuteOrderDelete near 8135 and wrapper STB_RequestOrderDelete | Single delete writer located; **known gap** | H7-H5-001: writer itself does not enforce the verified symbol lease/authorization at the write boundary; rollback callers require a narrow explicit policy |
+| Chart/UI command path | Buttons created in OnInit; OnChartEvent near 8530 dispatches commands | Located; static evidence only | Prove every command uses a validated door and UI cannot mutate broker state or clear unrelated overrides |
+| Event intake and cycle orchestration | OnInit, OnTick (~8220), OnTimer (~8256), OnTradeTransaction (~8301), OnChartEvent (~8530); central cycle at ~8212 | Located; static evidence only | Event ordering, duplicate delivery, long-handler behavior and reconciliation convergence need tests |
+| Diagnostics, persistence and recovery | Print/log paths, terminal Global Variables, adaptive CSV, tester metrics CSV | Located; cross-cutting services are spread through the EA | Retention, namespace collisions, write failures, corrupted/stale values and observability coverage need explicit tests |
+| Build/test/release evidence | An EX5 exists in the branch | Not verified | EX5/source provenance unknown; no current-source MetaEditor compile or runtime evidence |
+
+### Confirmed architectural gaps from source tracing
+
+1. **No separately identified break-even manager.** The source contains a universal profit-lock path and live trailing, but the terms/functions for a distinct break-even manager are absent from the inspected EA. Do not label profit lock as break-even.
+2. **No independently verified live position TP manager.** The central position writer preserves the current TP while changing SL; this is not evidence of a TP proposal owner or TP conflict resolver.
+3. **The SL “resolver” is not yet a multi-manager merge in the current call path.** STB_SubmitPositionSL builds a one-element proposal array and calls STB_ResolvePositionSL with count 1. The resolver function can compare proposals in principle, but the inspected submission path does not collect and arbitrate simultaneous initial-SL, profit-lock, and trail proposals. Current sequencing is serial priority, not the full target contract described in section D.
+4. **Order creation has four separate call-site families.** Modification and deletion are centralized, but creation remains in multiple functions. This is not automatically a defect if all doors share equivalent validation, but the central creation contract is not structurally enforced.
+5. **Delete writer authorization remains incomplete.** STB_ExecuteOrderDelete reselects the ticket and checks the server result/disappearance, but does not itself verify the symbol lease and scoped authorization. This is the previously recorded H7-H5-001.
+6. **Logical houses are not isolated modules.** Most houses share one 8,665-line EA translation unit. The map can assign ownership, but compiler-enforced boundaries and dependency direction are not present for most houses.
+
+### Whole-building rule
+
+No room may be marked “complete” merely because a function or field exists. A capability is complete only when all four links are evidenced: **owner → every input/door → every dependency/interaction → failure/recovery proof**. Missing product requirements remain marked “unknown” rather than silently invented. Current status is **static map coverage improved; functional and release completeness not proven**.
+
+### External platform facts used
+
+The official MQL5 documentation states that trade-transaction events may arrive in multiple stages, request-to-event cardinality is not one-to-one, transaction arrival priority is not guaranteed, and account state may change while OnTradeTransaction runs. The handler therefore cannot be treated as an atomic account snapshot. References: https://www.mql5.com/en/docs/event_handlers/ontradetransaction, https://www.mql5.com/en/docs/event_handlers/ontrade, https://www.mql5.com/en/docs/basis/function/events.
