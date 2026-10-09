@@ -8697,18 +8697,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    string comment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
    long magic=HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
    long entryType=HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
-
-   if(magic!=(long)InpMagic)
-      return;
-
-// Hedges use the same magic but are not strategy-profile observations.
-   bool isHedge=STB_AdaptiveIsHedgeComment(comment);
-
    string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
 
-   // Clean per-ticket protection state for all close paths, including hedges
-   // which are intentionally excluded from adaptive learning below.
+   // Reconcile per-ticket protection state before filtering by deal magic:
+   // a manual/foreign-magic deal can partially or fully close a managed
+   // netting position. Preserve state after partial OUT/OUT_BY while the
+   // position still exists; clear it on full close or direction reversal.
    if(entryType==DEAL_ENTRY_OUT ||
       entryType==DEAL_ENTRY_OUT_BY ||
       entryType==DEAL_ENTRY_INOUT)
@@ -8716,10 +8711,21 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       ulong closedTicket=trans.position;
       if(closedTicket>0)
         {
-         GlobalVariableDel(TicketLockName(closedTicket));
-         GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
+         bool positionRemains=PositionSelectByTicket(closedTicket);
+         bool exposureReversed=(entryType==DEAL_ENTRY_INOUT);
+         if(exposureReversed || !positionRemains)
+           {
+            GlobalVariableDel(TicketLockName(closedTicket));
+            GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
+           }
         }
      }
+
+   if(magic!=(long)InpMagic)
+      return;
+
+// Hedges use the same magic but are not strategy-profile observations.
+   bool isHedge=STB_AdaptiveIsHedgeComment(comment);
 
    if(entryType==DEAL_ENTRY_IN && !isHedge && positionId>0)
      {
