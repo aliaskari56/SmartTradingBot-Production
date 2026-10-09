@@ -3026,6 +3026,56 @@ bool FindOriginCandle(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Find the nearest already-confirmed opposite-side swing that predates the
+// structure-break candle. This is the fallback stop anchor when no valid OB
+// exists; the broken pivot itself is an entry trigger, not a protective stop.
+bool FindStructuralStopAnchor(const string symbol,
+                              const int direction,
+                              const int bosShift,
+                              double &anchorPrice)
+  {
+   anchorPrice=0.0;
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+      return false;
+
+   int bestShift=2147483647;
+
+   if(direction>0)
+     {
+      for(int i=0;i<ArraySize(lows);i++)
+        {
+         if(lows[i].shift<=bosShift || lows[i].price<=0.0)
+            continue;
+
+         if(lows[i].shift<bestShift)
+           {
+            bestShift=lows[i].shift;
+            anchorPrice=lows[i].price;
+           }
+        }
+     }
+   else
+     if(direction<0)
+       {
+        for(int i=0;i<ArraySize(highs);i++)
+          {
+           if(highs[i].shift<=bosShift || highs[i].price<=0.0)
+              continue;
+
+           if(highs[i].shift<bestShift)
+             {
+              bestShift=highs[i].shift;
+              anchorPrice=highs[i].price;
+             }
+          }
+       }
+
+   return (anchorPrice>0.0 && bestShift<2147483647);
+  }
+
 bool BuildSetup(const string symbol,
                 const int direction,
                 Setup &s,
@@ -3289,55 +3339,6 @@ bool BuildSetup(const string symbol,
    return true;
   }
 
-// Find the nearest already-confirmed opposite-side swing that predates the
-// structure-break candle. This is the fallback stop anchor when no valid OB
-// exists; the broken pivot itself is an entry trigger, not a protective stop.
-bool FindStructuralStopAnchor(const string symbol,
-                              const int direction,
-                              const int bosShift,
-                              double &anchorPrice)
-  {
-   anchorPrice=0.0;
-
-   SwingPoint highs[];
-   SwingPoint lows[];
-   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-      return false;
-
-   int bestShift=2147483647;
-
-   if(direction>0)
-     {
-      for(int i=0;i<ArraySize(lows);i++)
-        {
-         if(lows[i].shift<=bosShift || lows[i].price<=0.0)
-            continue;
-
-         if(lows[i].shift<bestShift)
-           {
-            bestShift=lows[i].shift;
-            anchorPrice=lows[i].price;
-           }
-        }
-     }
-   else
-     if(direction<0)
-       {
-        for(int i=0;i<ArraySize(highs);i++)
-          {
-           if(highs[i].shift<=bosShift || highs[i].price<=0.0)
-              continue;
-
-           if(highs[i].shift<bestShift)
-             {
-              bestShift=highs[i].shift;
-              anchorPrice=highs[i].price;
-             }
-          }
-       }
-
-   return (anchorPrice>0.0 && bestShift<2147483647);
-  }
 
 //==================================================================
 // GLOBAL VARIABLE IDENTIFIERS
