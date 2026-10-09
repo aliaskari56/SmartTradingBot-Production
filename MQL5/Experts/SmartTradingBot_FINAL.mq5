@@ -4698,6 +4698,28 @@ void STB_CycleMarkWritten(const ulong ticket)
       g_stbExposure[idx].lastWriteCycle=g_stbCycleId;
   }
 
+// Validate every proposal against one shared price/constraint snapshot.
+// IsValidSLForPosition() is still used on the chosen candidate and again by
+// ModifyPositionSL() immediately before broker submission.
+bool STB_IsValidSLForDecisionSnapshot(const long side,
+                                      const double sl,
+                                      const MqlTick &tick,
+                                      const double point,
+                                      const long stopsLevel,
+                                      const long freezeLevel)
+  {
+   if(sl<=0.0 || point<=0.0 || tick.bid<=0.0 || tick.ask<=0.0)
+      return false;
+   double minimumDistance=(MathMax((double)stopsLevel,(double)freezeLevel)+1.0)*point;
+   if(minimumDistance<=0.0)
+      minimumDistance=point;
+   if(side==POSITION_TYPE_BUY)
+      return sl<tick.bid && (tick.bid-sl)>=minimumDistance;
+   if(side==POSITION_TYPE_SELL)
+      return sl>tick.ask && (sl-tick.ask)>=minimumDistance;
+   return false;
+  }
+
 bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource)
   {
    finalSL=0.0; finalSource=-1;
@@ -4705,6 +4727,14 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    string symbol=PositionGetString(POSITION_SYMBOL);
    long side=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
+
+   // Use one tick and one broker-constraint snapshot for all proposals so
+   // array arrival order cannot change which candidates pass geometry checks.
+   MqlTick decisionTick;
+   if(!SymbolInfoTick(symbol,decisionTick)) return false;
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   long stopsLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   long freezeLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
    bool found=false;
@@ -4712,7 +4742,9 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
      {
       if(!props[i].valid || !props[i].hasSL || props[i].sl<=0.0) continue;
       double c=NormalizePrice(symbol,props[i].sl);
-      if(c<=0.0 || !IsValidSLForPosition(symbol,side,c)) continue;
+      if(c<=0.0 ||
+         !STB_IsValidSLForDecisionSnapshot(side,c,decisionTick,point,stopsLevel,freezeLevel))
+         continue;
       if(side==POSITION_TYPE_BUY)
         {
          if(currentSL>0.0 && c<=currentSL) continue;
@@ -4726,7 +4758,12 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
            { finalSL=c; finalSource=props[i].source; found=true; }
         }
      }
-   return found;
+
+   // The chosen candidate must still satisfy the live broker constraint check.
+   // If the market moved since the decision snapshot, fail closed this cycle.
+   if(!found || !IsValidSLForPosition(symbol,side,finalSL))
+      return false;
+   return true;
   }
 
 bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false)
