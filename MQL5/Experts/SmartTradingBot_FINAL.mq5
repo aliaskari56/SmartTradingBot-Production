@@ -8232,8 +8232,24 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
      {
       bool serverExpired=(timeType==ORDER_TIME_SPECIFIED &&
                           expiry>0 && TimeCurrent()>=expiry);
-      // Local age expiry is only permitted for EA-created automatic orders.
-      authorized=serverExpired || (autoCreated && !STB_ManualOverrideIs(ticket));
+      bool localAgeExpired=false;
+      if(source=="ManagePendingOrders" && autoCreated &&
+         !STB_ManualOverrideIs(ticket) && setupTime>0)
+        {
+         int maxBars=InpMaxPendingBars;
+         int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
+         if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
+           {
+            STB_AP_SetActive(profileId);
+            maxBars=STB_EffectiveMaxPendingBars();
+            STB_AP_ClearActive();
+           }
+         localAgeExpired=(maxBars>0 &&
+                          TimeCurrent()-setupTime>=maxBars*15*60);
+        }
+      // Revalidate the same expiration condition at the writer boundary;
+      // callers cannot use this reason to delete an arbitrary STB pending.
+      authorized=serverExpired || localAgeExpired;
      }
 
    if(!authorized)
