@@ -2561,8 +2561,17 @@ TrendInfo GetH4Trend(const string symbol)
       lows[nl-1].price  < lows[nl-2].price;
 
    double lastClose=iClose(symbol,PERIOD_H4,1);
-   if(lastClose<=0.0)
+   datetime lastClosedBar=iTime(symbol,PERIOD_H4,1);
+   if(lastClose<=0.0 || lastClosedBar<=0)
       return result;
+
+   // Compare the last closed candle with the trendline at that candle's
+   // close time. TimeCurrent() projects the line beyond the candle being
+   // tested and can create a time mismatch late in the next H4 bar.
+   int h4Seconds=PeriodSeconds(PERIOD_H4);
+   if(h4Seconds<=0)
+      return result;
+   datetime evaluationTime=lastClosedBar+h4Seconds;
 
    double pip=PipSize(symbol);
    double tolerance=(pip>0.0 ? InpTrendlineTolerancePips*pip : 0.0);
@@ -2618,7 +2627,7 @@ TrendInfo GetH4Trend(const string symbol)
            }
         }
 
-      double lineNow=b.price+slope*(double)(TimeCurrent()-b.time);
+      double lineNow=b.price+slope*(double)(evaluationTime-b.time);
 
       // The line is structurally valid when price has not decisively
       // broken below it. This check affects trading validity only.
@@ -2675,7 +2684,7 @@ TrendInfo GetH4Trend(const string symbol)
            }
         }
 
-      double lineNow=b.price+slope*(double)(TimeCurrent()-b.time);
+      double lineNow=b.price+slope*(double)(evaluationTime-b.time);
 
       // This affects trading validity only; the drawing still shows
       // the confirmed structural line.
