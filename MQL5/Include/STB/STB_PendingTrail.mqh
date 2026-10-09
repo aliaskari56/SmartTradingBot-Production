@@ -254,9 +254,17 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
                                          minDistance/pip);
      }
 
-   double entryBufferPips=STB_ParsePendingEntryBufferPips(comment,
-                                                          fallbackEntryBufferPips);
-   if(entryBufferPips<0.0)
+   // Persisted manual authority means the user may have changed entry/SL/TP
+   // since the original comment was written. On recovery, re-anchor to the
+   // current geometry rather than trusting a stale historical EB value.
+   double entryBufferPips=0.0;
+   if(STB_ManualOverrideIs(ticket) || StringFind(comment,"|EB")<0)
+      entryBufferPips=fallbackEntryBufferPips;
+   else
+      entryBufferPips=STB_ParsePendingEntryBufferPips(comment,
+                                                     fallbackEntryBufferPips);
+
+   if(entryBufferPips<0.0 || !MathIsValidNumber(entryBufferPips))
       return false;
 
    // P4 STB-002: the pending SL distance is the STRUCTURAL risk of the order
