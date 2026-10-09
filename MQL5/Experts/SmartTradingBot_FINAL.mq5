@@ -4731,9 +4731,9 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
 
    // If net profit has crossed the universal lock trigger, a competing
    // automatic proposal may not replace the required lock with a weaker SL.
-   // When the existing position has no SL at all, retain a valid INITIAL
-   // protection candidate as a last-resort safety fallback if broker geometry
-   // makes the profit-lock target impossible this cycle.
+   // When the existing position has no SL at all, retain the strongest valid
+   // non-profit-lock candidate as a last-resort protection fallback if broker
+   // geometry makes the profit-lock target impossible this cycle.
    double decisionNetProfitPips=PositionNetProfitPips(ticket);
    double pip=PipSize(symbol);
    bool enforceProfitLockFloor=
@@ -4759,9 +4759,9 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
    bool found=false;
-   bool initialFallbackFound=false;
-   double initialFallbackSL=0.0;
-   int initialFallbackSource=-1;
+   bool unprotectedFallbackFound=false;
+   double unprotectedFallbackSL=0.0;
+   int unprotectedFallbackSource=-1;
    for(int i=0;i<count;i++)
      {
       if(!props[i].valid || !props[i].hasSL || props[i].sl<=0.0) continue;
@@ -4788,17 +4788,24 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
          // Never downgrade an installed SL below the active lock target.
          // Only a position with no existing SL may use the INITIAL candidate
          // as a fail-safe stop while the broker rejects the requested lock.
-         if(currentSL<=0.0 && props[i].source==STB_SL_SRC_INITIAL)
+         if(currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION)
            {
-            bool strongerFallback=!initialFallbackFound ||
-               (side==POSITION_TYPE_BUY
-                ? c>initialFallbackSL
-                : c<initialFallbackSL);
+            bool strongerFallback=!unprotectedFallbackFound;
+            if(unprotectedFallbackFound)
+              {
+               if(side==POSITION_TYPE_BUY && c>unprotectedFallbackSL)
+                  strongerFallback=true;
+               else if(side==POSITION_TYPE_SELL && c<unprotectedFallbackSL)
+                  strongerFallback=true;
+               else if(MathAbs(c-unprotectedFallbackSL)<=tieTolerance &&
+                       props[i].source<unprotectedFallbackSource)
+                  strongerFallback=true;
+              }
             if(strongerFallback)
               {
-               initialFallbackSL=c;
-               initialFallbackSource=props[i].source;
-               initialFallbackFound=true;
+               unprotectedFallbackSL=c;
+               unprotectedFallbackSource=props[i].source;
+               unprotectedFallbackFound=true;
               }
            }
          continue;
@@ -4816,12 +4823,13 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
         }
      }
 
-   // With no installed SL, retain a valid initial-protection fallback when
-   // the active profit-lock target is itself unplaceable by broker geometry.
-   if(!found && initialFallbackFound)
+   // With no installed SL, use the strongest valid non-lock stop if broker
+   // geometry prevents the minimum profit-lock target from being placed.
+   // This emergency fallback is never used to loosen an existing position.
+   if(!found && unprotectedFallbackFound)
      {
-      finalSL=initialFallbackSL;
-      finalSource=initialFallbackSource;
+      finalSL=unprotectedFallbackSL;
+      finalSource=unprotectedFallbackSource;
       found=true;
      }
 
