@@ -11,7 +11,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `17059923ccb18e1b717947e4581d9790df26a368` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the current source Git blob `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
 | BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
@@ -38,6 +38,7 @@ Do not label the build production-ready until the exact source revision has a re
 | DEL-06 | Expired order | Test actual server expiry and local-age expiry independently | Only an order meeting the explicit expiry policy is deleted | NOT RUN |
 | DEL-07 | Stale rollback request | Attempt rollback outside the permitted fresh-setup window | Delete is refused | NOT RUN |
 | DEL-08 | Broker response ambiguity | Simulate timeout/rejection/transaction delay around deletion | Logs include retcode; subsequent state is re-read; no false success claim | NOT RUN |
+| DEL-09 | Expiry writer ownership gate | Request expiry while another chart owns the symbol lease or ownership is stale; compare with the valid owner | Final writer rejects wrong-source/unverified-owner requests; eligible expiry succeeds only through the managed owner | NOT RUN |
 
 ## D. Stop-loss and position management — release-critical
 
@@ -80,7 +81,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## G. Evidence to attach before approval
 
-- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `17059923ccb18e1b717947e4581d9790df26a368`)
+- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7`)
 - [ ] MetaEditor version/build and complete compile log
 - [ ] EX5 SHA-256 and source-to-binary provenance manifest
 - [ ] Strategy Tester configuration, data range, modelling mode, report and journal
@@ -91,8 +92,8 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary
 
-- Current source blob: `17059923ccb18e1b717947e4581d9790df26a368` (Git blob identifier, not raw-file SHA-256).
-- Latest static CI run `37935834667`: **SUCCESS**, 24 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
+- Current source blob: `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7` (Git blob identifier, not raw-file SHA-256).
+- Latest static CI run `37938088631`: **SUCCESS**, 24 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - Functional tests for SL-01 through SL-11 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
