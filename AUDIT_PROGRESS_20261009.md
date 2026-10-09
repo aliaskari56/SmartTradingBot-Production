@@ -983,3 +983,14 @@ The source was re-fetched and its blob SHA remained `955d9961e3da1d855a162ac6f4a
 ## Current audit decision
 
 `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`; release remains `BLOCKED / NOT VERIFIED`. Next step is not an untested code patch: obtain an exact-source MetaEditor build with raw logs and hash provenance, complete dependency provenance/licensing review, then run the deterministic order-write, exposure, event-ordering, restart/recovery, Strategy Tester and demo acceptance matrix. Close each blocker only against recorded evidence.
+
+
+## Pass 27 — Deterministic order-write acceptance matrix
+
+Added `docs/DETERMINISTIC_ORDER_WRITE_ACCEPTANCE_MATRIX_PASS27_20261009.md` with 38 acceptance scenarios covering creation/exposure limits, deletion authorization and rollback, SL/TP freshness and proposal arbitration, pending-trail lifecycle, event reconciliation, build provenance, dependency inventory, tester/demo validation and independent release review. Every case is marked NOT RUN; this is a specification, not test evidence. No executable source changed.
+
+## Pass 28 — Exact-source build provenance checklist
+
+Added `docs/EXACT_SOURCE_BUILD_PROVENANCE_CHECKLIST_PASS28_20261009.md`. It defines the frozen-source identity, clean-checkout requirements, toolchain capture, full compiler log, exit status, raw source/EX5 SHA-256, artifact custody, reproducibility and reviewer sign-off needed to close BL-01/BL-02. It explicitly distinguishes Git blob SHA from raw SHA-256 and prevents historical logs or a pre-existing EX5 from being treated as proof of a current-source build.
+
+No MetaEditor environment was invoked and no compile/runtime/tester/demo run occurred in this pass. The build and binary-provenance gates remain OPEN; release remains `BLOCKED / NOT VERIFIED`.
