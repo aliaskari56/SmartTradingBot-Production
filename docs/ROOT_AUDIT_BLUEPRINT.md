@@ -523,3 +523,68 @@ This is a target architecture and acceptance contract, not a claim that the curr
 
 ### Non-goals and proof boundary
 This section does not claim compile success, runtime correctness, complete defect elimination, or any financial outcome. The contract can be accepted only after source-wide call-site review, build evidence, controlled non-live tests, and independent review.
+
+
+## Architecture follow-through — prioritized remediation and evidence plan (2026-10-09)
+
+This section turns the target architecture into a reviewable sequence of engineering work. It is a planning artifact only: no EA logic was changed, and no build or runtime validation is implied.
+
+### Priority bands
+
+**P0 — Establish trustworthy boundaries before claiming completeness**
+- Inventory every externally visible mutation path and its callers.
+- Define a single, documented authorization contract at each mutation boundary; document narrowly scoped exceptions rather than relying on caller assumptions.
+- Define what constitutes confirmed, rejected, unknown, and inconsistent outcomes.
+- Record a baseline of source files, branch, commit, and hashes before any future implementation work.
+- Acceptance evidence: call-site inventory, boundary table, negative-path review, and independent sign-off.
+
+**P1 — Make state convergence and conflicts explicit**
+- Document the canonical identity and normalized snapshot for each supported object category.
+- Define stale-snapshot handling and the conditions under which a proposed change must be refused and the state re-read.
+- Specify deterministic conflict outcomes for competing proposals; avoid describing sequential calls as simultaneous arbitration.
+- Define restart/reconnect recovery and periodic reconciliation independently of event delivery.
+- Acceptance evidence: state-transition table, conflict table, restart/reconnect scenarios, duplicate/out-of-order event scenarios, and test results.
+
+**P2 — Improve modularity without creating needless complexity**
+- Keep the ten logical houses as responsibility boundaries, but extract modules only where ownership and dependency direction are clear.
+- Prefer a small number of stable interfaces over a large framework of wrappers.
+- Keep presentation, diagnostics, analysis, state ownership, and mutation policy separated.
+- Acceptance evidence: dependency map, module ownership table, and proof that a module can be changed without unrelated modules requiring edits.
+
+**P3 — Establish repeatable quality checks**
+- Define static checks, unit-level contract tests, integration scenarios, and fault-injection cases.
+- Distinguish test design from test execution and record environment, version, result, and limitations for each run.
+- Require review of both positive and negative outcomes; a successful API return alone is not proof of the final external state.
+- Acceptance evidence: versioned test matrix, reproducible run record, unresolved-issue list, and reviewer approval.
+
+### Required engineering records
+
+Maintain these records inside the existing audit documents unless there is a concrete reason to create a separate artifact:
+1. **Boundary register:** operation/domain, owning component, authorization rule, observable result, known callers, evidence status.
+2. **State-transition register:** starting state, event or observation, expected state, uncertainty handling, recovery action.
+3. **Dependency register:** module, dependencies, prohibited dependencies, shared state ownership.
+4. **Evidence register:** claim, evidence type, source/commit, result, reviewer, limitation.
+5. **Open-risk register:** issue, impact, priority, evidence, proposed owner, closure criterion.
+
+### Exit criteria for an architecture claim
+
+A claim such as “centralized,” “source-agnostic,” “restart-safe,” or “fully covered” must not be accepted from naming or documentation alone. It requires:
+- a complete inventory of relevant paths;
+- source evidence at the boundary and at all known callers;
+- tests covering both success and failure/uncertainty;
+- evidence that recovery converges to observed platform state;
+- explicit unresolved exceptions and limitations;
+- independent review of the evidence.
+
+### Evidence status vocabulary
+
+Use only these labels consistently:
+- **Planned** — described, not implemented.
+- **Inspected** — static source review performed.
+- **Implemented** — source change exists, but not necessarily validated.
+- **Build-verified** — exact revision successfully built in a named environment.
+- **Test-verified** — named test passed on an identified revision and environment.
+- **Independently reviewed** — evidence reviewed by a separate reviewer.
+- **Blocked / Unknown** — evidence is missing, contradictory, or unavailable.
+
+Do not upgrade a status without a corresponding record. Current work remains a static architecture/source audit; build, runtime, simulator, and independent-review evidence have not been established here.
