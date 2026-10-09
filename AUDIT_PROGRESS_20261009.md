@@ -936,3 +936,10 @@ Added `docs/EVENT_LIFECYCLE_TRACE_PASS18_20261009.md`. Static trace covers `OnIn
 ## Pass 19 — consolidated finding register
 
 Added `docs/CONSOLIDATED_FINDING_REGISTER_PASS19_20261009.md`, consolidating BL-01..BL-10, EVT-F01..EVT-F05, and additional architecture/evidence items into a prioritized, evidence-driven register. Every item remains OPEN pending its stated acceptance evidence; priorities are provisional audit triage labels, not quantified risk estimates. The register cross-references release gates and the Pass 17/18 test plans and defines a closure protocol. No executable source changed; no compile, Strategy Tester, demo test, or independent review was performed. Status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Pass 20 — Technical audit execution plan
+
+Added `docs/TECHNICAL_AUDIT_EXECUTION_PLAN_PASS20_20261009.md`. The plan orders open findings into evidence-gated work packages: freeze the exact source snapshot; establish exact-source build and EX5 provenance; resolve dependency provenance/licensing; design and test order-delete authorization and rollback proof; define SL/TP snapshot freshness and proposal arbitration; test pending-trail recovery; test event ordering/reconciliation; execute Strategy Tester/demo validation; and obtain independent review plus a recorded release decision.
+
+The plan defines PASS/FAIL/BLOCKED/NOT RUN/CLOSED semantics, evidence bundle fields, required design decisions before code changes, and explicit local MetaEditor/test-operator prerequisites. It does not claim any test ran or any finding closed. No executable source changed; no compile, runtime, Strategy Tester, demo-account, or independent review was performed. Current status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
