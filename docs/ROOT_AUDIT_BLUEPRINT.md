@@ -717,3 +717,35 @@ The inventory is not complete merely because every house has a description. Each
 **Foundation status:** *architecture/documentation baseline available; full foundation acceptance pending source traceability and independent evidence review.*
 
 This status is deliberately conservative. It prevents a documentation update from being mistaken for implemented or verified behavior.
+
+
+## Source evidence ledger — foundation traceability pass v1 (2026-10-09)
+
+Purpose: turn the prior requirement map into a compact, source-anchored ledger. These are static observations from the current branch's EA source, not runtime conclusions. Line numbers are navigation hints and may move after edits; the source file SHA recorded below is the stable identity for this pass.
+
+**Inspected source:** `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
+**Observed source blob SHA:** `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`  
+**Scope:** read-only static inspection; no EA source modification, build, terminal run, or test was performed.
+
+| Evidence ID | Requirement link | Source anchor | Static observation | Status / confidence | Evidence still needed |
+|---|---|---|---|---|---|
+| SRC-FND-001 | FND-001, FND-003 | Whole EA; ten logical houses in this blueprint | Logical responsibilities are documented, but the implementation remains a single translation unit. The documentation boundary is not a compiler-enforced boundary. | Observed; high confidence for file layout | Function/state ownership inventory and dependency map across the full source |
+| SRC-FND-002 | FND-005, FND-009 | `STB_ModifyPendingOrderGeometry`, around line 1868 | This pending-order geometry writer visibly checks verified symbol-management ownership before its modify call. | Observed in inspected function; high confidence | Caller-path review and negative-path evidence; do not generalize this guard to other writers |
+| SRC-FND-003 | FND-005, FND-009 | `ModifyPositionSL`, around line 4680 | This position-SL writer visibly checks verified symbol-management ownership before `trade.PositionModify`. | Observed in inspected function; high confidence | Caller-path review, stale-snapshot/concurrent-change review, and controlled verification evidence |
+| SRC-FND-004 | FND-005, FND-009 | `STB_ExecuteOrderDelete`, around line 8135; `STB_RequestOrderDelete`, around line 8181 | The centralized pending-delete path checks ticket/order state and evaluates the trade-server result, but the inspected writer does not visibly apply the same verified symbol-lease check used by the two writers above. | Static gap candidate; high confidence for the inspected function, broader impact still requires caller mapping | Complete caller-to-writer authorization map, including rollback/cleanup paths, plus explicit review of permitted cleanup behavior |
+| SRC-FND-005 | FND-004, FND-009 | `STB_SubmitPositionSL` and `STB_ResolvePositionSL`, around line 4654 | The submit path constructs one proposal and invokes the resolver with a count of one. This inspected path therefore does not establish simultaneous arbitration across multiple manager proposals. | Observed; high confidence for this path | Full call graph and a declared, tested policy for conflicts among proposal sources |
+| SRC-FND-006 | FND-004, FND-006 | `ModifyPositionSL`, around line 4694 | The writer calls `trade.PositionModify(ticket,newSL,tp)`; SL and TP are passed together. A current-state refresh and race analysis are needed before claiming concurrent-writer safety. | API usage observed; risk is a review concern, not proof of a reproduced fault | Freshness/ownership review and controlled evidence for preservation of unrelated position fields |
+| SRC-FND-007 | FND-005, FND-006 | Four creation families identified in `OneClickHedge`, `PlaceSetup`, `PlaceManualPendingDirection`, `PlaceManualLimitDirection` | Creation behavior is distributed across multiple call families; the current audit has not established one structurally enforced creation gateway. | Partial source inventory; medium-high confidence | Full call-site inventory and a source-backed boundary map |
+| SRC-FND-008 | FND-007, FND-008 | `OnTradeTransaction`, around line 8301; lifecycle event handlers | A transaction intake handler exists, but its presence alone does not prove event-order independence, restart convergence, or recovery from missed/partial updates. | Handler existence observed; runtime properties unknown | Scenario definitions and repeatable test records for duplicate, reordered, missed, and restart/reconnect cases |
+| SRC-FND-009 | FND-008, FND-009 | `STB_PendingTrail.mqh` and pending-trail call paths | Per-ticket state and recovery-related code are present in the reviewed module; complete activation, handoff, and recovery behavior across all lifecycle cases is not established by static presence alone. | Partial observation; runtime unknown | End-to-end call-path trace and controlled lifecycle evidence |
+| SRC-FND-010 | FND-010, FND-012 | Audit documents and current branch history | The requirement register and evidence ledger improve traceability, but several requirements still lack complete source anchors and test evidence. | Documentation partially established | Close each ledger row with source references, verification artifacts, reviewer, and date; retain blocked/unknown where evidence is absent |
+
+### Rules for maintaining this ledger
+
+1. Keep observation, inference, and test result in separate fields. A source pattern is not a runtime proof.
+2. Every new finding gets a stable evidence ID, requirement link, source anchor, confidence, owner, and closure evidence.
+3. If a source reference is not yet verified, label it *unverified* rather than estimating a line or claiming coverage.
+4. A finding is not closed by a documentation edit alone. Closure requires the evidence named in its row and an explicit reviewer decision.
+5. Preserve the original EA source hash until a separate, explicitly approved source-change phase exists. This pass did not change source.
+
+**Ledger result:** source traceability has improved, but the foundation remains **open**. In particular, authorization coverage, full state ownership, lifecycle convergence, and test evidence are not yet demonstrated.
