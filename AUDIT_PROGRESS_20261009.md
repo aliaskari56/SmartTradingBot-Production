@@ -1015,3 +1015,10 @@ No executable source changed. No full-tree license scan, legal review, compile, 
 Added `docs/ALGLIB_REFERENCE_AND_INCLUDE_CLOSURE_TRACE_PASS31_20261009.md`. Rechecked exact primary source blob `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`: the EA has three direct includes (MetaQuotes Trade library and two STB modules), and a case-insensitive scan found no `ALGLIB`, `CFastFourierTransform`, or `CAlglib` text references in the primary source. The two directly included STB modules themselves have no include directives. This does not establish the complete transitive include closure or the contents of the historical EX5 / backup ZIP. The ZIP binary could not be retrieved through the available file-content endpoint in this pass. ALGLIB is present in the repository's bundled Include tree; its distribution status and license obligations remain under review. BL-06 remains OPEN.
 
 No executable source changed. No archive extraction, full recursive include scan, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 32 — Recursive include closure and bundled ALGLIB status
+
+Added `docs/RECURSIVE_INCLUDE_CLOSURE_AND_ALGLIB_STATUS_PASS32_20261009.md`. Recursively inspected the primary EA's direct include graph: `Trade.mqh` → `Object.mqh` → `StdLibErr.mqh`, plus `OrderInfo.mqh`, `HistoryOrderInfo.mqh`, `PositionInfo.mqh`, and `DealInfo.mqh`, which each include `Object.mqh). The two direct STB includes have no include directives in their inspected contents. No ALGLIB include was observed in this traced graph; ALGLIB headers remain separately present in the repository's bundled Include tree and contain their own internal include chain. This narrows the source-level finding but does not determine archive or EX5 contents. Binary ZIP retrieval/extraction was not achieved. BL-06 remains OPEN.
+
+No executable source changed. No compilation, runtime, Strategy Tester, demo test, archive extraction or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
