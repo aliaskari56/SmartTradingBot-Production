@@ -3841,7 +3841,8 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(!InpAllowOneClickHedge || !IsHedgingAccount())
+   if(!InpAllowOneClickHedge || !IsHedgingAccount() ||
+      !STB_TradeEnvironmentAllowed())
       return false;
 
    string symbol=_Symbol;
@@ -3870,6 +3871,13 @@ bool OneClickHedge()
 
    long hedgeType=(sourceType==POSITION_TYPE_BUY) ? POSITION_TYPE_SELL
                                                   : POSITION_TYPE_BUY;
+
+   long tradeMode=SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE);
+   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
+      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
+      (hedgeType==POSITION_TYPE_BUY && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
+      (hedgeType==POSITION_TYPE_SELL && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+      return false;
 
    if(HasManagedPositionDirection(symbol,hedgeType) ||
       STB_HasManagedPendingDirection(symbol,hedgeType))
@@ -6293,7 +6301,15 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(direction!=1 && direction!=-1)
+   if((direction!=1 && direction!=-1) ||
+      !STB_TradeEnvironmentAllowed())
+      return false;
+
+   long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
+   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
+      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
+      (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
+      (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
       return false;
 
    MqlTick tick;
@@ -6382,7 +6398,15 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(direction!=1 && direction!=-1)
+   if((direction!=1 && direction!=-1) ||
+      !STB_TradeEnvironmentAllowed())
+      return false;
+
+   long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
+   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
+      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
+      (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
+      (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
       return false;
 
    MqlTick tick;
