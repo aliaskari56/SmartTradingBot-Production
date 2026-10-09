@@ -76,6 +76,16 @@ def lexical_errors(source: str) -> list[str]:
     return errors
 
 
+def source_region(source: str, start: str, end: str) -> str:
+    begin = source.find(start)
+    if begin < 0:
+        return ""
+    finish = source.find(end, begin + len(start))
+    if finish <= begin:
+        return ""
+    return source[begin:finish]
+
+
 def candidate_producers_safe(source: str) -> bool:
     """Ensure automatic candidate producers cannot write around the resolver."""
     regions = (
@@ -85,14 +95,8 @@ def candidate_producers_safe(source: str) -> bool:
         ("void STB_ProfitProtectionOne(", "bool ModifyPositionSL(", False),
     )
     for start, end, needs_submit in regions:
-        begin = source.find(start)
-        if begin < 0:
-            return False
-        finish = source.find(end, begin + len(start))
-        if finish <= begin:
-            return False
-        body = source[begin:finish]
-        if "ModifyPositionSL(" in body:
+        body = source_region(source, start, end)
+        if not body or "ModifyPositionSL(" in body:
             return False
         if needs_submit and "STB_SubmitPositionSL(" not in body:
             return False
@@ -180,6 +184,11 @@ def main() -> int:
           (source[source.find("bool ApplyProfitLock("):source.find("void AutoProfitProtection()",
              source.find("bool ApplyProfitLock("))]) if "bool ApplyProfitLock(" in source and
           "void AutoProfitProtection()" in source else False),
+        ("arbitration confirmation rejects missing SL before profit-lock bookkeeping",
+         (lambda body: bool(body) and "if(actualSL<=0.0)" in body and
+          body.index("if(actualSL<=0.0)") < body.index("if(hasProfitCandidate)") and
+          "STB SL arbitration verification failed: position has no SL" in body)
+          (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
