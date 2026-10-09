@@ -14,9 +14,9 @@ The audit branch now collects the automatic candidates generated in `ManagePosit
 ## 2. Current implementation
 
 Source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
-Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `20a21c47bd576ca804465cc94940d3b4ea1ca6e1`  
-Latest source-changing commit: `aa09b2c95b2e00d9a4789c66ca9d6264c29cb20b`  
-Static-checker update: `6c7213801bf5b405e88b00e34f0d4e3f74134831`
+Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `17059923ccb18e1b717947e4581d9790df26a368`  
+Latest source-changing commit: `d57b5c8c588a9cfa17e6a357d26ba2b87fd00155`  
+Static-checker update: `cb1d96f7ea353929d8a6ced8611a33d3f1ee4cd3`
 
 The source implementation includes these controls:
 
@@ -26,11 +26,11 @@ The source implementation includes these controls:
 4. **Single central write.** The automatic batch flushes once after initial protection, profit protection, and trailing have generated their proposals. The selected change still passes through the existing modify bridge, which rechecks live position/TP state, ownership, manual override, current SL, broker constraints, retcodes, and terminal state.
 5. **No silent partial batch on allocation failure.** If the queue itself cannot grow, the cycle aborts the automatic batch rather than arbitrating incomplete input. If the temporary per-ticket proposal array cannot hold the full set, that ticket is skipped and the failure is logged.
 6. **No automatic bypass outside the cycle.** Non-initial automatic requests are rejected when collection is inactive. Two deliberate synchronous paths remain: explicit user SAVE, and initial protective SL for a newly-created position before the next scheduled management cycle. The latter is a lifecycle exception; it is not evidence of same-cycle arbitration for that pre-cycle event.
-7. **Confirmed lock state.** Automatic profit-lock bookkeeping is deferred while candidates are collected. Existing SL that already satisfies a lock is re-read before state is credited. The flush rejects a missing terminal SL before it can commit profit-lock bookkeeping or log arbitration as confirmed.
+7. **Confirmed lock state.** Automatic profit-lock bookkeeping is deferred while candidates are collected. Existing SL that already satisfies a lock is re-read before state is credited. The flush rejects a missing terminal SL before it can commit profit-lock bookkeeping or log arbitration as confirmed. Close-deal cleanup also preserves locked-pips state during partial exits and clears it only on a full close or reversal, including close deals whose magic differs from this EA.
 
 ## 3. Static verification evidence
 
-GitHub Actions run [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375) completed with **success** on checker commit `6c7213801bf5b405e88b00e34f0d4e3f74134831`. Its log reports 22 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
+GitHub Actions run [37935834667](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37935834667) completed with **success** on checker commit `cb1d96f7ea353929d8a6ced8611a33d3f1ee4cd3`. Its log reports 24 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
 
 This is source-level structural evidence only. It does not execute the MQL resolver or prove permutation-independent runtime behavior.
 
