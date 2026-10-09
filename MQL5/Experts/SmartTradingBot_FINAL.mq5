@@ -3543,7 +3543,7 @@ void STB_ReconcileTradeRegistry()
       ulong ticket=PositionGetTicket(i);
       if(ticket==0 || !PositionSelectByTicket(ticket))
          continue;
-      if(!STB_IsProtectionPosition(ticket)
+      if(!STB_IsProtectionPosition(ticket))
          continue;
 
       // Seed recovery state from the actual terminal geometry. Otherwise the
