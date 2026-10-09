@@ -1,0 +1,26 @@
+name: MQL5 static audit (not a compiler)
+on:
+  push:
+    branches:
+      - audit/expose-cleaned-source-20261009
+  pull_request:
+    branches:
+      - main
+      - audit/expose-cleaned-source-20261009
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run static guardrails
+        run: python tools/audit_static_checks.py MQL5/Experts/SmartTradingBot_FINAL.mq5
