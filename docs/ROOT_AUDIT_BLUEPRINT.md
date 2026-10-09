@@ -807,3 +807,15 @@ Source re-fetched from branch `audit/expose-cleaned-source-20261009`: `MQL5/Expe
 - Counts above are limited to the re-fetched primary EA source and are static search observations; included headers, dynamic behavior, server outcomes, and build behavior are not proven by this pass.
 
 **Pass conclusion:** event and mutation paths are now better indexed, but deletion authorization, SL/TP conflict resolution, complete creation-path control, event convergence/recovery, and build/runtime evidence remain open. Documentation only; no executable source changed.
+
+
+## Static pass 9 — Existing CI evidence classification (2026-10-09)
+
+Historical GitHub Actions runs were inspected. They target the `main` branch and compile `MQL5/Experts/SmartTradingBot.mq5`, not the audit branch's `MQL5/Experts/SmartTradingBot_FINAL.mq5`. They are therefore historical context only and do not establish a build result for the current audit source.
+
+- [STB UI Compile run](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37322115019), commit `72fb9027073646229cfa0a3b6d07970ab48751cf`: log reports `0 errors, 4 warnings` and `COMPILE PASS`.
+- [MQL5 Temporary Compile run](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37321366255), commit `4638a38708a1c7fd3a1959140d8d863c305f9479`: compiler log reports `0 errors, 4 warnings`, but the job ended with a nonzero MetaEditor exit code. The run is a failure, not a pass.
+- [MQL5 Temporary Compile run](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37321142680), commit prefix `1701d07c72`: log reports `1 errors, 4 warnings`.
+- [MQL5 Compile Once run](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37319978704), commit prefix `9cbfb95402`: log reports `0 errors, 4 warnings`.
+
+**Evidence conclusion:** historical main-branch compilation cannot certify the audit branch's current source. A failed job is not a successful build merely because one compiler line reports zero errors. Current audit-branch build evidence remains **Unknown / not established**. No new workflow was dispatched and no executable source was changed.
