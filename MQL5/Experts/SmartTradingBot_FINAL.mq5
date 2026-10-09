@@ -289,46 +289,6 @@ double             g_panelChartSellScore=0.0;
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-double STB_VizATR(MqlRates &r[],
-                  const int shift,
-                  const int period)
-  {
-   int total=ArraySize(r);
-
-   if(total<=shift+period)
-      return 0.0;
-
-   double sum=0.0;
-   int count=0;
-
-   int endShift=shift+period-1;
-
-   for(int i=shift;i<=endShift;i++)
-     {
-      double tr1=r[i].high-r[i].low;
-      double tr2=MathAbs(r[i].high-r[i+1].close);
-      double tr3=MathAbs(r[i].low-r[i+1].close);
-
-      double tr=MathMax(
-                   tr1,
-                   MathMax(tr2,tr3)
-                );
-
-      if(tr>0.0)
-        {
-         sum+=tr;
-         count++;
-        }
-     }
-
-   if(count<=0)
-      return 0.0;
-
-   return sum/count;
-  }
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
 ulong STB_AP_Hash(const string raw)
   {
    ulong h=1469598103934665603ULL;
@@ -2648,71 +2608,6 @@ TrendInfo GetH4Trend(const string symbol)
 //+------------------------------------------------------------------+
 
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void BuildZigZagPoints(const string symbol,
-                       const ENUM_TIMEFRAMES tf,
-                       const int lookback,
-                       SwingPoint &points[])
-  {
-   ArrayResize(points,0);
-
-   SwingPoint highs[];
-   SwingPoint lows[];
-
-   if(CollectSwings(symbol,tf,lookback,highs,lows)<=0)
-      return;
-
-   int nh=ArraySize(highs);
-   int nl=ArraySize(lows);
-   int total=nh+nl;
-
-   if(total<2)
-      return;
-
-   SwingPoint raw[];
-   ArrayResize(raw,total);
-
-   int n=0;
-   for(int i=0;i<nh;i++)
-      raw[n++]=highs[i];
-
-   for(int i=0;i<nl;i++)
-      raw[n++]=lows[i];
-
-   SortSwingsByTime(raw);
-
-// The trendline must use exactly the same confirmed ZigZag pivots
-// that are visible on the chart. Consecutive pivots of the same type
-// are compressed to the more extreme pivot.
-   for(int i=0;i<n;i++)
-     {
-      int m=ArraySize(points);
-
-      if(m==0)
-        {
-         ArrayResize(points,1);
-         points[0]=raw[i];
-         continue;
-        }
-
-      if(points[m-1].isHigh==raw[i].isHigh)
-        {
-         bool replace=
-            (raw[i].isHigh && raw[i].price>points[m-1].price) ||
-            (!raw[i].isHigh && raw[i].price<points[m-1].price);
-
-         if(replace)
-            points[m-1]=raw[i];
-        }
-      else
-        {
-         ArrayResize(points,m+1);
-         points[m]=raw[i];
-        }
-     }
-  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -7154,50 +7049,7 @@ void DrawHLine(const string name,const double price,const color clr)
 //|                                                                  |
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void DrawTextMarker(const string name,const datetime t,const double price,
-                    const string text,const color clr)
-  {
-   ObjectDelete(0,name);
-   if(t<=0 || price<=0.0)
-      return;
 
-   if(!ObjectCreate(0,name,OBJ_TEXT,0,t,price))
-      return;
-
-   ObjectSetString(0,name,OBJPROP_TEXT,text);
-   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
-   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,8);
-   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-  }
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void DrawZone(const string name,const datetime t1,const double p1,
-              const datetime t2,const double p2,const color clr)
-  {
-   ObjectDelete(0,name);
-
-   if(t1<=0 || t2<=0 || p1<=0.0 || p2<=0.0)
-      return;
-
-   if(!ObjectCreate(0,name,OBJ_RECTANGLE,0,t1,p1,t2,p2))
-      return;
-
-   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,name,OBJPROP_FILL,true);
-   ObjectSetInteger(0,name,OBJPROP_BACK,true);
-   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-  }
 
 
 //+------------------------------------------------------------------+
@@ -7240,30 +7092,6 @@ void SortSwingsByTime(SwingPoint &points[])
 //+------------------------------------------------------------------+
 
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void DrawStructureLine(const string name,
-                       const datetime t1,const double p1,
-                       const datetime t2,const double p2,
-                       const color clr)
-  {
-   ObjectDelete(0,name);
-   if(t1<=0 || t2<=t1 || p1<=0.0 || p2<=0.0)
-      return;
-
-   if(!ObjectCreate(0,name,OBJ_TREND,0,t1,p1,t2,p2))
-      return;
-
-   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
-   ObjectSetInteger(0,name,OBJPROP_RAY_LEFT,false);
-   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
-   ObjectSetInteger(0,name,OBJPROP_BACK,false);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
