@@ -3826,8 +3826,11 @@ bool OneClickHedge()
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
+   double hedgeEntryOffset=MathAbs(entry-(hedgeType==POSITION_TYPE_BUY
+                                          ? tick.bid:tick.ask))/pip;
    string comment="STB|HEDGE|"+
-                  (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
+                  (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+
+                  "|EB"+DoubleToString(hedgeEntryOffset,8);
    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -6272,7 +6275,9 @@ bool PlaceManualLimitDirection(const int direction)
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
+   double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
+   string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+
+                  "|EB"+DoubleToString(effectiveManualOffset,8);
    bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7283,8 +7288,7 @@ int CountManagedPendingOrders()
 int TrailAllPendingOrdersNow()
   {
    STB_BeginCycle(); // Blueprint 26: user PEND_TRAIL command gets its own decision cycle
-   STB_PendingTrailProcess(true); // MANUAL_OVERRIDE: user PEND_TRAIL command
-   return 1;
+   return STB_PendingTrailProcess(true); // count only confirmed broker geometry changes
   }
 
 //+------------------------------------------------------------------+
