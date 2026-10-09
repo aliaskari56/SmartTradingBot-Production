@@ -3227,12 +3227,19 @@ bool BuildSetup(const string symbol,
    // in PreparePendingSetup().
    if(direction>0)
      {
-      s.entry=NormalizePrice(symbol,originHigh + entryBuffer*pip);
+      // A BUY STOP is a breakout order, so its trigger must stay above the
+      // confirmed swing-high broken by BOS. The OB high can be below that
+      // swing; basing a STOP only on the OB may let it trigger prematurely.
+      double buyTriggerBase=MathMax(originHigh,breakSwing.price);
+      s.entry=NormalizePrice(symbol,buyTriggerBase + entryBuffer*pip);
       s.sl=NormalizePrice(symbol,stopAnchor - slBuffer*pip);
      }
    else
      {
-      s.entry=NormalizePrice(symbol,originLow - entryBuffer*pip);
+      // Symmetric rule for SELL STOP: trigger below both the OB low and the
+      // confirmed broken swing-low. If valid RR no longer exists, reject it.
+      double sellTriggerBase=MathMin(originLow,breakSwing.price);
+      s.entry=NormalizePrice(symbol,sellTriggerBase - entryBuffer*pip);
       s.sl=NormalizePrice(symbol,stopAnchor + slBuffer*pip);
      }
 
