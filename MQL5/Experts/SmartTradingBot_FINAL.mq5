@@ -1890,6 +1890,33 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
    double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
 
+   // Keep a Stop-Limit's trigger-to-limit offset when trailing its trigger.
+   // Leaving stoplimit unchanged would detach the child limit price from the
+   // moved stop price and can make a valid order invalid or behave differently.
+   if(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
+      stbOt==ORDER_TYPE_SELL_STOP_LIMIT)
+     {
+      if(stbCurEntry<=0.0 || stopLimit<=0.0)
+         return false;
+
+      double stopLimitOffset=stopLimit-stbCurEntry;
+      stopLimit=NormalizePrice(symbol,newEntry+stopLimitOffset);
+
+      bool offsetValid=(stopLimit>0.0 &&
+                        ((stbOt==ORDER_TYPE_BUY_STOP_LIMIT && stopLimit<newEntry) ||
+                         (stbOt==ORDER_TYPE_SELL_STOP_LIMIT && stopLimit>newEntry)));
+
+      if(!offsetValid)
+        {
+         Print("STB STOP-LIMIT MODIFY REJECT ticket=",ticket,
+               " symbol=",symbol,
+               " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " newStopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+         return false;
+        }
+     }
+
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
 
@@ -3008,7 +3035,9 @@ bool BuildSetup(const string symbol,
    if(InpStrictPatternFilters && InpRequireOB && !hasOB)
       return STB_BuildReject(symbol,direction,"OB_REQUIRED");
 
-   if(!hasOB && !InpStrictPatternFilters)
+   // If OB is optional and none is found, use the confirmed break swing as
+   // the structural fallback. The mandatory-OB case already rejected above.
+   if(!hasOB)
      {
       originShift=breakSwing.shift;
       originHigh=iHigh(symbol,PERIOD_M15,originShift);
@@ -3435,7 +3464,38 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_IsSymbolAllowed(const string s){ if(s=="") return false; if(s==_Symbol) return true; if(StringLen(InpScannerSymbols)==0) return false; string parts[]; string cfg=InpScannerSymbols; StringReplace(cfg,";",","); ushort sep=StringGetCharacter(",",0); int n=StringSplit(cfg,sep,parts); for(int i=0;i<n;i++){ string it=parts[i]; StringTrimLeft(it); StringTrimRight(it); if(it!="" && it==s) return true; } return false; } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
+bool STB_IsSymbolAllowed(const string s)
+  {
+   if(s=="")
+      return false;
+
+   // Strategy Tester isolation is a hard scope boundary when enabled.
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+      return s==_Symbol;
+
+   // Keep scanner, trailing, expiry and position management aligned:
+   // an empty list means the selected Market Watch universe, not just _Symbol
+   // and not every symbol known to the broker.
+   if(StringLen(InpScannerSymbols)==0)
+      return s==_Symbol || (bool)SymbolInfoInteger(s,SYMBOL_SELECT);
+
+   string parts[];
+   string cfg=InpScannerSymbols;
+   StringReplace(cfg,";",",");
+   ushort sep=StringGetCharacter(",",0);
+   int n=StringSplit(cfg,sep,parts);
+
+   for(int i=0;i<n;i++)
+     {
+      string it=parts[i];
+      StringTrimLeft(it);
+      StringTrimRight(it);
+      if(it!="" && it==s)
+         return true;
+     }
+
+   return false;
+  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
    return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
@@ -3938,7 +3998,10 @@ bool STB_OverridePersistOn(const ulong ticket,const string symbol)
 // all=false removes only tickets that no longer exist in the terminal.
 void STB_OverridePersistPrune(const bool all)
   {
-   string pref=g_prefix+"OVR_";
+   // Only prune overrides belonging to this account + EA magic. A broad
+   // STB_OVR_ prefix would erase manual-authority records for other instances.
+   string pref=g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+               (string)InpMagic+"_";
    for(int i=GlobalVariablesTotal()-1;i>=0;i--)
      {
       string name=GlobalVariableName(i);
@@ -4708,10 +4771,12 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
    sl=0.0;
 
    long direction=(orderType==ORDER_TYPE_BUY_STOP ||
-                   orderType==ORDER_TYPE_BUY_LIMIT)
+                   orderType==ORDER_TYPE_BUY_LIMIT ||
+                   orderType==ORDER_TYPE_BUY_STOP_LIMIT)
                   ? POSITION_TYPE_BUY
                   : (orderType==ORDER_TYPE_SELL_STOP ||
-                     orderType==ORDER_TYPE_SELL_LIMIT)
+                     orderType==ORDER_TYPE_SELL_LIMIT ||
+                     orderType==ORDER_TYPE_SELL_STOP_LIMIT)
                   ? POSITION_TYPE_SELL
                   : -1;
 
@@ -6470,14 +6535,22 @@ void STB_ScannerRun()
       ArrayResize(symbols,1);
       symbols[0]=_Symbol;
      }
-   else
+   else if(StringLen(InpScannerSymbols)>0)
      {
-      int total=SymbolsTotal(false);
+      // Parse only configured symbols instead of iterating the broker's full
+      // symbol catalog. This keeps explicit-universe scans bounded and fast.
+      string configured=InpScannerSymbols;
+      StringReplace(configured,";",",");
+      string parts[];
+      ushort separator=StringGetCharacter(",",0);
+      int count=StringSplit(configured,separator,parts);
 
-      for(int i=0;i<total;i++)
+      for(int i=0;i<count;i++)
         {
-         string symbol=SymbolName(i,false);
-         if(symbol=="" || !STB_ScannerIsAllowListed(symbol))
+         string symbol=parts[i];
+         StringTrimLeft(symbol);
+         StringTrimRight(symbol);
+         if(symbol=="")
             continue;
 
          bool duplicate=false;
@@ -6489,6 +6562,22 @@ void STB_ScannerRun()
               }
 
          if(duplicate)
+            continue;
+
+         int n=ArraySize(symbols);
+         ArrayResize(symbols,n+1);
+         symbols[n]=symbol;
+        }
+     }
+   else
+     {
+      // Empty InpScannerSymbols means selected Market Watch symbols only.
+      int total=SymbolsTotal(true);
+
+      for(int i=0;i<total;i++)
+        {
+         string symbol=SymbolName(i,true);
+         if(symbol=="")
             continue;
 
          int n=ArraySize(symbols);
