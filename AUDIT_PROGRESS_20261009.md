@@ -943,3 +943,10 @@ Added `docs/CONSOLIDATED_FINDING_REGISTER_PASS19_20261009.md`, consolidating BL-
 Added `docs/TECHNICAL_AUDIT_EXECUTION_PLAN_PASS20_20261009.md`. The plan orders open findings into evidence-gated work packages: freeze the exact source snapshot; establish exact-source build and EX5 provenance; resolve dependency provenance/licensing; design and test order-delete authorization and rollback proof; define SL/TP snapshot freshness and proposal arbitration; test pending-trail recovery; test event ordering/reconciliation; execute Strategy Tester/demo validation; and obtain independent review plus a recorded release decision.
 
 The plan defines PASS/FAIL/BLOCKED/NOT RUN/CLOSED semantics, evidence bundle fields, required design decisions before code changes, and explicit local MetaEditor/test-operator prerequisites. It does not claim any test ran or any finding closed. No executable source changed; no compile, runtime, Strategy Tester, demo-account, or independent review was performed. Current status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Pass 21 — Risk sizing and exposure boundary trace
+
+Added `docs/RISK_SIZING_AND_EXPOSURE_TRACE_PASS21_20261009.md` after re-fetching the primary source and verifying blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8` and 8,665 lines. The static trace records six open findings: risk sizing is opt-in by default; sizing estimates entry-to-SL loss and does not prove realized loss; explicit directional volume-limit enforcement was located in the strategy setup path but not visibly in the inspected manual pending paths; manual pending stop/limit commands use fixed base lots; zero risk percentage can lead to setup rejection when sizing is enabled; and this focused trace did not establish an account-wide loss circuit breaker.
+
+The document provides RSK-01..RSK-10 acceptance scenarios. These are findings to verify, not claims that a loss or limit breach has occurred. No executable source changed; no compile, Strategy Tester, demo test, or independent review was performed. Status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
