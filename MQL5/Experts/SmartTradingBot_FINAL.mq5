@@ -7052,27 +7052,6 @@ void DrawHLine(const string name,const double price,const color clr)
 
 
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
-void SortSwingsByTime(SwingPoint &points[])
-  {
-   int n=ArraySize(points);
-
-   for(int i=1;i<n;i++)
-     {
-      SwingPoint key=points[i];
-      int j=i-1;
-
-      while(j>=0 && points[j].time>key.time)
-        {
-         points[j+1]=points[j];
-         j--;
-        }
-
-      points[j+1]=key;
-     }
-  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
