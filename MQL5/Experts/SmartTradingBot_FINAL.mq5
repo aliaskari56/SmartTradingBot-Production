@@ -4645,6 +4645,9 @@ struct STBQueuedSLProposal
   };
 STBQueuedSLProposal g_stbSLQueue[];
 bool g_stbCollectingSLProposals=false;
+// Any queue allocation failure makes the automatic SL batch incomplete.
+// Fail closed rather than silently resolving a subset of intended candidates.
+bool g_stbSLCollectionFaulted=false;
 long g_stbCycleId=0;
 
 void STB_BeginCycle()
@@ -4652,6 +4655,7 @@ void STB_BeginCycle()
    g_stbCycleId++;
    ArrayResize(g_stbSLQueue,0);
    g_stbCollectingSLProposals=false;
+   g_stbSLCollectionFaulted=false;
   }
 
 bool STB_QueuePositionSL(const ulong ticket,const double candidateSL,const int source,const string reason)
@@ -4661,7 +4665,12 @@ bool STB_QueuePositionSL(const ulong ticket,const double candidateSL,const int s
       return false;
    int n=ArraySize(g_stbSLQueue);
    if(ArrayResize(g_stbSLQueue,n+1)!=n+1)
+     {
+      g_stbSLCollectionFaulted=true;
+      Print("STB SL arbitration collection failure: queue allocation failed cycle=",
+            g_stbCycleId," ticket=",ticket," source=",source," reason=",reason);
       return false;
+     }
    g_stbSLQueue[n].ticket=ticket;
    g_stbSLQueue[n].cycle=g_stbCycleId;
    g_stbSLQueue[n].valid=true;
@@ -4863,6 +4872,15 @@ bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int 
 void STB_FlushPositionSLProposals()
   {
    g_stbCollectingSLProposals=false;
+   bool collectionFault=g_stbSLCollectionFaulted;
+   g_stbSLCollectionFaulted=false;
+   if(collectionFault)
+     {
+      Print("STB SL arbitration ABORTED: incomplete proposal queue; no automatic SL writes this cycle=",
+            g_stbCycleId," queued=",ArraySize(g_stbSLQueue));
+      ArrayResize(g_stbSLQueue,0);
+      return;
+     }
    for(int i=0;i<ArraySize(g_stbSLQueue);i++)
      {
       ulong ticket=g_stbSLQueue[i].ticket;
@@ -4874,13 +4892,23 @@ void STB_FlushPositionSLProposals()
       STBSLProposal props[];
       int count=0;
       for(int j=i;j<ArraySize(g_stbSLQueue);j++)
+         if(g_stbSLQueue[j].ticket==ticket && g_stbSLQueue[j].cycle==g_stbCycleId)
+            count++;
+      if(count<=0) continue;
+      if(ArrayResize(props,count)!=count)
+        {
+         Print("STB SL arbitration ABORTED for ticket=",ticket,
+               ": cannot allocate full candidate set cycle=",g_stbCycleId,
+               " candidates=",count);
+         continue; // never arbitrate a silently truncated candidate set
+        }
+      int propIndex=0;
+      for(int j=i;j<ArraySize(g_stbSLQueue);j++)
         {
          if(g_stbSLQueue[j].ticket!=ticket || g_stbSLQueue[j].cycle!=g_stbCycleId) continue;
-         int n=ArraySize(props);
-         if(ArrayResize(props,n+1)!=n+1) continue;
-         props[n].valid=g_stbSLQueue[j].valid; props[n].hasSL=g_stbSLQueue[j].hasSL;
-         props[n].sl=g_stbSLQueue[j].sl; props[n].source=g_stbSLQueue[j].source;
-         props[n].reason=g_stbSLQueue[j].reason; count++;
+         props[propIndex].valid=g_stbSLQueue[j].valid; props[propIndex].hasSL=g_stbSLQueue[j].hasSL;
+         props[propIndex].sl=g_stbSLQueue[j].sl; props[propIndex].source=g_stbSLQueue[j].source;
+         props[propIndex].reason=g_stbSLQueue[j].reason; propIndex++;
         }
       double chosenSL=0.0; int chosenSource=-1;
       if(count<=0 || !STB_ResolvePositionSL(ticket,props,count,chosenSL,chosenSource)) continue;
