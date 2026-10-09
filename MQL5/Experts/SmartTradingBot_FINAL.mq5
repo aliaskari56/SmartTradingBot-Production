@@ -4731,11 +4731,27 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
 
 bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket)) return false;
-   if(!isUserAction && g_stbCollectingSLProposals)
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      return false;
+
+   // Explicit user SAVE remains synchronous and isolated from automatic batches.
+   if(isUserAction)
+      return ModifyPositionSL(ticket,candidateSL,true);
+
+   if(g_stbCollectingSLProposals)
       return STB_QueuePositionSL(ticket,candidateSL,source,reason);
-   // Explicit/manual and out-of-cycle calls remain synchronous.
-   return ModifyPositionSL(ticket,candidateSL,isUserAction);
+
+   // Lifecycle exception: a newly-created position may need its initial
+   // protective stop before the next scheduled management cycle. Do not let
+   // trailing/profit-protection silently bypass same-cycle arbitration.
+   if(source!=STB_SL_SRC_INITIAL)
+     {
+      Print("STB SL request blocked outside arbitration cycle ticket=",ticket,
+            " source=",source," reason=",reason);
+      return false;
+     }
+
+   return ModifyPositionSL(ticket,candidateSL,false);
   } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
