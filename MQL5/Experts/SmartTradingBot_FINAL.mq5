@@ -2996,7 +2996,8 @@ bool FindOriginCandle(const string symbol,
 //+------------------------------------------------------------------+
 bool BuildSetup(const string symbol,
                 const int direction,
-                Setup &s)
+                Setup &s,
+                const bool countAdaptiveAttempt)
   {
    ZeroMemory(s);
 
@@ -3008,10 +3009,11 @@ bool BuildSetup(const string symbol,
    STB_AP_SelectActive(symbol,direction);
    s.adaptiveProfile=g_activeAdaptiveProfileId;
 
-// Count one probe for the selected profile even when this build later
-// rejects on structure/geometry/pattern conditions. Closed trade outcomes
-// remain the only signals that update wins/losses/R-multiple.
-   STB_AP_RecordAttempt(symbol,direction,s.adaptiveProfile);
+// Count a strategy probe only during the scanner's first-pass discovery.
+// Candidate revalidation rebuilds the same setup several times; those checks
+// must not inflate adaptive sample counts or make profiles appear warmed up.
+   if(countAdaptiveAttempt)
+      STB_AP_RecordAttempt(symbol,direction,s.adaptiveProfile);
 
    if(!IsDirectionTradable(symbol,direction))
      {
@@ -4068,14 +4070,21 @@ double PositionNetProfitPips(const ulong ticket)
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
 
    double pipValue=PositionPipValue(symbol,type,volume,entry);
-   if(pipValue<=0.0)
-      return PositionProfitPips(symbol,type,entry);
+   // Fail closed if the cash value of one pip cannot be computed. Falling back
+   // to gross quote movement can trigger an automatic profit lock while the
+   // actual position is still net negative after commission/swap.
+   if(pipValue<=0.0 || !MathIsValidNumber(pipValue))
+      return 0.0;
 
    double netMoney=PositionGetDouble(POSITION_PROFIT)+
                    PositionGetDouble(POSITION_SWAP)+
                    PositionCommissionMoney(ticket);
 
-   return netMoney/pipValue;
+   if(!MathIsValidNumber(netMoney))
+      return 0.0;
+
+   double netPips=netMoney/pipValue;
+   return MathIsValidNumber(netPips) ? netPips:0.0;
   }
 
 //==================================================================
@@ -6143,7 +6152,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
      }
 
    Setup refreshed;
-   if(!BuildSetup(c.symbol,c.direction,refreshed))
+   if(!BuildSetup(c.symbol,c.direction,refreshed,false))
      {
       c.rejectReason=(g_lastBuildRejectReason=="" ?
                       "REJECT_NO_STRATEGY":g_lastBuildRejectReason);
@@ -7030,7 +7039,7 @@ void STB_ScannerRun()
             continue;
 
          Setup setup;
-         if(!BuildSetup(symbol,direction,setup))
+         if(!BuildSetup(symbol,direction,setup,true))
             continue;
 
          STBCandidate candidate;
