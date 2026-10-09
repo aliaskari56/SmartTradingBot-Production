@@ -97,8 +97,6 @@ input bool    InpStrictPatternFilters   = false; // true = FVG/OB mandatory; fal
 input int     InpPatternWindowBars      = 12;
 
 input group "=== PROFIT PROTECTION ==="
-input double  InpAutoTriggerPips        = 50.0;
-input double  InpAutoLockPips           = 20.0;  // UNIVERSAL POLICY: lock +20 pip at/after +50 pip (all managed positions)
 input double  InpManualSaveStepPips     = 20.0;
 
 input group "=== TRADE MANAGEMENT ==="
@@ -115,8 +113,6 @@ input double  InpTrendlineTolerancePips = 10.0;
 input group "=== TRAILING ==="
 input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
 input double  InpTrailStartPips         = 150.0;
-input int     InpTrailCandleShift       = 5;
-input double  InpTrailBufferPips        = 1.0;
 input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance after +InpTrailStartPips, manual + EA
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
@@ -7156,14 +7152,10 @@ bool ValidateInputs()
       return false;
    if(InpPatternWindowBars<1)
       return false;
-   if(InpAutoTriggerPips<0.0 ||
-      InpAutoLockPips<0.0 ||
-      InpManualSaveStepPips<0.0)
+   if(InpManualSaveStepPips<0.0)
       return false;
-   if(      InpTrendlineTolerancePips<0.0 ||
-      InpTrailStartPips<0.0 ||
-      InpTrailCandleShift<1 ||
-      InpTrailBufferPips<0.0)
+   if(InpTrendlineTolerancePips<0.0 ||
+      InpTrailStartPips<0.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
@@ -7203,49 +7195,7 @@ bool ValidateInputs()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-/*
 
-long g_cs_autoscroll=-9999;
-long g_cs_shift     =-9999;
-long g_cs_first     =-9999;
-
-
-
-void STB_ChartStateLog(const string ev)
-  {
-   long scale     =ChartGetInteger(0,CHART_SCALE);
-   long autoscroll=ChartGetInteger(0,CHART_AUTOSCROLL);
-   long shift     =ChartGetInteger(0,CHART_SHIFT);
-
-   long visible   =ChartGetInteger(0,CHART_VISIBLE_BARS);
-   long width     =ChartGetInteger(0,CHART_WIDTH_IN_BARS);
-   int  objects   =ObjectsTotal(0,-1,-1);
-
-
-      first==g_cs_first && visible==g_cs_visible && width==g_cs_width)
-      return;
-
-   string t=TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS);
-
-   Print("[STB][CHARTSTATE] BEFORE time=",t," chart=",ChartID()," event=",ev,
-         " symbol=",_Symbol," period=",EnumToString((ENUM_TIMEFRAMES)_Period),
-         " scale=",g_cs_scale," autoscroll=",g_cs_autoscroll," shift=",g_cs_shift,
-         " first=",g_cs_first," visible=",g_cs_visible," width=",g_cs_width,
-
-
-         " symbol=",_Symbol," period=",EnumToString((ENUM_TIMEFRAMES)_Period),
-         " scale=",scale," autoscroll=",autoscroll," shift=",shift,
-         " first=",first," visible=",visible," width=",width,
-
-
-         " dScale=",scale-g_cs_scale," dAutoscroll=",autoscroll-g_cs_autoscroll,
-         " dShift=",shift-g_cs_shift," dFirst=",first-g_cs_first,
-
-
-   g_cs_scale=scale; g_cs_autoscroll=autoscroll; g_cs_shift=shift;
-
-
-*/
 
 int OnInit()
   {
@@ -7318,7 +7268,7 @@ int OnInit()
          " oscHardFilter=",InpOscillatorHardFilter ? "ON":"OFF",
          " adaptiveParams=",InpAdaptiveParameterLearning ? "ON":"OFF",
          " warmup=",IntegerToString(InpAdaptiveWarmupPerProfile),
-         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2)); Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1)," (legacy InpAutoTriggerPips/InpAutoLockPips are informational only)");
+         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2)); Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
 
 // Keep the six dedicated EA controls in the upper-right, away from
 // the native MT5 one-click panel. Button handlers only dispatch to
