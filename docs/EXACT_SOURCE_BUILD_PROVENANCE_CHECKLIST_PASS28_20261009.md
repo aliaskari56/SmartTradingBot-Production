@@ -8,16 +8,16 @@ Status: **PREPARED FOR LOCAL METAEDITOR BUILD; NOT EXECUTED IN THIS ENVIRONMENT*
 
 - Repository: `aliaskari56/SmartTradingBot-Production`
 - Primary source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Current source Git blob: `17059923ccb18e1b717947e4581d9790df26a368` (Git blob SHA; not raw-file SHA-256)
-- Latest source-changing commit: `d57b5c8c588a9cfa17e6a357d26ba2b87fd00155`
-- Observed source size: 300,415 bytes; 9,055 lines
+- Current source Git blob: `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7` (Git blob SHA; not raw-file SHA-256)
+- Latest source-changing commit: `a901d47128c82af4789edb4b825b73167373f3e2`
+- Observed source size: 300,912 bytes; 9,064 lines
 - Direct/transitive compile closure found by source trace: primary EA, standard `Trade/Trade.mqh` family, and two repository-owned-path STB includes. The STB modules have no further include directives in the inspected source.
 
 Expected tracked Git blobs used by the automated preflight:
 
 | Repository-relative path | Expected Git blob |
 |---|---|
-| `MQL5/Experts/SmartTradingBot_FINAL.mq5` | `17059923ccb18e1b717947e4581d9790df26a368` |
+| `MQL5/Experts/SmartTradingBot_FINAL.mq5` | `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7` |
 | `MQL5/Include/Trade/Trade.mqh` | `37cfd4c3fc15c6de9aec7390287c95530d3d31cb` |
 | `MQL5/Include/Trade/OrderInfo.mqh` | `104444612778249ff7c0abe2aa6d8f51135cc1ad` |
 | `MQL5/Include/Trade/HistoryOrderInfo.mqh` | `f570b65d72f35061ed45c5bce4dfa62d1093edd5` |
@@ -54,7 +54,7 @@ $Head = (& git -C $RepoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve HEAD.' }
 
 $ExpectedBlobs = [ordered]@{
-    'MQL5/Experts/SmartTradingBot_FINAL.mq5' = '17059923ccb18e1b717947e4581d9790df26a368'
+    'MQL5/Experts/SmartTradingBot_FINAL.mq5' = 'cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7'
     'MQL5/Include/Trade/Trade.mqh' = '37cfd4c3fc15c6de9aec7390287c95530d3d31cb'
     'MQL5/Include/Trade/OrderInfo.mqh' = '104444612778249ff7c0abe2aa6d8f51135cc1ad'
     'MQL5/Include/Trade/HistoryOrderInfo.mqh' = 'f570b65d72f35061ed45c5bce4dfa62d1093edd5'
