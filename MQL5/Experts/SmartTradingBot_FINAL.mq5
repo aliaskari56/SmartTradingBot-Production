@@ -5598,16 +5598,11 @@ void ManagePendingOrders()
                " profile=",IntegerToString(profileId));
 
          if(!STB_RequestOrderDelete(ticket,STB_DEL_SERVER_EXPIRATION,"ManagePendingOrders"))
-            Print("STB pending delete failed ticket=",ticket,
-                  " ret=",trade.ResultRetcode()," ",
-                  trade.ResultRetcodeDescription());
-         else
-            if(!TradeRetcodeModifySucceeded())
-               Print("STB pending delete server rejected ticket=",ticket,
-                     " ret=",trade.ResultRetcode()," ",
-                     trade.ResultRetcodeDescription());
-            else
-               STB_AdaptiveDeleteOrderState(ticket);
+      Print("STB pending delete failed ticket=",ticket,
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription());
+   else
+      STB_AdaptiveDeleteOrderState(ticket);
         }
      }
   }
