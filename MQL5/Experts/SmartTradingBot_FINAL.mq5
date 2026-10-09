@@ -8214,6 +8214,7 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
    ENUM_ORDER_TYPE_TIME timeType=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
    datetime expiry=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
    bool stbComment=(StringFind(orderComment,"STB|")==0);
+   bool hedgeCreated=(StringFind(orderComment,"STB|HEDGE|")==0);
    bool autoCreated=(StringFind(orderComment,"STB|B|")==0 ||
                      StringFind(orderComment,"STB|S|")==0);
    bool authorized=false;
@@ -8226,8 +8227,13 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
       // Rollback is narrowly scoped to a fresh STB order. Manual orders may
       // use magic 0, so the explicit STB comment + exact creator source is
       // the authorization signal rather than magic number alone.
-      authorized=knownCreator && stbComment && setupTime>0 &&
-                 setupTime<=TimeCurrent()+5 &&
+      bool creatorCommentMatches=
+         (source=="OneClickHedge" && hedgeCreated) ||
+         (source=="PlaceSetup" && autoCreated) ||
+         (source=="PlaceManual" &&
+          StringFind(orderComment,"STB|M|")==0);
+      authorized=knownCreator && stbComment && creatorCommentMatches &&
+                 setupTime>0 && setupTime<=TimeCurrent()+5 &&
                  TimeCurrent()-setupTime<=120;
      }
    else if(reason==STB_DEL_SERVER_EXPIRATION)
