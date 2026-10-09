@@ -882,3 +882,32 @@ Open static findings remain: (1) the central delete writer checks server result 
 **Pass 13 result:** the source-tree inventory and include count reconcile, but reproducible build, source-to-binary equivalence, behavioral/recovery testing, independent review, dependency provenance/license review, and release approval remain open. Documentation only was changed; no executable source, build, or runtime test was changed/run, and `main` remains untouched.
 
 **Status:** `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Pass 14 — Audit closure matrix and acceptance criteria
+
+This pass turns the known gaps into an evidence-driven closure matrix. It does not claim that unavailable builds or tests were executed.
+
+| ID | Gap / risk | Evidence required to close | Acceptance criteria | Status |
+|---|---|---|---|---|
+| BL-01 | Build of the exact branch source | Raw MetaEditor output, compiler/terminal version, build command/settings, SHA-256 of input source | Build is tied to the exact recorded source; full output retained, with warnings/errors and commit mapping | Open |
+| BL-02 | Source-to-EX5 provenance | SHA-256 of generated and delivered EX5, build provenance and artifact record | Artifact is demonstrably produced by BL-01; file presence or Git blob SHA alone is insufficient | Open |
+| BL-03 | Dependency provenance and licensing | Dependency inventory, upstream URL/version, applicable license and notices | All distributed dependencies identified and obligations satisfied | Open |
+| BL-04 | Authorization at order-delete write boundary | Review all callers plus ordinary-delete and cleanup/rollback tests | Ordinary deletion without a valid lease is rejected; authorized rollback is not blocked; server result and final state are reconciled | Open |
+| BL-05 | SL/TP writes and competing writers | Write-ownership design, snapshot freshness rules, concurrency scenarios | An SL update cannot overwrite a newer TP using a stale snapshot; ownership and precedence are documented and tested | Open |
+| BL-06 | SL proposal arbitration | Trace/tests for initial SL, profit-lock and trailing in one cycle | Related proposals are evaluated before one final write, or serial policy is explicitly documented and proven by tests | Open |
+| BL-07 | Pending trail and restart | Restart, order-modification failure, trigger, cancel/recreate and recovery tests | State and handoff remain consistent with server state after transitions; retries are bounded and observable | Open |
+| BL-08 | Event ordering and reconciliation | Tests with duplicate and reordered OnTradeTransaction/account events | Processing is idempotent and does not assume a fixed event order | Open |
+| BL-09 | Behavioral/risk testing | Strategy Tester and demo-account runs with defined scenarios and complete reports | Reproducible coverage includes spread, price gap, requote, restart, partial failure and exposure controls | Open |
+| BL-10 | Independent review and release | Independent reviewer report, resolved-finding list and release-owner approval | No critical/high blocker remains open; release decision is recorded | Open |
+
+### Recommended closure order
+1. Establish build provenance (BL-01 and BL-02) before making any compile/release claim.
+2. Review order/position write boundaries (BL-04 to BL-06) before behavioral testing.
+3. Test restart/event/recovery (BL-07 and BL-08), then Strategy Tester/demo scenarios (BL-09).
+4. Complete dependency/license review and independent review (BL-03 and BL-10).
+
+### Repository work tracking
+At the time of this pass, searches for open issues and open PRs returned no results. This reflects only the current search results and is not technical evidence. No issue or PR was created in this pass, and no executable source was changed.
+
+**Pass 14 result:** each known gap now has an ID, required evidence and acceptance criteria. All technical items remain open until real evidence is supplied and reviewed. Overall status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
