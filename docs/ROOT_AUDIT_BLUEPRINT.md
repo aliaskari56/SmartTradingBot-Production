@@ -848,3 +848,18 @@ This pass separates documentation completion from technical approval. Current ev
 Evidence required to close: (1) reproducible build from the exact source commit with raw logs and tool versions, (2) dependency and source/binary hash linkage, (3) repeatable event/state/failure-path test results, (4) independent review of mutation authorization boundaries, and (5) documented review of the full branch diff versus `main`.
 
 Final status remains: `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Static pass 12 — Full branch-diff inventory (2026-10-09)
+
+A fresh GitHub comparison of `main` against `audit/expose-cleaned-source-20261009` reports the audit branch **99 commits ahead, 0 behind**. The comparison returned **272 paths**, all marked `added`; no `modified` or `removed` paths appeared in that returned file list.
+
+Inventory by path: 269 under `MQL5/`, plus one audit progress report, one backup manifest, and one audit blueprint. By extension: 241 `.mqh`, 23 `.bmp`, two `.md`, two `.hlsl`, and one each of `.txt`, `.ex5`, `.mq5`, and `.tpl`. The primary `SmartTradingBot_FINAL.mq5` appears as a newly added 8,664-line text file in the comparison; the `.ex5` binary is also newly added, but line statistics do not describe its binary size.
+
+### Review implication
+
+This branch must not be treated as a documentation-only patch relative to `main`. It adds a source snapshot, include/dependency tree, UI assets/template, compiled binary, manifest, and audit documents. The comparison does not prove provenance, licensing/version consistency, snapshot completeness, or source-to-binary equivalence. Before merge, review the dependency inventory and provenance, the relationship to historical source filenames, and the manifest's linkage to the exact checked-in source/binary artifacts.
+
+This was an inventory/documentation pass only. No executable source changed; no build, runtime test, or independent review was performed; `main` remains untouched. Branch-scope review is documented, not approved.
+
+**Status remains:** `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
