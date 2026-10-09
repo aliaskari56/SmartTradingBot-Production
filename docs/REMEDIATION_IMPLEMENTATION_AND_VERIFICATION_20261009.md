@@ -3,7 +3,7 @@
 ## Status
 
 - **Static remediation:** implemented on the audit branch, including same-cycle SL proposal collection and arbitration.
-- **Latest static structural checks:** PASS (24 checks) on GitHub Actions run [37935834667](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37935834667).
+- **Latest static structural checks:** PASS (24 checks) on GitHub Actions run [37938088631](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37938088631).
 - **MetaEditor compilation:** NOT RUN; MetaEditor and Wine are not available in the current execution environment.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
@@ -13,10 +13,10 @@ This report records source changes and static evidence only. It does not claim b
 ## Source under review
 
 - File: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Current Git blob SHA (not a raw-file SHA-256): `17059923ccb18e1b717947e4581d9790df26a368`
+- Current Git blob SHA (not a raw-file SHA-256): `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7`
 - Branch: `audit/expose-cleaned-source-20261009`
-- Latest source-changing commit: `d57b5c8c588a9cfa17e6a357d26ba2b87fd00155`
-- Latest static-checker commit: `cb1d96f7ea353929d8a6ced8611a33d3f1ee4cd3`
+- Latest source-changing commit: `a901d47128c82af4789edb4b825b73167373f3e2`
+- Latest static-checker commit: `6d63ff904b0d376159e17ee0d5507a2838ce635b`
 
 ## Implemented changes
 
@@ -43,7 +43,7 @@ The single `trade.OrderDelete()` writer now:
 - blocks deletion requests that do not satisfy the reason/source policy and logs the block;
 - retains the existing server-retcode and post-delete disappearance checks.
 
-The rollback check intentionally does not rely on magic number alone because UI-created STB pending orders may use magic `0`. Manual-order rollback remains allowed only for the known creator source and fresh STB-tagged order.
+The rollback check intentionally does not rely on magic number alone because UI-created STB pending orders may use magic `0`. Manual-order rollback remains allowed only for the known creator source and fresh STB-tagged order. Server-expiry deletion additionally rechecks `source==ManagePendingOrders`, managed-symbol scope, and a verified symbol lease at the final writer boundary.
 
 **Boundary:** only currently observed callers were reviewed. Any future delete reason or creator path must be explicitly added to the authorization policy and tested; do not bypass the central writer.
 
@@ -72,7 +72,7 @@ The static checks validate the encoded source structure, but do not execute the 
 
 ## Static verification performed
 
-The latest GitHub Actions run, [37935834667](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37935834667), completed with **success** on checker commit `cb1d96f7ea353929d8a6ced8611a33d3f1ee4cd3`. Its job log reports 24 passing checks, including:
+The latest GitHub Actions run, [37938088631](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37938088631), completed with **success** on checker commit `6d63ff904b0d376159e17ee0d5507a2838ce635b`. Its job log reports 24 passing checks, including:
 
 - one direct `trade.OrderDelete()` writer and one direct `trade.PositionModify()` writer;
 - four order-creation paths using the shared directional-volume guard;
