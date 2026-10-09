@@ -3,7 +3,7 @@
 ## Status
 
 - **Static remediation:** implemented on the audit branch, including same-cycle SL proposal collection and arbitration.
-- **Latest static structural checks:** PASS (26 checks) on GitHub Actions run [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234).
+- **Latest static structural checks:** PASS (26 checks) on GitHub Actions run [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138).
 - **MetaEditor compilation:** NOT RUN; MetaEditor and Wine are not available in the current execution environment.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
@@ -73,7 +73,7 @@ The static checks validate the encoded source structure, but do not execute the 
 
 ## Static verification performed
 
-The latest GitHub Actions run, [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234), completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its job log reports 26 passing checks, including:
+The latest GitHub Actions run, [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138), completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its job log reports 26 passing checks, including:
 
 - one direct `trade.OrderDelete()` writer and one direct `trade.PositionModify()` writer;
 - four order-creation paths using the shared directional-volume guard;
