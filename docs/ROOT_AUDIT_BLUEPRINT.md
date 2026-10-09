@@ -911,3 +911,27 @@ This pass turns the known gaps into an evidence-driven closure matrix. It does n
 At the time of this pass, searches for open issues and open PRs returned no results. This reflects only the current search results and is not technical evidence. No issue or PR was created in this pass, and no executable source was changed.
 
 **Pass 14 result:** each known gap now has an ID, required evidence and acceptance criteria. All technical items remain open until real evidence is supplied and reviewed. Overall status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Pass 15 — Include tracing and dependency provenance (2026-10-09)
+
+### Scope
+The primary branch source was fetched again from GitHub (blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`, 8,665 lines). Textual directives were scanned and three include files were read. This is not a full license audit of all 266 Include files and does not establish legal clearance.
+
+### Evidence-backed findings
+- The primary source has three direct includes:
+  - `Trade/Trade.mqh`
+  - `STB\\STB_PendingDistanceResolver.mqh`
+  - `STB\\STB_PendingTrail.mqh`
+- The two STB files in the repository are 309 and 769 lines. Their headers describe module roles; no explicit license notice was visible in the inspected file openings. This limited observation does not prove that the files are unlicensed.
+- `Trade/Trade.mqh` carries a MetaQuotes copyright notice (2000–2026) and includes five local headers: `Object.mqh`, `OrderInfo.mqh`, `HistoryOrderInfo.mqh`, `PositionInfo.mqh`, and `DealInfo.mqh`. The origin and distribution terms for the standard library should be checked against the official version and terms.
+- The manifest's IncludeFileCount of 266 matches the previously counted contents of `MQL5/Include/`. Matching counts do not prove upstream provenance, equivalence to an official MetaQuotes package, or redistribution rights.
+- The manifest's Source and EX5 fields point to a local terminal path and list hashes; those local paths are not independently accessible evidence of a reproducible build.
+
+### Required follow-up
+1. Record provenance, upstream version/commit, local modifications, and license for each of the 266 files.
+2. Check the official source version and redistribution terms for MetaQuotes libraries; do not remove or weaken copyright notices.
+3. Document author/owner, license terms, redistribution rights, and any adapted code for the two STB modules.
+4. Exclude files with unresolved provenance from a distributable package until clarified, or obtain the necessary permissions.
+
+**Pass 15 status:** direct includes and the principal standard-library dependency were traced. Full provenance/license review for all include files remains open. No executable source was changed; no build or runtime test was run; `main` remains untouched.
