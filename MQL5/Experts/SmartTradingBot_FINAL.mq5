@@ -4482,7 +4482,8 @@ bool STB_ManualOverrideIs(const ulong ticket)
    int idx=STB_ExposureFind(ticket);
    if(idx>=0)
       return g_stbExposure[idx].manualOverride;
-   // Persistent override is consulted by pending-order managers only;\n   // open-position protection deliberately ignores this flag.
+   // Persistent override is consulted by pending-order managers only;
+   // open-position protection deliberately ignores this flag.
    return STB_OverridePersistOn(ticket,STB_ExposureSymbolOf(ticket));
   }
 
