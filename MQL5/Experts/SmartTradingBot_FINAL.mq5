@@ -4727,6 +4727,27 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    string symbol=PositionGetString(POSITION_SYMBOL);
    long side=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+
+   // If net profit has crossed the universal lock trigger, a competing
+   // automatic proposal may not replace the required lock with a weaker SL.
+   // When the existing position has no SL at all, retain a valid INITIAL
+   // protection candidate as a last-resort safety fallback if broker geometry
+   // makes the profit-lock target impossible this cycle.
+   double decisionNetProfitPips=PositionNetProfitPips(ticket);
+   double pip=PipSize(symbol);
+   bool enforceProfitLockFloor=
+      (decisionNetProfitPips>=STB_ProfitLockTriggerPips() && pip>0.0);
+   double profitLockTarget=0.0;
+   if(enforceProfitLockFloor)
+     {
+      profitLockTarget=NormalizePrice(symbol,
+         side==POSITION_TYPE_BUY
+         ? entry+STB_ProfitLockLockPips()*pip
+         : entry-STB_ProfitLockLockPips()*pip);
+      if(profitLockTarget<=0.0)
+         enforceProfitLockFloor=false;
+     }
 
    // Use one tick and one broker-constraint snapshot for all proposals so
    // array arrival order cannot change which candidates pass geometry checks.
@@ -4738,6 +4759,9 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
    bool found=false;
+   bool initialFallbackFound=false;
+   double initialFallbackSL=0.0;
+   int initialFallbackSource=-1;
    for(int i=0;i<count;i++)
      {
       if(!props[i].valid || !props[i].hasSL || props[i].sl<=0.0) continue;
@@ -4745,18 +4769,60 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
       if(c<=0.0 ||
          !STB_IsValidSLForDecisionSnapshot(side,c,decisionTick,point,stopsLevel,freezeLevel))
          continue;
+
       if(side==POSITION_TYPE_BUY)
         {
          if(currentSL>0.0 && c<=currentSL) continue;
+        }
+      else if(side==POSITION_TYPE_SELL)
+        {
+         if(currentSL>0.0 && c>=currentSL) continue;
+        }
+      else
+         continue;
+
+      bool meetsProfitLockFloor=!enforceProfitLockFloor ||
+         (side==POSITION_TYPE_BUY ? c>=profitLockTarget:c<=profitLockTarget);
+      if(!meetsProfitLockFloor)
+        {
+         // Never downgrade an installed SL below the active lock target.
+         // Only a position with no existing SL may use the INITIAL candidate
+         // as a fail-safe stop while the broker rejects the requested lock.
+         if(currentSL<=0.0 && props[i].source==STB_SL_SRC_INITIAL)
+           {
+            bool strongerFallback=!initialFallbackFound ||
+               (side==POSITION_TYPE_BUY
+                ? c>initialFallbackSL
+                : c<initialFallbackSL);
+            if(strongerFallback)
+              {
+               initialFallbackSL=c;
+               initialFallbackSource=props[i].source;
+               initialFallbackFound=true;
+              }
+           }
+         continue;
+        }
+
+      if(side==POSITION_TYPE_BUY)
+        {
          if(!found || c>finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
            { finalSL=c; finalSource=props[i].source; found=true; }
         }
       else if(side==POSITION_TYPE_SELL)
         {
-         if(currentSL>0.0 && c>=currentSL) continue;
          if(!found || c<finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
            { finalSL=c; finalSource=props[i].source; found=true; }
         }
+     }
+
+   // With no installed SL, retain a valid initial-protection fallback when
+   // the active profit-lock target is itself unplaceable by broker geometry.
+   if(!found && initialFallbackFound)
+     {
+      finalSL=initialFallbackSL;
+      finalSource=initialFallbackSource;
+      found=true;
      }
 
    // The chosen candidate must still satisfy the live broker constraint check.
@@ -4990,8 +5056,26 @@ void STB_FlushPositionSLProposals()
       if(hasProfitCandidate)
         {
          double pip=PipSize(symbol);
-         double achieved=(pip>0.0 ? (side==POSITION_TYPE_BUY ? (actualSL-entry)/pip:(entry-actualSL)/pip):0.0);
-         if(achieved>0.0) SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
+         double lockTargetSL=(pip>0.0 ?
+            NormalizePrice(symbol,
+               side==POSITION_TYPE_BUY
+               ? entry+STB_ProfitLockLockPips()*pip
+               : entry-STB_ProfitLockLockPips()*pip):0.0);
+         bool lockTargetConfirmed=
+            (lockTargetSL>0.0 && pip>0.0 &&
+             (side==POSITION_TYPE_BUY
+              ? actualSL+tolerance>=lockTargetSL
+              : actualSL-tolerance<=lockTargetSL));
+         // Do not persist a partial/sub-minimum lock merely because some
+         // profit-protection proposal was queued but lost live validation.
+         if(lockTargetConfirmed)
+           {
+            double achieved=(side==POSITION_TYPE_BUY
+                             ? (actualSL-entry)/pip
+                             : (entry-actualSL)/pip);
+            if(achieved>0.0)
+               SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
+           }
         }
       Print("STB SL arbitration confirmed ticket=",ticket," source=",chosenSource,
             " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
