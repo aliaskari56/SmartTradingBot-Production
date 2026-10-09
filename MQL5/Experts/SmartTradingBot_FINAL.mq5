@@ -5813,20 +5813,7 @@ bool EnsureInitialSL(const ulong ticket)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-void STB_RecordPendingInitialSLFailure(const int stateIdx)
-  {
-   if(stateIdx<0 || stateIdx>=ArraySize(g_stbPendingTrail))
-      return;
-
-   g_stbPendingTrail[stateIdx].failureCount++;
-
-   int fc=g_stbPendingTrail[stateIdx].failureCount;
-   int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
-                         : (fc==2 ? STB_PEND_BACKOFF_2_SEC
-                                  : STB_PEND_BACKOFF_3_SEC));
-
-   g_stbPendingTrail[stateIdx].nextRetryTime=TimeCurrent()+backoffSec;
-  }
+void STB_RecordPendingInitialSLFailure(const int stateIdx);
 
 bool EnsureInitialSLForPendingOrder(const ulong ticket)
   {
@@ -8571,6 +8558,21 @@ void OnDeinit(const int reason)
    ============================================================== */
 #include <STB\STB_PendingDistanceResolver.mqh>
 #include <STB\STB_PendingTrail.mqh>
+void STB_RecordPendingInitialSLFailure(const int stateIdx)
+  {
+   if(stateIdx<0 || stateIdx>=ArraySize(g_stbPendingTrail))
+      return;
+
+   g_stbPendingTrail[stateIdx].failureCount++;
+
+   int fc=g_stbPendingTrail[stateIdx].failureCount;
+   int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
+                         : (fc==2 ? STB_PEND_BACKOFF_2_SEC
+                                  : STB_PEND_BACKOFF_3_SEC));
+
+   g_stbPendingTrail[stateIdx].nextRetryTime=TimeCurrent()+backoffSec;
+  }
+
 //==================================================================
 // COMMON POST-CREATION POINT (MASTER BLUEPRINT 10/11)
 //==================================================================
