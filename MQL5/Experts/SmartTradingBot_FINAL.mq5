@@ -1949,13 +1949,26 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   STB_GeomStore(ticket,false,newEntry,newSL,newTP); // MANUAL_OVERRIDE: remember own write
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
+     {
+      if(OrderSelect(ticket))
+         STB_GeomStore(ticket,false,
+                       OrderGetDouble(ORDER_PRICE_OPEN),
+                       OrderGetDouble(ORDER_SL),
+                       OrderGetDouble(ORDER_TP));
       return false;
+     }
 
    if(!TradeRetcodeModifySucceeded())
+     {
+      if(OrderSelect(ticket))
+         STB_GeomStore(ticket,false,
+                       OrderGetDouble(ORDER_PRICE_OPEN),
+                       OrderGetDouble(ORDER_SL),
+                       OrderGetDouble(ORDER_TP));
       return false;
+     }
 
    if(!OrderSelect(ticket))
       return false;
@@ -1972,8 +1985,13 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(MathAbs(ve-newEntry)>tolerance ||
       MathAbs(vs-newSL)>tolerance ||
       MathAbs(vt-newTP)>tolerance)
+     {
+      // Cache the actual server geometry, never an unconfirmed proposal.
+      STB_GeomStore(ticket,false,ve,vs,vt);
       return false;
+     }
 
+   STB_GeomStore(ticket,false,ve,vs,vt); // MANUAL_OVERRIDE: verified own write only
    return true;
   }
 
@@ -4267,9 +4285,15 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    Print("[STB][P5A][MODFAIL][BEFORE_REQUEST] ticket=",ticket,      " gv=",gv,      " tickms=",GetTickCount64(),      " newSL=",DoubleToString(newSL,_Digits),      " currentSL=",DoubleToString(currentSL,_Digits),      " ret_before=",trade.ResultRetcode());
        if(STB_CycleWriteAlreadyDone(ticket))
       return false; // Blueprint 8/39: max ONE position modify per ticket per cycle
-   STB_GeomStore(ticket,true,PositionGetDouble(POSITION_PRICE_OPEN),newSL,tp); // MANUAL_OVERRIDE: remember own write
-    if(!trade.PositionModify(ticket,newSL,tp))
+   if(!trade.PositionModify(ticket,newSL,tp))
      {
+      // Failed writes must not leave the proposed SL as the geometry baseline;
+      // refresh the cache from the actual terminal state instead.
+      if(PositionSelectByTicket(ticket))
+         STB_GeomStore(ticket,true,
+                       PositionGetDouble(POSITION_PRICE_OPEN),
+                       PositionGetDouble(POSITION_SL),
+                       PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
        Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       Print("STB MODIFY request failed ticket=",ticket,
@@ -4283,6 +4307,11 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    if(ret==TRADE_RETCODE_NO_CHANGES)
      {
       g_modifyWasNoChanges=true;
+      if(PositionSelectByTicket(ticket))
+         STB_GeomStore(ticket,true,
+                       PositionGetDouble(POSITION_PRICE_OPEN),
+                       PositionGetDouble(POSITION_SL),
+                       PositionGetDouble(POSITION_TP));
       Print("[STB][P5A][MODFAIL][BEFORE_DEL] ticket=",ticket,      " gv=",gv,      " exists=",GlobalVariableCheck(gv),      " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,      " tickms=",GetTickCount64(),      " ret=",trade.ResultRetcode());
        GlobalVariableDel(gv);
       return true;
@@ -4290,6 +4319,11 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
 
    if(!TradeRetcodeModifySucceeded())
      {
+      if(PositionSelectByTicket(ticket))
+         STB_GeomStore(ticket,true,
+                       PositionGetDouble(POSITION_PRICE_OPEN),
+                       PositionGetDouble(POSITION_SL),
+                       PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
        Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       return false;
@@ -4307,6 +4341,10 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    double tolerance=MathMax(point*0.5,
                             tickSize>0.0 ? tickSize*0.5:point*0.5);
 
+   STB_GeomStore(ticket,true,
+                  PositionGetDouble(POSITION_PRICE_OPEN),
+                  verified,
+                  PositionGetDouble(POSITION_TP)); // MANUAL_OVERRIDE: only cache the verified terminal geometry
    STB_CycleMarkWritten(ticket); // Blueprint 8/39: this cycle already wrote this ticket
    return MathAbs(verified-newSL)<=tolerance;
   }
@@ -5575,7 +5613,12 @@ bool PlaceSetup(Setup &s)
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
    trade.SetAsyncMode(false);
 
-   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile)+"|EB"+DoubleToString(MathMax(0.0,s.entryBufferPips),8);
+   double commentPip=PipSize(s.symbol);
+   double commentAnchor=(s.direction>0 ? s.originHigh:s.originLow);
+   double effectiveEntryBuffer=(commentPip>0.0 && commentAnchor>0.0)
+                               ? MathAbs(s.entry-commentAnchor)/commentPip
+                               : MathMax(0.0,s.entryBufferPips);
+   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile)+"|EB"+DoubleToString(effectiveEntryBuffer,8);
 
    bool ok=false;
 
@@ -5907,7 +5950,8 @@ bool PlaceManualPendingDirection(const int direction)
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
+   double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
+   string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
    bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
