@@ -4383,34 +4383,16 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 //+------------------------------------------------------------------+
 void AutoProfitProtection()
 {
+   // One implementation owns trigger, lock policy and manual-override gating.
+   // This avoids duplicate logic and prevents repeated logs for user-controlled
+   // positions whose automatic writes are intentionally paused.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
-
       if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
-      PositionSelectByTicket(ticket);
-
-      string symbol=PositionGetString(POSITION_SYMBOL);
-      long type=PositionGetInteger(POSITION_TYPE);
-      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-
-      double profit=PositionNetProfitPips(ticket);
-      double locked=GetLockedPips(ticket);
-
-      if(profit>=STB_ProfitLockTriggerPips() && locked<STB_ProfitLockLockPips())
-      {
-         Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
-               " symbol=",symbol,
-               " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-               " profitPips=",DoubleToString(profit,1),
-               " triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1),
-               " lockPips=",DoubleToString(STB_ProfitLockLockPips(),1),
-               " lockedPips=",DoubleToString(locked,1));
-
-         ApplyProfitLock(ticket,STB_ProfitLockLockPips());
-      }
+      STB_ProfitProtectionOne(ticket);
    }
 }
 
@@ -6023,29 +6005,6 @@ int g_scannerTop10Count=0;
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_ScannerIsAllowListed(const string symbol)
-  {
-   if(StringLen(InpScannerSymbols)==0)
-      return true;
-
-   string configured=InpScannerSymbols;
-   StringReplace(configured,";",",");
-
-   string parts[];
-   ushort separator=StringGetCharacter(",",0);
-   int n=StringSplit(configured,separator,parts);
-
-   for(int i=0;i<n;i++)
-     {
-      string item=parts[i];
-      StringTrimLeft(item);
-      StringTrimRight(item);
-      if(item==symbol)
-         return true;
-     }
-
-   return false;
-  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
