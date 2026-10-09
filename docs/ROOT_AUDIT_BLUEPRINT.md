@@ -159,3 +159,74 @@ A repository-wide tree/name inventory was checked on both available branches (`m
 - The EA source contains comments referring to “MASTER BLUEPRINT” and numbered blueprint rules, but these references are not themselves the complete master map and cannot safely be used to reconstruct its full meaning.
 
 **Conclusion:** the canonical master map has **not been located** in the accessible repository contents. The house map above remains a provisional, code-derived inventory only; it must not be treated as a replacement for the user's original master map. Keep the current map clearly labeled provisional until the original document is found or supplied. No source code or release artifact was changed as part of this search.
+
+
+## Master map — target architecture (source-neutral collaboration)
+
+**Status: proposed architecture target derived from the user's requirements and the current code inventory. This is not yet a statement that the implementation conforms.** Keep this map deliberately small: one shared view of exposures, specialist decision-makers, and a few controlled write doors.
+
+```mermaid
+flowchart TD
+    A["Sources: EA / chart buttons / desktop / mobile / broker events"] --> B["Event intake + reconciliation"]
+    C["Scanner + setup builder"] --> D["Order creation gate"]
+    D --> E["Broker / terminal"]
+    E --> B
+    B --> R["Shared exposure registry\n(ticket identity, actual geometry, scope, authority, lifecycle)"]
+    R --> S["Specialist managers\nSL | TP | pending geometry | trailing | expiry | lifecycle stats"]
+    S --> P["Policy + conflict resolver\nownership, permissions, broker rules, priority, dedup"]
+    P --> W1["Single position-geometry writer"]
+    P --> W2["Single pending-geometry writer"]
+    P --> W3["Single pending-delete writer"]
+    W1 --> E
+    W2 --> E
+    W3 --> E
+    E --> V["Read back server-confirmed state"]
+    V --> R
+```
+
+### Four rules that define the whole map
+
+1. **Origin-neutral coverage:** once an exposure is inside the explicitly authorized account/symbol scope, its origin (EA, chart command, desktop, mobile, or broker-side event) does not decide which protection manager may inspect it. The manager decides from current state and its responsibility, not from who created it.
+2. **One owner for each kind of state:** the exposure registry owns canonical per-ticket snapshots and authority metadata; specialist managers own only their private calculation/retry state; the policy resolver owns conflict resolution; central writers alone perform broker mutations.
+3. **No neighbor-house writes:** a manager may read another house only through a named interface or shared read model. It may submit a proposal, never modify another house's private state or call a broker mutation directly.
+4. **Verify, then reconcile:** a successful local API return is not enough. Re-read the terminal/server state, confirm the intended ticket and geometry, and update the shared registry from observed state. If confirmation fails, record the failure and reconcile before retrying.
+
+### Responsibilities at a glance
+
+- **Event intake / reconciler:** normalize events from all origins; reconcile current orders and positions on attach/restart; tolerate duplicate, delayed, or reordered events; do not assume a transaction callback is a complete snapshot.
+- **Exposure registry:** canonical ticket/position identity, actual server geometry, authorized scope, manual-control mode, pending-to-position lifecycle links, and restart recovery metadata.
+- **SL manager:** propose safe, valid SL geometry for every in-scope exposure it owns; never write to the broker itself.
+- **TP manager:** propose TP geometry using the same current snapshot and shared conflict policy; never write to the broker itself.
+- **Pending manager:** propose pending entry/SL/TP/trail/expiry changes for that pending ticket only; hand off when it fills.
+- **Scanner/setup builder:** discover candidates and produce proposals only; it is not the owner of existing exposure protection.
+- **Creation gate:** validate a new order proposal and permissions; creation is separate from management of exposures already found.
+- **Policy/conflict resolver:** enforce scope, symbol lease, account/terminal permissions, broker stop/freeze and tick-size constraints, monotonic-protection rules, per-cycle deduplication, and priority between competing proposals.
+- **Central writers:** the only code allowed to modify position geometry, modify pending geometry, or delete pending orders. Each writer independently enforces authorization and verifies the server result.
+- **Lifecycle/statistics:** consume confirmed events/outcomes; must not mutate geometry or inflate counts through repeated reconciliation.
+- **UI/chart controls:** express user intent through commands; no direct broker writes from UI code.
+
+### One policy point that must be resolved before code changes
+
+The new source-neutral goal changes how the existing blueprint currently describes manual edits. The old rule treats a manual geometry edit as per-ticket manual authority until AUTO is explicitly enabled. The proposed map separates **origin** from **authority**: origin never excludes an exposure from inspection, while a deliberate, explicit **MANUAL HOLD** state may suspend automatic proposals for that ticket. A manual edit alone should not silently become a permanent bypass if the intended goal is automatic protection for all sources. This is a design decision to confirm; do not change code until it is settled.
+
+### Current-code fit and known gaps
+
+- The current EA already has a shared management cycle and central mutation paths for position modification, pending modification, and pending deletion. This is a useful starting shape, but it does not prove every writer enforces the same authorization contract.
+- The static finding **H7-H5-001** remains open: the central pending-delete writer does not enforce the symbol lease at its own boundary. Resolve the creation/rollback exception deliberately; do not add a blind guard that can block cleanup of a newly created invalid order.
+- The houses mostly live inside one large EA translation unit. These are logical boundaries until code structure and call paths enforce them.
+- This target map is informed by Microsoft's guidance on explicit component responsibilities/dependencies and AWS guidance on bounded contexts/interfaces, plus MQL5's official description of terminal-originated trade transactions and the possibility that state can change while an event handler runs. See:
+  - https://learn.microsoft.com/azure/architecture/guide/architecture-styles
+  - https://learn.microsoft.com/azure/architecture/guide/design-principles
+  - https://docs.aws.amazon.com/prescriptive-guidance/latest/hexagonal-architectures/overview.html
+  - https://www.mql5.com/en/docs/constants/structures/mqltradetransaction
+  - https://www.mql5.com/en/docs/basis/function/events
+
+### Acceptance tests for the map (not yet run)
+
+- An in-scope exposure created by EA, desktop, mobile, or chart command is discovered and reconciled without relying on its origin.
+- SL and TP proposals for the same ticket are resolved from one fresh snapshot; neither writer can erase the other's update through stale geometry.
+- No specialist or UI component can reach broker mutation APIs except through the central writers.
+- Every central writer independently checks ticket identity, authorized scope, symbol lease/permissions, broker constraints, and final server state.
+- Restart, duplicate/reordered trade events, partial fills, pending-to-position transition, and failed modification leave the registry consistent with observed terminal state.
+- A ticket outside the authorized scope is never modified, even if visible to the EA.
+- Explicit manual hold / AUTO resume semantics are deterministic and documented before implementation.
