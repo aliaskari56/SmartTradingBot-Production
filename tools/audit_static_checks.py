@@ -137,7 +137,7 @@ def main() -> int:
                  ("bool TrailPositionByLivePrice(", "void ManagePositions(", True),
                  ("void STB_ProfitProtectionOne(", "bool ModifyPositionSL(", False)))),
         ("central SL modify bridge has only synchronous user, initial fallback, and flush call sites",
-         len(re.findall(r"\\bModifyPositionSL\\s*\\(", source)) == 4),
+         len(re.findall(r"\bModifyPositionSL\s*\(", source)) == 4),
         ("queue allocation failure aborts the incomplete arbitration batch",
          all(token in source for token in (
              "bool g_stbSLCollectionFaulted=false;",
