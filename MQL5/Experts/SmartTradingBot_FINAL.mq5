@@ -3576,11 +3576,16 @@ bool STB_IsSymbolAllowed(const string s)
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
       return s==_Symbol;
 
-   // Keep scanner, trailing, expiry and position management aligned:
-   // an empty list means the selected Market Watch universe, not just _Symbol
-   // and not every symbol known to the broker.
+   // The chart symbol remains manageable even when the scanner is configured
+   // to explore a different explicit symbol universe (manual controls operate
+   // on _Symbol). Additional symbols follow the configured universe.
+   if(s==_Symbol)
+      return true;
+
+   // An empty scanner list means other currently selected Market Watch symbols,
+   // not every symbol known to the broker.
    if(StringLen(InpScannerSymbols)==0)
-      return s==_Symbol || (bool)SymbolInfoInteger(s,SYMBOL_SELECT);
+      return (bool)SymbolInfoInteger(s,SYMBOL_SELECT);
 
    string parts[];
    string cfg=InpScannerSymbols;
