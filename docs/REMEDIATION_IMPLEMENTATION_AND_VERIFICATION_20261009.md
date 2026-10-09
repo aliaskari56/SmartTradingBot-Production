@@ -3,7 +3,7 @@
 ## Status
 
 - **Static remediation:** implemented on the audit branch, including same-cycle SL proposal collection and arbitration.
-- **Latest static structural checks:** PASS (22 checks) on GitHub Actions run [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375).
+- **Latest static structural checks:** PASS (22 checks) on GitHub Actions run [37934106795](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37934106795).
 - **MetaEditor compilation:** NOT RUN; MetaEditor and Wine are not available in the current execution environment.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
@@ -13,10 +13,10 @@ This report records source changes and static evidence only. It does not claim b
 ## Source under review
 
 - File: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Current Git blob SHA (not a raw-file SHA-256): `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf`
+- Current Git blob SHA (not a raw-file SHA-256): `20a21c47bd576ca804465cc94940d3b4ea1ca6e1`
 - Branch: `audit/expose-cleaned-source-20261009`
-- Latest source-changing commit: `9b91af646a0362bbf38b184cdc2d3effebd28239`
-- Latest static-checker commit: `6c7213801bf5b405e88b00e34f0d4e3f74134831`
+- Latest source-changing commit: `aa09b2c95b2e00d9a4789c66ca9d6264c29cb20b`
+- Latest static-checker commit: `979a632d4f953bd8c659426f9c9017f19825931c`
 
 ## Implemented changes
 
@@ -61,6 +61,7 @@ The former one-proposal call pattern has been replaced on this branch:
 - Each queued candidate records ticket and cycle, as well as source, reason, and SL.
 - The flush resolves the full candidate set per ticket. BUY chooses the highest valid improving SL; SELL chooses the lowest valid improving SL. Equal-price ties use stable source priority.
 - Candidate prices are normalized and revalidated with `IsValidSLForPosition()`; the selected request is revalidated again by the existing modify bridge.
+- Candidate geometries are evaluated against one shared tick/stops/freeze snapshot, then the selected candidate is rechecked with the live validator. If the tick moves enough to invalidate the selected candidate, the cycle fails closed rather than selecting a fallback against a different snapshot.
 - Non-initial automatic proposals are rejected outside collection rather than silently falling back to direct synchronous writes.
 - Explicit user SAVE remains synchronous. Initial protective SL for a newly-created position also retains a deliberate synchronous lifecycle fallback before the next scheduled management cycle.
 - If queue allocation fails, the automatic batch aborts instead of resolving an incomplete set. If the temporary per-ticket candidate array cannot hold the complete set, that ticket is skipped.
@@ -70,7 +71,7 @@ The static checks validate the encoded source structure, but do not execute the 
 
 ## Static verification performed
 
-The latest GitHub Actions run, [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375), completed with **success** on checker commit `6c7213801bf5b405e88b00e34f0d4e3f74134831`. Its job log reports 22 passing checks, including:
+The latest GitHub Actions run, [37934106795](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37934106795), completed with **success** on checker commit `979a632d4f953bd8c659426f9c9017f19825931c`. Its job log reports 22 passing checks, including:
 
 - one direct `trade.OrderDelete()` writer and one direct `trade.PositionModify()` writer;
 - four order-creation paths using the shared directional-volume guard;
@@ -78,7 +79,7 @@ The latest GitHub Actions run, [37931964375](https://github.com/aliaskari56/Smar
 - TP snapshot conflict mitigation;
 - same-cycle proposal collection, full candidate-set resolution, deterministic tie-break, and allocation-failure handling;
 - prevention of non-initial automatic SL writes outside arbitration cycles;
-- candidate-producer write boundaries and confirmation of a nonzero actual SL before profit-lock bookkeeping;
+- candidate-producer write boundaries, shared-snapshot candidate validation, and confirmation of a nonzero actual SL before profit-lock bookkeeping;
 - lexical balance of delimiters, comments, and literals.
 
 These are static structural checks only. They do not prove compiler validity, MQL runtime behavior, broker compatibility, profitability, or release readiness.
