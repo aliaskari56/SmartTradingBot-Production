@@ -3476,11 +3476,47 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
       trans.deal>0 &&
       HistoryDealSelect(trans.deal))
      {
+      // Manual authority belongs to the exposure, not the pending-order ticket.
+      // When an overridden pending fills, transfer that authority to the
+      // resulting position ticket before the expired order record is pruned.
+      bool inheritedManualOverride=false;
+
       if(trans.order>0)
+        {
+         int orderExposureIdx=STB_ExposureFind(trans.order);
+
+         if(orderExposureIdx>=0)
+            inheritedManualOverride=g_stbExposure[orderExposureIdx].manualOverride;
+
+         if(!inheritedManualOverride && trans.symbol!="")
+            inheritedManualOverride=STB_OverridePersistOn(trans.order,trans.symbol);
+
          STB_PendingTrailOnOrderFilled(trans.order);
+        }
 
       if(trans.position>0 && PositionSelectByTicket(trans.position))
         {
+         if(IsManagedPosition(trans.position))
+           {
+            string positionSymbol=PositionGetString(POSITION_SYMBOL);
+            double positionEntry=PositionGetDouble(POSITION_PRICE_OPEN);
+            double positionSL=PositionGetDouble(POSITION_SL);
+            double positionTP=PositionGetDouble(POSITION_TP);
+
+            STB_ExposureEnsure(trans.position,true);
+            STB_GeomStore(trans.position,true,
+                          positionEntry,positionSL,positionTP);
+
+            if(inheritedManualOverride)
+              {
+               STB_ManualOverrideSet(trans.position);
+               Print("STB MANUAL_OVERRIDE TRANSFERRED order=",
+                     IntegerToString((int)trans.order),
+                     " position=",IntegerToString((int)trans.position),
+                     " symbol=",positionSymbol);
+              }
+           }
+
          // SIMPLIFIED: origin registry call removed.
          STB_ManagePositionImmediately(trans.position);
         }
