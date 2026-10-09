@@ -630,9 +630,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 }
 
 //--- Per-cycle processing (OnTick / OnTimer with cycle dedup) ---------
-void STB_PendingTrailProcess(const bool manual=false)
+int STB_PendingTrailProcess(const bool manual=false)
 {
    g_stbPendingTrailCycle++;
+   int moved=0;
 
    // Registration pass: TERMINAL-SCAN every managed pending order type that
    // is not yet tracked (multi-ticket + manual/mobile/other-EA discovery).
@@ -667,9 +668,19 @@ void STB_PendingTrailProcess(const bool manual=false)
       if(g_stbPendingTrail[i].lastProcessedCycle==g_stbPendingTrailCycle)
          continue;
 
+      ulong ticket=g_stbPendingTrail[i].ticket;
+      datetime previousModifyTime=g_stbPendingTrail[i].lastModifyTime;
       g_stbPendingTrail[i].lastProcessedCycle=g_stbPendingTrailCycle;
-      STB_PendingTrailManageOne(g_stbPendingTrail[i].ticket,manual);
+
+      STB_PendingTrailManageOne(ticket,manual);
+
+      int updatedIdx=STB_PendingTrailFind(ticket);
+      if(updatedIdx>=0 &&
+         g_stbPendingTrail[updatedIdx].lastModifyTime>previousModifyTime)
+         moved++;
    }
+
+   return moved;
 }
 
 //--- Trigger handoff -------------------------------------------------
