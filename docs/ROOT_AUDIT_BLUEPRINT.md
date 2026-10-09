@@ -863,3 +863,22 @@ This branch must not be treated as a documentation-only patch relative to `main`
 This was an inventory/documentation pass only. No executable source changed; no build, runtime test, or independent review was performed; `main` remains untouched. Branch-scope review is documented, not approved.
 
 **Status remains:** `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Static pass 13 — Snapshot inventory, dependency count, and CI evidence (2026-10-09)
+
+A recursive Git tree read for the audit branch returned 309 entries (273 blobs, 36 trees), with no truncation. The `MQL5/` subtree contains 269 files: two under `Experts/`, 266 under `Include/`, and one profile template. The 266 include-tree files match `BACKUP_MANIFEST.txt`'s `IncludeFileCount=266`: 241 `.mqh`, 23 `.bmp`, and two `.hlsl` files.
+
+The primary source is 284,359 bytes in the Git tree, blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`, and 8,665 text lines when fetched. The EX5 is present at 236,764 bytes, blob SHA `348bb13126ba73b9502f82466f2d1a2bea1e8f6f`. Presence and metadata do not prove that this binary was produced from this exact source. The root backup ZIP is 2,584,569 bytes, blob SHA `a57ce1b04d64dfa6b890043098be8a001408b6da`; the same blob exists on `main`, so it is not part of the new branch diff. ZIP contents were not extracted or independently matched in this pass.
+
+No `.github/workflows/` path, root README, or root LICENSE/NOTICE file appears in the branch tree. This is a repository-tree observation, not proof that every upstream dependency lacks a license; dependency provenance and license obligations remain unverified. The combined commit-status endpoint returned no statuses for the inspected documentation commit, and the current branch contains no workflow definition. Historical CI for other commits/source filenames does not establish a build for this source.
+
+### Static mutation/event re-scan
+
+The main source text contains six event handlers: `OnInit`, `OnDeinit`, `OnTick`, `OnTimer`, `OnTradeTransaction`, and `OnChartEvent`. One direct `trade.OrderModify`, one direct `trade.PositionModify`, and one direct `trade.OrderDelete` call were found in the main source; order creation calls are distributed among four call families. This is a textual scan, not proof that all side effects across the dependency tree have been exhaustively enumerated.
+
+Open static findings remain: (1) the central delete writer checks server result and ticket disappearance, but does not visibly enforce the verified symbol lease at the write boundary; any fix must preserve authorized rollback/cleanup behavior; (2) the position-SL path checks the verified lease and passes the current TP to `PositionModify`, but this alone proves neither an independent TP manager nor simultaneous multi-proposal SL arbitration; `STB_SubmitPositionSL` resolves a single proposal with count 1; (3) pending-trail recovery and trigger handoff are not runtime-validated; and (4) manifest compile claims lack independently inspectable raw build output/toolchain linkage for the exact source.
+
+**Pass 13 result:** the source-tree inventory and include count reconcile, but reproducible build, source-to-binary equivalence, behavioral/recovery testing, independent review, dependency provenance/license review, and release approval remain open. Documentation only was changed; no executable source, build, or runtime test was changed/run, and `main` remains untouched.
+
+**Status:** `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
