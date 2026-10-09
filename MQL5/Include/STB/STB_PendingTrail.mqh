@@ -243,10 +243,9 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
          return false;
 
       bool buySide=STB_PendingIsBuySide((ENUM_ORDER_TYPE)orderType);
-      bool stopKind=STB_PendingIsStopKind((ENUM_ORDER_TYPE)orderType);
-      double anchorQuote=buySide
-                         ? (stopKind ? currentTick.ask:currentTick.bid)
-                         : (stopKind ? currentTick.bid:currentTick.ask);
+      // The pending trail's canonical anchor is Bid for BUY-side orders and
+      // Ask for SELL-side orders, regardless of STOP vs LIMIT geometry.
+      double anchorQuote=buySide ? currentTick.bid:currentTick.ask;
       fallbackEntryBufferPips=MathAbs(currentEntry-anchorQuote)/pip;
 
       double minDistance=TradeMinDistance(symbol);
