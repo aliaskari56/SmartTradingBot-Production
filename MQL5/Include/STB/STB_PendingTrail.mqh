@@ -247,12 +247,14 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
                              ? MathAbs(currentEntry-currentSL)/pip
                              : 0.0;
 
+   // Pending protection is independent from whether live trailing is
+   // disabled. If no SL exists yet, reserve a positive structural-buffer
+   // fallback; the EA's initial-protection path must install the real SL.
    double slBufferPips=(structuralRiskPips>0.0)
                         ? structuralRiskPips
-                        : MathMax(0.0,InpLiveTrailDistancePips);
-
-   if(slBufferPips<=0.0)
-      return false;
+                        : MathMax(1.0,
+                                  MathMax(InpInitialSLBufferPips,
+                                          InpSLBufferPips));
 
    int direction=STB_PendingTrailDirection(orderType);
    int offSign  =STB_PendingEntryOffsetSign((ENUM_ORDER_TYPE)orderType);
@@ -468,6 +470,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    }
 
    long orderType=OrderGetInteger(ORDER_TYPE);
+
+   // Initial structural protection owns unprotected pending orders. Do not
+   // let the trail fallback silently install a generic fixed-distance SL.
+   if(OrderGetDouble(ORDER_SL)<=0.0)
+      return true;
 
    if(!STB_PendingTrailIsManagedType(orderType))
    {
