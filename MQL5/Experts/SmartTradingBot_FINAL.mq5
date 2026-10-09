@@ -1987,16 +1987,32 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double tolerance=MathMax(point*0.5,
                             tickSize>0.0 ? tickSize*0.5:point*0.5);
 
+   long verifiedType=OrderGetInteger(ORDER_TYPE);
    double ve=OrderGetDouble(ORDER_PRICE_OPEN);
    double vs=OrderGetDouble(ORDER_SL);
    double vt=OrderGetDouble(ORDER_TP);
+   double verifiedStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   bool isStopLimit=(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
+                     stbOt==ORDER_TYPE_SELL_STOP_LIMIT);
 
-   if(MathAbs(ve-newEntry)>tolerance ||
+   if(verifiedType!=stbOt ||
+      MathAbs(ve-newEntry)>tolerance ||
       MathAbs(vs-newSL)>tolerance ||
-      MathAbs(vt-newTP)>tolerance)
+      MathAbs(vt-newTP)>tolerance ||
+      (isStopLimit && MathAbs(verifiedStopLimit-stopLimit)>tolerance))
      {
       // Cache the actual server geometry, never an unconfirmed proposal.
+      // Stop-limit tickets also verify the child limit price, not just the
+      // trigger Entry/SL/TP. A broker-side mismatch is not a committed trail.
       STB_GeomStore(ticket,false,ve,vs,vt);
+      Print("STB PENDING MODIFY POSTCHECK FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " expectedType=",EnumToString((ENUM_ORDER_TYPE)stbOt),
+            " actualType=",EnumToString((ENUM_ORDER_TYPE)verifiedType),
+            " entryExpected=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " entryActual=",DoubleToString(ve,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopLimitExpected=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopLimitActual=",DoubleToString(verifiedStopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
      }
 
