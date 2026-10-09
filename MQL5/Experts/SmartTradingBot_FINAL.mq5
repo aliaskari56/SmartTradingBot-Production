@@ -4850,7 +4850,7 @@ bool CalculateNearestStructuralSL(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-double CalculateReferenceCandleSL(const string symbol,
+bool CalculateReferenceCandleSL(const string symbol,
                                    const long positionType,
                                    const double referencePrice,
                                    double &sl)
