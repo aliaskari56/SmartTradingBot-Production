@@ -76,6 +76,29 @@ def lexical_errors(source: str) -> list[str]:
     return errors
 
 
+def candidate_producers_safe(source: str) -> bool:
+    """Ensure automatic candidate producers cannot write around the resolver."""
+    regions = (
+        ("bool EnsureInitialSL(", "void STB_RecordPendingInitialSLFailure(", True),
+        ("bool ApplyProfitLock(", "void AutoProfitProtection(", True),
+        ("bool TrailPositionByLivePrice(", "void ManagePositions(", True),
+        ("void STB_ProfitProtectionOne(", "bool ModifyPositionSL(", False),
+    )
+    for start, end, needs_submit in regions:
+        begin = source.find(start)
+        if begin < 0:
+            return False
+        finish = source.find(end, begin + len(start))
+        if finish <= begin:
+            return False
+        body = source[begin:finish]
+        if "ModifyPositionSL(" in body:
+            return False
+        if needs_submit and "STB_SubmitPositionSL(" not in body:
+            return False
+    return True
+
+
 def main() -> int:
     path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else
                         "MQL5/Experts/SmartTradingBot_FINAL.mq5")
@@ -126,16 +149,7 @@ def main() -> int:
              "if(g_stbCollectingSLProposals)",
              "if(isUserAction)"))),
         ("candidate producers do not call the broker modify bridge directly",
-         all((lambda a, b, need_submit:
-              a >= 0 and b > a and
-              "ModifyPositionSL(" not in source[a:b] and
-              (not need_submit or "STB_SubmitPositionSL(" in source[a:b]))
-              )(source.find(start), source.find(end, source.find(start)+len(start)), need)
-             for start, end, need in (
-                 ("bool EnsureInitialSL(", "void STB_RecordPendingInitialSLFailure(", True),
-                 ("bool ApplyProfitLock(", "void AutoProfitProtection(", True),
-                 ("bool TrailPositionByLivePrice(", "void ManagePositions(", True),
-                 ("void STB_ProfitProtectionOne(", "bool ModifyPositionSL(", False)))),
+         candidate_producers_safe(source)),
         ("central SL modify bridge has only synchronous user, initial fallback, and flush call sites",
          len(re.findall(r"\bModifyPositionSL\s*\(", source)) == 4),
         ("queue allocation failure aborts the incomplete arbitration batch",
