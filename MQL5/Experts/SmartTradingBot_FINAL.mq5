@@ -4700,7 +4700,7 @@ void STB_CycleMarkWritten(const ulong ticket)
 
 // Validate every proposal against one shared price/constraint snapshot.
 // IsValidSLForPosition() is still used on the chosen candidate and again by
-// ModifyPositionSL() immediately before broker submission.
+// the central modify bridge immediately before broker submission.
 bool STB_IsValidSLForDecisionSnapshot(const long side,
                                       const double sl,
                                       const MqlTick &tick,
