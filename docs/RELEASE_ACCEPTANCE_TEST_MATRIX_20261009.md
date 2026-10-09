@@ -11,7 +11,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `20a21c47bd576ca804465cc94940d3b4ea1ca6e1` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the current source Git blob `17059923ccb18e1b717947e4581d9790df26a368` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
 | BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
@@ -53,6 +53,7 @@ Do not label the build production-ready until the exact source revision has a re
 | SL-08 | Stops/freeze constraints | Test symbols with nonzero stop/freeze levels and variable tick size | Invalid requests are rejected safely and retried according to policy | NOT RUN |
 | SL-09 | Broker modify failures | Test invalid-stops, no-changes, market-closed, off-quotes, timeout/requote retcodes where reproducible | Cache reconciles to terminal state; failures are observable; retry policy is bounded | NOT RUN |
 | SL-10 | Manual override | Apply manual override and issue AUTO/manual SAVE commands | Automatic managers honor override; explicit user action behaves as documented | NOT RUN |
+| SL-11 | Partial close and lock-state lifetime | Partially close a managed position by EA and manually; also test full close and netting reversal. Include close deals whose magic differs from the EA's magic | A partial OUT/OUT_BY retains per-ticket lock/failure state while the position remains; full close clears it; INOUT reversal clears the old-direction lock. Confirm actual state after every transaction burst | NOT RUN |
 
 ## E. Lifecycle, event ordering, and resilience
 
@@ -79,7 +80,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## G. Evidence to attach before approval
 
-- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `20a21c47bd576ca804465cc94940d3b4ea1ca6e1`)
+- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `17059923ccb18e1b717947e4581d9790df26a368`)
 - [ ] MetaEditor version/build and complete compile log
 - [ ] EX5 SHA-256 and source-to-binary provenance manifest
 - [ ] Strategy Tester configuration, data range, modelling mode, report and journal
@@ -90,10 +91,10 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary
 
-- Earlier static guardrail CI run `37925611744`: success on the prior checker version; it verified only the checks encoded at that revision.
-- Historical fail-closed run `37927127485`: **FAIL as intended** on the previous source, because it resolved SL proposals one at a time. That result is historical and is not the current branch status.
-- Current source has a cycle-scoped candidate queue and a central per-ticket flush. The latest static CI run `37934106795` passed 22 checks, including complete candidate-set collection, shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
-- Functional tests for SL-01 through SL-10 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
-- The position modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
+- Current source blob: `17059923ccb18e1b717947e4581d9790df26a368` (Git blob identifier, not raw-file SHA-256).
+- Latest static CI run `37935834667`: **SUCCESS**, 24 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
+- The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
+- Functional tests for SL-01 through SL-11 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
+- The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
 - MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
 - Release decision: **BLOCKED / NOT VERIFIED**.
