@@ -1029,3 +1029,10 @@ No executable source changed. No compilation, runtime, Strategy Tester, demo tes
 Added `docs/ALGLIB_LICENSE_NOTICE_INVENTORY_AND_RELEASE_DECISION_PASS33_20261009.md`. Six inspected ALGLIB-family headers explicitly state GPL v2-or-later terms and credit Sergey Bochkanov / ALGLIB plus MetaQuotes. The traced source include closure still does not visibly reference this family, but these headers are bundled in the repository; whether they ship in the actual ZIP remains unknown. This is a confirmed license-review gate, not a conclusion of infringement or noncompliance. BL-06 remains OPEN pending exact package inventory and qualified review.
 
 No executable source changed. No ZIP extraction, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 34 — Complete ALGLIB directory inventory from Git tree
+
+Added `docs/COMPLETE_ALGLIB_TREE_INVENTORY_PASS34_20261009.md`. A non-truncated recursive Git tree query confirms 18 tracked `.mqh` files under `MQL5/Include/Math/Alglib/`, totalling 10,742,550 bytes (10.24 MiB). The inventory records every filename, size and blob SHA. This is repository-tree evidence only; it does not establish ZIP membership or EX5 contents. The large ALGLIB directory is a concrete dependency/licensing review item, while no ALGLIB include was observed in the EA's traced include closure. BL-06 remains OPEN.
+
+No executable source changed. No ZIP extraction, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
