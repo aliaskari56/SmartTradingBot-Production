@@ -94,7 +94,7 @@ Do not label the build production-ready until the exact source revision has a re
 ## Current evidence summary
 
 - Current source blob: `6bca33bc8e0c961f317b0828e46faf7a6b9929b4` (Git blob identifier, not raw-file SHA-256).
-- Latest static CI run `37949430269`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
+- Verified static CI run `37950552410`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - The resolver now enforces the active profit-lock floor, uses a deterministic no-SL fail-safe fallback where appropriate, and the flush only credits saved lock state after the actual SL meets the normalized lock target.
 - Functional tests for SL-01 through SL-12 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
