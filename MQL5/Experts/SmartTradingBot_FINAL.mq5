@@ -5208,6 +5208,22 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // P10: management lease scope is account + symbol ONLY (never magic). Under
 // Universal Management every exposure on an allowed symbol has exactly one
 // broker writer, regardless of which magic/EA created it.
+string g_stbLeaseSymbols[];
+
+void STB_LeaseTrackSymbol(const string symbol)
+  {
+   if(symbol=="")
+      return;
+
+   for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
+      if(g_stbLeaseSymbols[i]==symbol)
+         return;
+
+   int n=ArraySize(g_stbLeaseSymbols);
+   if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
+      g_stbLeaseSymbols[n]=symbol;
+  }
+
 string STB_MgmtScopeKey(const string purpose,const string symbol)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|MGMT|"+purpose+"|"+symbol;
@@ -5254,14 +5270,29 @@ bool STB_SymbolManagementOwned(const string symbol)
    string leaseKey=STB_MgmtLeaseKey(symbol);
    datetime now=TimeCurrent();
 
-   // P11: seed an unowned sentinel (0.0) so the claim can be an atomic CAS.
+   // Create the sentinel without overwriting a concurrent claimant. A plain
+   // GlobalVariableSet(ownerKey,0) after a missing-key check can race and erase
+   // another chart's successful claim. GlobalVariableTemp creates only-if-absent.
    if(!GlobalVariableCheck(ownerKey))
-      GlobalVariableSet(ownerKey,0.0);
+     {
+      ResetLastError();
+      if(!GlobalVariableTemp(ownerKey) && !GlobalVariableCheck(ownerKey))
+        {
+         Print("STB lease owner-key creation failed symbol=",symbol,
+               " err=",GetLastError());
+         return false;
+        }
+     }
+
+   if(!GlobalVariableCheck(ownerKey))
+      return false;
 
    if(GlobalVariableGet(ownerKey)==0.0)
      {
-      if(!GlobalVariableSetOnCondition(ownerKey,me,0.0)) return false; // P11 atomic claim (CAS 0 -> me)
+      if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
+         return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
+      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
@@ -5271,13 +5302,16 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
+      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
    if(lease<=0.0 || (now-(datetime)lease)>STB_MGMT_LEASE_SEC)
      {
-      if(!GlobalVariableSetOnCondition(ownerKey,me,owner)) return false; // P11 atomic stale takeover (CAS)
+      if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
+         return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
+      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
@@ -5294,11 +5328,18 @@ void STB_ReleaseSymbolManagement(const string symbol)
    double me=(double)((long)ChartID());
    string ownerKey=STB_MgmtOwnerKey(symbol);
 
-   if(GlobalVariableCheck(ownerKey) && GlobalVariableGet(ownerKey)==me)
-     {
-      GlobalVariableDel(ownerKey);
-      GlobalVariableDel(STB_MgmtLeaseKey(symbol));
-     }
+   // Release through CAS. Deleting the key after a separate owner check can
+   // erase a new chart's claim in the race window. Zero is an unowned sentinel.
+   if(GlobalVariableCheck(ownerKey))
+      GlobalVariableSetOnCondition(ownerKey,0.0,me);
+  }
+
+void STB_ReleaseAllSymbolManagement()
+  {
+   for(int i=ArraySize(g_stbLeaseSymbols)-1;i>=0;i--)
+      STB_ReleaseSymbolManagement(g_stbLeaseSymbols[i]);
+
+   ArrayResize(g_stbLeaseSymbols,0);
   }
 
 void ManagePositions()
@@ -7550,7 +7591,8 @@ int OnInit()
    else
       if(!InpAutoTrading)
         {
-         // Input=false is a hard safety gate.
+         // Input=false forces AUTO OFF at initialization. The chart's
+         // explicit AUTO button remains a deliberate runtime override.
          g_autoTrading=false;
          GlobalVariableSet(g_autoStateName,0.0);
         }
@@ -7709,7 +7751,7 @@ double OnTester()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   STB_ReleaseSymbolManagement(_Symbol); // P10 release this chart's symbol writer lease
+   STB_ReleaseAllSymbolManagement(); // P10 release every symbol lease owned by this chart
 
    ObjectDelete(0,g_prefix+"BUY_STOP");
    ObjectDelete(0,g_prefix+"SELL_STOP");
@@ -7775,29 +7817,41 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
    if(ticket==0 || !OrderSelect(ticket))
       return false;
 
-   if(!trade.OrderDelete(ticket))
-     {
-      Print("STB DELETE FAILED ticket=",IntegerToString((int)ticket),
-            " reason=",IntegerToString((int)reason),
-            " source=",source,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-     }
+   trade.SetAsyncMode(false);
+   trade.SetExpertMagicNumber(InpMagic);
 
-   if(!TradeRetcodeModifySucceeded())
+   bool requestOK=trade.OrderDelete(ticket);
+   uint ret=trade.ResultRetcode();
+   string retText=trade.ResultRetcodeDescription();
+
+   // CTrade::OrderDelete returning true only confirms the local request
+   // structure. Require both a server-success retcode and disappearance of
+   // this active ticket before treating deletion as complete.
+   if(!requestOK ||
+      (ret!=TRADE_RETCODE_DONE && ret!=TRADE_RETCODE_DONE_PARTIAL))
      {
       Print("STB DELETE REJECTED ticket=",IntegerToString((int)ticket),
             " reason=",IntegerToString((int)reason),
             " source=",source,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
+            " ret=",ret," ",retText,
+            " requestOK=",requestOK ? "YES":"NO");
       return false;
      }
 
-   Print("STB DELETE ticket=",IntegerToString((int)ticket),
+   if(OrderSelect(ticket))
+     {
+      Print("STB DELETE NOT CONFIRMED ticket=",IntegerToString((int)ticket),
+            " reason=",IntegerToString((int)reason),
+            " source=",source,
+            " ret=",ret," ",retText,
+            " reason=ORDER_STILL_ACTIVE");
+      return false;
+     }
+
+   Print("STB DELETE CONFIRMED ticket=",IntegerToString((int)ticket),
          " reason=",IntegerToString((int)reason),
-         " source=",source);
+         " source=",source,
+         " ret=",ret);
    return true;
   }
 
