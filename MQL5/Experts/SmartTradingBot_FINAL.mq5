@@ -1926,6 +1926,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
         }
      }
 
+   // One broker geometry write per ticket per management cycle. This also
+   // prevents ManagePendingOrders' initial-SL repair and the trailing engine
+   // from both modifying the same pending ticket in one cycle.
+   if(STB_CycleWriteAlreadyDone(ticket))
+      return false;
+
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
 
@@ -2017,6 +2023,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
      }
 
    STB_GeomStore(ticket,false,ve,vs,vt); // MANUAL_OVERRIDE: verified own write only
+   STB_CycleMarkWritten(ticket); // one pending geometry write per cycle
    return true;
   }
 
