@@ -1036,3 +1036,8 @@ No executable source changed. No ZIP extraction, compile, runtime, Strategy Test
 Added `docs/COMPLETE_ALGLIB_TREE_INVENTORY_PASS34_20261009.md`. A non-truncated recursive Git tree query confirms 18 tracked `.mqh` files under `MQL5/Include/Math/Alglib/`, totalling 10,742,550 bytes (10.24 MiB). The inventory records every filename, size and blob SHA. This is repository-tree evidence only; it does not establish ZIP membership or EX5 contents. The large ALGLIB directory is a concrete dependency/licensing review item, while no ALGLIB include was observed in the EA's traced include closure. BL-06 remains OPEN.
 
 No executable source changed. No ZIP extraction, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 35 — Source attribution and release metadata
+
+Added `docs/SOURCE_ATTRIBUTION_AND_RELEASE_METADATA_REVIEW_PASS35_20261009.md`. The EA header visibly contains generic `ProjectName`, `CompanyName`, and `companyname.net` placeholders; the correct rights holder cannot be inferred and must be confirmed by the project owner. The two directly included STB modules' inspected headers describe their function but do not state author, origin or license. This is a provenance/metadata gap, not proof that permission is absent or that a violation occurred. No source changes were made. ZIP/EX5 provenance, compile and runtime remain unverified; BL-06 remains open and release remains `BLOCKED / NOT VERIFIED`.
