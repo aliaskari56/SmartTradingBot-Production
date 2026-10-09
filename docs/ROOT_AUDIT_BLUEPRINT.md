@@ -749,3 +749,37 @@ Purpose: turn the prior requirement map into a compact, source-anchored ledger. 
 5. Preserve the original EA source hash until a separate, explicitly approved source-change phase exists. This pass did not change source.
 
 **Ledger result:** source traceability has improved, but the foundation remains **open**. In particular, authorization coverage, full state ownership, lifecycle convergence, and test evidence are not yet demonstrated.
+
+
+## Ownership and dependency inventory — static pass 2 (2026-10-09)
+
+This pass maps visible source anchors to logical houses and distinguishes confirmed source structure from ownership claims that remain unproven. It is not a declaration that the current implementation conforms to the target architecture.
+
+| House / cross-cutting area | Source anchors observed | What can be stated from static inspection | Open ownership / dependency question | Evidence status |
+|---|---|---|---|---|
+| H0 — host and policy foundation | `OnInit` (~7883); shared inputs/global state; symbol-scope and managed-object helpers | Initialization validates inputs and restores or initializes a persisted AUTO state; common helper functions exist in the same source file. | Full inventory of global state, who may write it, and dependency cycles is not complete. | Partial |
+| H1 — market structure and setup | Signal/setup code called from the scanner/selection flow | A signal/setup path exists, but this pass does not assign every helper or mutable field to H1. | Complete function-to-house map and state read/write ownership. | Open |
+| H2 — adaptive learning and lifecycle statistics | Registry/reconciliation references and state/statistics call sites | Related state and reconciliation functions exist; ownership boundaries are not established merely by naming. | Identify canonical owner, persistence semantics, and all writers/readers. | Open |
+| H3 — scanner, regime, and ranking | `STB_ScannerRun`, `STB_ExecuteTopCandidate` calls in event paths | Scanner and candidate-selection entry points are visible in the event flow. | Complete call graph and ensure UI/event entrypoints do not create competing policy paths. | Partial |
+| H4 — order construction and execution gate | Multiple creation families; `STB_AfterExposureCreated` call sites around 4052, 6189, 6509, 6607 | Several creation paths are visible and share a post-creation helper, but that helper alone does not prove a single creation/authorization boundary. | Full source-backed creation boundary map and explicit treatment of failure/rollback paths. | Open |
+| H5 — exposure registry and authority | `IsManagedOrder` (~3741), `IsManagedPosition` call sites, `STB_ReconcileTradeRegistry` in event paths | Management-scope predicates and reconciliation entrypoints exist. The visible order predicate scopes by allowed symbol; that alone does not prove ownership authorization for every mutation. | Separate discovery, scope, ownership, and mutation authorization in the source inventory. | Partial |
+| H6 — position protection | `STB_SubmitPositionSL`, `STB_ResolvePositionSL`, `ModifyPositionSL` (~4654–4694) | A proposal/resolver/writer path exists for SL changes; the submit path inspected earlier passes one proposal at a time. | Full manager/source inventory, conflict semantics, stale-state behavior, and unrelated-field preservation evidence. | Partial |
+| H7 — pending lifecycle | `STB_ModifyPendingOrderGeometry` (~1868), `STB_ExecuteOrderDelete` (~8135), pending lifecycle call sites | A pending geometry writer checks verified symbol ownership; the central delete writer does not visibly apply that same check within the inspected function. | Complete caller authorization map, including rollback and cleanup, and review of all external-state mutation boundaries. | Open |
+| H8 — dashboard and chart controls | `OnChartEvent` (~8530); UI control names and handlers | Chart events route user interactions into handlers within the same EA file. | Trace each UI action to its policy/service boundary; confirm UI does not become a parallel authority. | Partial |
+| H9 — event/lifecycle orchestrator | `OnTick` (~8220), `OnTimer` (~8256), `OnTradeTransaction` (~8301), `OnChartEvent` (~8530) | Both tick and timer handlers invoke the shared management cycle; tick and timer paths also invoke reconciliation/signal-related work. A transaction handler and chart handler exist. | Establish ordering assumptions, re-entrancy/idempotence, duplicate-work behavior, and convergence from authoritative state. | Partial |
+| Cross-cutting: symbol ownership lease | `STB_SymbolManagementOwnedVerified` (~5542); visible checks in pending geometry and position SL writers | A verified-ownership helper exists and is used by the inspected pending geometry and position SL writers. | Audit every external-state writer individually; do not infer universal coverage from helper existence. | Partial |
+| Cross-cutting: delete completion | `STB_ExecuteOrderDelete` (~8135–8181) | The path requires an accepted server retcode and verifies the active ticket is no longer selectable before reporting confirmed deletion. | Separate request acceptance from confirmed state in all callers; authorization boundary remains open. | Partial |
+| Cross-cutting: observed-state reconciliation | `STB_ReconcileTradeRegistry` call sites in tick/timer flow | Reconciliation is invoked from more than one event path. | Determine whether repeated invocations are intentionally idempotent and whether all event outcomes converge without relying on event order. | Open |
+
+### Dependency and ownership rules for the next pass
+
+- A helper's existence is evidence of an available mechanism, not proof that all relevant paths use it.
+- A management-scope predicate is not interchangeable with authorization to mutate an object.
+- A common post-creation helper is not proof of a single creation gateway.
+- A shared management-cycle function can still be entered from multiple event handlers; idempotence must be demonstrated, not assumed.
+- Record dependencies from actual call sites. Avoid inventing clean module boundaries where the source remains a single translation unit.
+- Keep source observation, design intent, and verified behavior as separate labels.
+
+### Result
+
+The logical-house map now has source anchors for several major entry points, but it is not a complete dependency graph. H1/H2 ownership, full H4/H7 mutation-boundary coverage, H6 conflict handling, and H9 event convergence remain open. No source code was changed and no build or runtime evidence was generated.
