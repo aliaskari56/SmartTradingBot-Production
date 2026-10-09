@@ -82,7 +82,7 @@ input double  InpBaseLots               = 0.01;
 input double  InpTrendLotMultiplier     = 2.0;
 input double  InpUniversalLotMultiplier = 1.0;
 input double  InpEntryBufferPips        = 1.0;
-input double  InpPendingTrailMaxRiskExpansion = 1.25; // Maximum pending-trail risk expansion; <=0 disables
+input double  InpPendingTrailMaxRiskExpansion = 1.0;  // Pending-trail risk ratio; hard-capped at 1.0 (no risk expansion)
 input double  InpPipPointsOverride      = 0.0;  // 0 = automatic; >0 = points per pip
 input double  InpSLBufferPips           = 1.0;
 input double  InpInitialSLBufferPips    = 2.0;  // automatic SL: distance beyond nearest confirmed swing
@@ -2548,7 +2548,9 @@ TrendInfo GetH4Trend(const string symbol)
         {
          SwingPoint c=lows[nl-3];
 
-         if(c.time>a.time)
+         // c is the older confirmed pivot before anchor a. Test it against
+         // the backward extension of the same line to count a third touch.
+         if(c.time<a.time)
            {
             double lineAtC=a.price+slope*(double)(c.time-a.time);
 
@@ -2603,7 +2605,9 @@ TrendInfo GetH4Trend(const string symbol)
         {
          SwingPoint c=highs[nh-3];
 
-         if(c.time>a.time)
+         // c is the older confirmed pivot before anchor a. Test it against
+         // the backward extension of the same line to count a third touch.
+         if(c.time<a.time)
            {
             double lineAtC=a.price+slope*(double)(c.time-a.time);
 
@@ -4446,6 +4450,11 @@ bool TrailPositionByLivePrice(const ulong ticket)
    if(!IsManagedPosition(ticket))
       return false;
 
+   // Manual authority is terminal for automatic trailing until AUTO is
+   // explicitly enabled again; avoid repeated blocked-write work each tick.
+   if(STB_ManualOverrideIs(ticket))
+      return false;
+
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
@@ -4881,6 +4890,11 @@ bool EnsureInitialSL(const ulong ticket)
    if(PositionGetDouble(POSITION_SL)>0.0)
       return true;
 
+   // A user override owns the geometry; do not keep retrying to add a stop
+   // the user intentionally removed or has chosen to manage manually.
+   if(STB_ManualOverrideIs(ticket))
+      return false;
+
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -4927,6 +4941,10 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 
    if(currentSL>0.0)
       return VerifyPendingInitialSL(ticket);
+
+   // Do not re-create missing geometry on an order explicitly under user control.
+   if(STB_ManualOverrideIs(ticket))
+      return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL);
    double entry=OrderGetDouble(ORDER_PRICE_OPEN);
@@ -5391,19 +5409,22 @@ double CalculateOrderVolumeByRisk(const Setup &s)
    double raw=riskMoney/lossForOneLot;
    double minLot=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_MIN);
 
-   if(raw<minLot)
-     {
-      // The broker minimum would exceed the requested account risk.
-      // Refuse the setup instead of silently oversizing the trade.
-      return 0.0;
-     }
-
    if(InpMaxRiskVolume>0.0)
       raw=MathMin(raw,InpMaxRiskVolume);
 
+   if(raw+1e-9<minLot)
+     {
+      // The broker minimum OR the configured volume cap would exceed the
+      // requested risk/volume limit. Never clamp upward into an unsafe lot.
+      return 0.0;
+     }
+
    double volume=NormalizeVolume(s.symbol,raw);
 
-   if(volume<=0.0)
+   if(volume<=0.0 || !MathIsValidNumber(volume))
+      return 0.0;
+
+   if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)
       return 0.0;
 
    return volume;
