@@ -3982,6 +3982,10 @@ bool OneClickHedge()
       return false;
      }
 
+   int hedgeDirection=(hedgeType==POSITION_TYPE_BUY ? 1:-1);
+   if(!STB_DirectionVolumeWithinLimit(symbol,hedgeDirection,volume,"OneClickHedge"))
+      return false;
+
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
       return false;
@@ -4691,6 +4695,35 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    trade.SetTypeFillingBySymbol(symbol);
        if(STB_CycleWriteAlreadyDone(ticket))
       return false; // Blueprint 8/39: max ONE position modify per ticket per cycle
+
+   // Re-read the live position immediately before submitting the combined
+   // SL/TP request. If TP changed since the earlier snapshot, abort instead
+   // of restoring a stale TP over a manual/other-manager update.
+   if(!PositionSelectByTicket(ticket))
+      return false;
+   long latestType=PositionGetInteger(POSITION_TYPE);
+   double latestSL=PositionGetDouble(POSITION_SL);
+   double latestTP=PositionGetDouble(POSITION_TP);
+   double pointNow=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSizeNow=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double tpTolerance=MathMax(pointNow*0.5,
+                              tickSizeNow>0.0 ? tickSizeNow*0.5:pointNow*0.5);
+   if(latestType!=type || MathAbs(latestTP-tp)>tpTolerance)
+     {
+      Print("STB MODIFY ABORTED: position state changed before request ticket=",
+            IntegerToString((int)ticket),
+            " tpSnapshot=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " tpLatest=",DoubleToString(latestTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
+     }
+   if(latestSL>0.0 &&
+      ((latestType==POSITION_TYPE_BUY && newSL<=latestSL) ||
+       (latestType==POSITION_TYPE_SELL && newSL>=latestSL)))
+      return true;
+   if(!IsValidSLForPosition(symbol,latestType,newSL))
+      return false;
+   tp=latestTP;
+
    if(!trade.PositionModify(ticket,newSL,tp))
      {
       // Failed writes must not leave the proposed SL as the geometry baseline;
@@ -5751,6 +5784,35 @@ void ManagePendingOrders()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Shared preflight for every EA order-creation path. This is a local
+// snapshot check, not an account-wide atomic reservation; OrderCheck and the
+// server response remain authoritative if exposure changes concurrently.
+bool STB_DirectionVolumeWithinLimit(const string symbol,
+                                    const int direction,
+                                    const double requestedVolume,
+                                    const string source)
+  {
+   if((direction!=1 && direction!=-1) || requestedVolume<=0.0)
+      return false;
+
+   double volumeLimit=SymbolInfoDouble(symbol,SYMBOL_VOLUME_LIMIT);
+   if(volumeLimit<=0.0)
+      return true;
+
+   double currentVolume=DirectionExposureVolume(symbol,direction);
+   if(currentVolume+requestedVolume>volumeLimit+1e-9)
+     {
+      Print("STB VOLUME LIMIT REJECT source=",source,
+            " symbol=",symbol,
+            " direction=",(direction>0 ? "BUY":"SELL"),
+            " requested=",DoubleToString(requestedVolume,3),
+            " currentDirectionVolume=",DoubleToString(currentVolume,3),
+            " limit=",DoubleToString(volumeLimit,3));
+      return false;
+     }
+   return true;
+  }
+
 double DirectionExposureVolume(const string symbol,const int direction)
   {
    double total=0.0;
@@ -6076,16 +6138,8 @@ bool PlaceSetup(Setup &s)
          return STB_LogPlaceReject(s,"FIXED_VOLUME_INVALID");
      }
 
-   double volumeLimit=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_LIMIT);
-   if(volumeLimit>0.0 &&
-      DirectionExposureVolume(s.symbol,s.direction)+volume>volumeLimit+1e-9)
-     {
-      Print("STB order rejected by SYMBOL_VOLUME_LIMIT symbol=",s.symbol,
-            " requested=",DoubleToString(volume,3),
-            " currentDirectionVolume=",DoubleToString(DirectionExposureVolume(s.symbol,s.direction),3),
-            " limit=",DoubleToString(volumeLimit,3));
+   if(!STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetup"))
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
-     }
 
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
@@ -6452,6 +6506,8 @@ bool PlaceManualPendingDirection(const int direction)
    double volume=NormalizeVolume(_Symbol,InpBaseLots);
    if(pip<=0.0 || volume<=0.0)
       return false;
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
+      return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
    if((orderModes&SYMBOL_ORDER_STOP)!=SYMBOL_ORDER_STOP ||
@@ -6548,6 +6604,8 @@ bool PlaceManualLimitDirection(const int direction)
    double pip=PipSize(_Symbol);
    double volume=NormalizeVolume(_Symbol,InpBaseLots);
    if(pip<=0.0 || volume<=0.0)
+      return false;
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
       return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
@@ -8138,6 +8196,55 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
   {
    if(ticket==0 || !OrderSelect(ticket))
       return false;
+
+   ENUM_ORDER_TYPE deleteType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   bool isPending=(deleteType==ORDER_TYPE_BUY_LIMIT ||
+                   deleteType==ORDER_TYPE_SELL_LIMIT ||
+                   deleteType==ORDER_TYPE_BUY_STOP ||
+                   deleteType==ORDER_TYPE_SELL_STOP ||
+                   deleteType==ORDER_TYPE_BUY_STOP_LIMIT ||
+                   deleteType==ORDER_TYPE_SELL_STOP_LIMIT);
+   if(!isPending)
+      return false;
+
+   string orderComment=OrderGetString(ORDER_COMMENT);
+   datetime setupTime=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+   ENUM_ORDER_TYPE_TIME timeType=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
+   datetime expiry=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
+   bool stbComment=(StringFind(orderComment,"STB|")==0);
+   bool autoCreated=(StringFind(orderComment,"STB|B|")==0 ||
+                     StringFind(orderComment,"STB|S|")==0);
+   bool authorized=false;
+
+   if(reason==STB_DEL_AUTO_ROLLBACK || reason==STB_DEL_SERVER_ACCEPT_INVALID)
+     {
+      bool knownCreator=(source=="OneClickHedge" ||
+                         source=="PlaceSetup" ||
+                         source=="PlaceManual");
+      // Rollback is narrowly scoped to a fresh STB order. Manual orders may
+      // use magic 0, so the explicit STB comment + exact creator source is
+      // the authorization signal rather than magic number alone.
+      authorized=knownCreator && stbComment && setupTime>0 &&
+                 setupTime<=TimeCurrent()+5 &&
+                 TimeCurrent()-setupTime<=120;
+     }
+   else if(reason==STB_DEL_SERVER_EXPIRATION)
+     {
+      bool serverExpired=(timeType==ORDER_TIME_SPECIFIED &&
+                          expiry>0 && TimeCurrent()>=expiry);
+      // Local age expiry is only permitted for EA-created automatic orders.
+      authorized=serverExpired || (autoCreated && !STB_ManualOverrideIs(ticket));
+     }
+
+   if(!authorized)
+     {
+      Print("STB DELETE BLOCKED ticket=",IntegerToString((int)ticket),
+            " reason=",IntegerToString((int)reason),
+            " source=",source,
+            " comment=",orderComment,
+            " reason=UNAUTHORIZED_OR_UNVERIFIED");
+      return false;
+     }
 
    trade.SetAsyncMode(false);
    trade.SetExpertMagicNumber(InpMagic);
