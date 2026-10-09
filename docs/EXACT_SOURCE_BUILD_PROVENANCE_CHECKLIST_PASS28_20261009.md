@@ -169,8 +169,14 @@ function Invoke-STBMetaEditorCompile {
             $Ex5Hash = 'MISSING'
         }
 
+        $BuildStatus = 'BLOCKED'
+        if ($Process.ExitCode -eq 0 -and $ErrorCount -eq 0 -and
+            $WarningCount -eq 0 -and $Ex5Hash -ne 'MISSING') {
+            $BuildStatus = 'PASS'
+        }
+
         $Result = [pscustomobject]@{
-            Status             = if ($Process.ExitCode -eq 0 -and $ErrorCount -eq 0 -and $WarningCount -eq 0 -and $Ex5Hash -ne 'MISSING') { 'PASS' } else { 'BLOCKED' }
+            Status             = $BuildStatus
             Branch             = $BranchName
             SourceGitBlob      = $ActualBlob
             SourceSHA256       = $SourceHash
