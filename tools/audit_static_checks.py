@@ -108,6 +108,11 @@ def main() -> int:
          "authorized=serverExpired || localAgeExpired" in source),
         ("position modify rechecks TP snapshot",
          "position state changed before request" in source),
+        # Fail closed on the confirmed root cause. A one-element proposal
+        # array makes the resolver incapable of comparing management sources.
+        ("SL submit does not force single-proposal arbitration",
+         "ArrayResize(props,1)" not in source and
+         "STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)" not in source),
     ]
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
@@ -118,12 +123,12 @@ def main() -> int:
     for error in errors:
         print(f"  {error}")
 
-    # Known unresolved root cause: SL proposals are still submitted one at a
-    # time. Report this separately so a structural PASS is never mistaken for
-    # full trading validation.
-    single_proposal = "STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)" in source
+    # A source-level regression tripwire complements the check above; neither
+    # this nor a passing run proves runtime correctness or compiler validity.
+    single_proposal = ("ArrayResize(props,1)" in source or
+                       "STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)" in source)
     if single_proposal:
-        print("OPEN: SL proposal arbitration across initial/profit/trailing sources is not proven.")
+        print("BLOCKER: SL candidates are still resolved one at a time; same-cycle arbitration is absent.")
     print("NOT COVERED: MetaEditor compilation, Strategy Tester, demo, broker compatibility, "
           "EX5 provenance, package/license review, profitability.")
     return 1 if failed else 0
