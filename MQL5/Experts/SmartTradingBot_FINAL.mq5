@@ -8191,6 +8191,20 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
 
+   // Clean per-ticket protection state for all close paths, including hedges
+   // which are intentionally excluded from adaptive learning below.
+   if(entryType==DEAL_ENTRY_OUT ||
+      entryType==DEAL_ENTRY_OUT_BY ||
+      entryType==DEAL_ENTRY_INOUT)
+     {
+      ulong closedTicket=trans.position;
+      if(closedTicket>0)
+        {
+         GlobalVariableDel(TicketLockName(closedTicket));
+         GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
+        }
+     }
+
    if(entryType==DEAL_ENTRY_IN && !isHedge && positionId>0)
      {
       long dealType=HistoryDealGetInteger(trans.deal,DEAL_TYPE);
@@ -8246,18 +8260,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    if(isHedge)
       return;
-
-   if(entryType==DEAL_ENTRY_OUT || entryType==DEAL_ENTRY_OUT_BY)
-     {
-      ulong closedTicket=trans.position;
-      if(closedTicket>0)
-        {
-         GlobalVariableDel(TicketLockName(closedTicket));
-   // P5 STB-010: TRAIL_ cleanup removed (no writer/reader in FINAL - dead state)
-         GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
-   // P5 STB-010: COMM_ cleanup removed (FINAL computes commission directly - dead state)
-        }
-     }
 
    if(entryType!=DEAL_ENTRY_OUT &&
       entryType!=DEAL_ENTRY_OUT_BY &&
