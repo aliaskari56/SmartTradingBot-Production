@@ -5991,9 +5991,6 @@ bool PlaceSetup(Setup &s)
       return false;
      }
 
-   SetLastSetupTime(s.symbol,s.direction,s.setupTime);
-   STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
-
    ulong placedOrder=trade.ResultOrder();
 
    if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))
@@ -6005,6 +6002,12 @@ bool PlaceSetup(Setup &s)
          STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,"PlaceSetup");
       return STB_LogPlaceReject(s,"INITIAL_SL_NOT_CONFIRMED");
      }
+
+   // Commit the setup cooldown only after the accepted order's initial SL
+   // has been verified. A failed protection check triggers rollback and must
+   // not poison this valid setup with a false "already placed" timestamp.
+   SetLastSetupTime(s.symbol,s.direction,s.setupTime);
+   STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
 
    if(placedOrder>0)
      {
