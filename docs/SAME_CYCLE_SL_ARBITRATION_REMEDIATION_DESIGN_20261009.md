@@ -30,7 +30,7 @@ The source implementation includes these controls:
 
 ## 3. Static verification evidence
 
-GitHub Actions run [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its log reports 26 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
+GitHub Actions run [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138) completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its log reports 26 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
 
 This is source-level structural evidence only. It does not execute the MQL resolver or prove permutation-independent runtime behavior.
 
@@ -40,6 +40,7 @@ This is source-level structural evidence only. It does not execute the MQL resol
 - BUY and SELL monotonicity with and without an existing SL.
 - Initial protection plus trailing, and profit protection plus trailing, during one management cycle.
 - Equal-price ties, invalid candidates, changing ticks, stop/freeze levels, and tick-size boundaries.
+- SL-12: active +50/+20 lock-floor contention where stop/freeze constraints invalidate the target; verify no weaker replacement for an existing SL and no false lock-state credit.
 - Active +50/+20 lock-floor contention when stop/freeze constraints invalidate the lock target; verify existing SL is not weakened and state is not credited unless the actual SL meets the target, including the no-SL emergency-stop case.
 - TP changes between collection and submission; broker rejection, no-changes, timeout, and delayed transaction results.
 - Manual override, user SAVE, restart/reconnect, netting/hedging, and multi-instance ownership.
