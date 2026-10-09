@@ -5784,6 +5784,8 @@ void ManagePendingOrders()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+double DirectionExposureVolume(const string symbol,const int direction);
+
 // Shared preflight for every EA order-creation path. This is a local
 // snapshot check, not an account-wide atomic reservation; OrderCheck and the
 // server response remain authoritative if exposure changes concurrently.
