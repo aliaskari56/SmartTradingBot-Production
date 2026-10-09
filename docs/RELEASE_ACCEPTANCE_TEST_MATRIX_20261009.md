@@ -11,7 +11,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the current source Git blob `20a21c47bd576ca804465cc94940d3b4ea1ca6e1` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
 | BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
@@ -79,7 +79,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## G. Evidence to attach before approval
 
-- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf`)
+- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `20a21c47bd576ca804465cc94940d3b4ea1ca6e1`)
 - [ ] MetaEditor version/build and complete compile log
 - [ ] EX5 SHA-256 and source-to-binary provenance manifest
 - [ ] Strategy Tester configuration, data range, modelling mode, report and journal
@@ -92,7 +92,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 - Earlier static guardrail CI run `37925611744`: success on the prior checker version; it verified only the checks encoded at that revision.
 - Historical fail-closed run `37927127485`: **FAIL as intended** on the previous source, because it resolved SL proposals one at a time. That result is historical and is not the current branch status.
-- Current source has a cycle-scoped candidate queue and a central per-ticket flush. The latest static CI run `37932226274` passed 22 checks, including complete candidate-set collection, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
+- Current source has a cycle-scoped candidate queue and a central per-ticket flush. The latest static CI run `37934106795` passed 22 checks, including complete candidate-set collection, shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - Functional tests for SL-01 through SL-10 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
 - The position modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
 - MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
