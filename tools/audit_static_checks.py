@@ -131,8 +131,13 @@ def main() -> int:
              '(source=="PlaceSetup" && autoCreated)',
              '(source=="PlaceManual" &&',
              'StringFind(orderComment,"STB|M|")==0'))),
-        ("delete writer revalidates expiry",
-         "authorized=serverExpired || localAgeExpired" in source),
+        ("expiry delete rechecks source, managed scope, and symbol lease at the writer boundary",
+         all(token in source for token in (
+             'bool expiryAuthority=(source=="ManagePendingOrders" &&',
+             "IsManagedOrder(ticket)",
+             "STB_SymbolManagementOwnedVerified(symbol)",
+             "if(expiryAuthority)",
+             "authorized=serverExpired || localAgeExpired"))),
         ("position modify rechecks TP snapshot",
          "position state changed before request" in source),
         # Fail closed on the confirmed root cause. A one-element proposal
