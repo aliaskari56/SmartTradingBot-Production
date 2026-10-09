@@ -6,7 +6,7 @@ Current source Git blob: `fdce203d23a08eb4ca2966d4a09719c3e4a89397` (Git blob ID
 Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`  
 Observed source size: 304,511 bytes; 9,156 lines  
 Static checker Git blob: `7f5092f1663f8a899449a16f3b6588df80c19bef`  
-Latest static run for this source/checker: [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) — success, 26 checks passed.
+Latest static run for this source/checker: [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138) — success, 26 checks passed.
 
 ## 1. Executive decision
 
@@ -83,7 +83,7 @@ Other configuration caveats remain: `InpUseRiskSizing` defaults to `false`; the 
 
 ## 4. Verification evidence
 
-The latest static run [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) completed successfully with 26 passing source-structure checks, including:
+The latest static run [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138) completed successfully with 26 passing source-structure checks, including:
 
 - one central order-delete writer and one central position-modify writer;
 - all four order-creation paths using shared directional-volume preflight;
