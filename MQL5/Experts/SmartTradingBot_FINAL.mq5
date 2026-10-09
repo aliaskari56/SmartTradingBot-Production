@@ -6059,15 +6059,26 @@ void STB_ExecuteTopCandidate()
    for(int i=0;i<g_scannerTop10Count;i++)
      {
       STBCandidate c=g_scannerTop10[i];
+      string symbol=c.symbol;
+      bool wasSelected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
+
+      // Keep the candidate symbol subscribed through final revalidation and
+      // order placement. Retain it afterward only while a managed exposure
+      // needs live quotes for stop management/trailing.
+      if(!wasSelected && !SymbolSelect(symbol,true))
+         continue;
 
       Setup validated;
-      if(!STB_FinalCandidateRevalidation(c,validated))
-         continue;
+      bool revalidated=STB_FinalCandidateRevalidation(c,validated);
+      bool placed=false;
 
-      if(!STB_FinalAutoGate(validated))
-         continue;
+      if(revalidated && STB_FinalAutoGate(validated))
+         placed=PlaceSetup(validated);
 
-      if(PlaceSetup(validated))
+      if(!wasSelected && !HasManagedExposure(symbol))
+         SymbolSelect(symbol,false);
+
+      if(placed)
         {
          g_panelScanPlacements++;
          return;
@@ -7024,7 +7035,7 @@ void STB_ScannerRun()
      }
 
    for(int i=0;i<ArraySize(symbols) && i<ArraySize(wasSelected);i++)
-      if(!wasSelected[i])
+      if(!wasSelected[i] && !HasManagedExposure(symbols[i]))
          SymbolSelect(symbols[i],false);
 
    g_scannerLastCycleBar=cycleBar;
