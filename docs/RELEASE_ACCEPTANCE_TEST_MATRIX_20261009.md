@@ -94,7 +94,7 @@ Do not label the build production-ready until the exact source revision has a re
 ## Current evidence summary
 
 - Current source blob: `fdce203d23a08eb4ca2966d4a09719c3e4a89397` (Git blob identifier, not raw-file SHA-256).
-- Latest static CI run `37941413234`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
+- Latest static CI run `37941943138`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - Functional tests for SL-01 through SL-12 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
