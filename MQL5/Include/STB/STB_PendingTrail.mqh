@@ -116,6 +116,15 @@ void STB_PendingTrailClear()
    g_stbPendingTrailCycle=0;
 }
 
+// Drop completed/cancelled order records. Without compaction, every historical
+// pending ticket would remain in this per-cycle array for the EA's lifetime.
+void STB_PendingTrailPruneInactive()
+{
+   for(int i=ArraySize(g_stbPendingTrail)-1;i>=0;i--)
+      if(!g_stbPendingTrail[i].active)
+         ArrayRemove(g_stbPendingTrail,i,1);
+}
+
 // Every supported pending geometry is managed by the same trail engine:
 // BUY/SELL STOP, BUY/SELL LIMIT and BUY/SELL STOP-LIMIT.
 bool STB_PendingTrailIsManagedType(const long orderType)
@@ -639,6 +648,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 //--- Per-cycle processing (OnTick / OnTimer with cycle dedup) ---------
 int STB_PendingTrailProcess(const bool manual=false)
 {
+   STB_PendingTrailPruneInactive();
    g_stbPendingTrailCycle++;
    int moved=0;
 
@@ -687,6 +697,7 @@ int STB_PendingTrailProcess(const bool manual=false)
          moved++;
    }
 
+   STB_PendingTrailPruneInactive();
    return moved;
 }
 
