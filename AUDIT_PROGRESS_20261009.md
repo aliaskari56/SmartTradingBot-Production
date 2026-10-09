@@ -1001,3 +1001,10 @@ No MetaEditor environment was invoked and no compile/runtime/tester/demo run occ
 Added `docs/DEPENDENCY_PROVENANCE_LICENSE_REGISTER_PASS29_20261009.md`. It records the known dependency-tree snapshot and establishes evidence requirements for standard MetaQuotes headers, custom STB modules, remaining headers, bitmap/HLSL assets, copied snippets, archives/binaries, and release notices. The register deliberately does not infer that a file is unlicensed or noncompliant merely because a notice was not observed in a limited inspection. BL-06 remains OPEN until provenance, applicable terms, permissions and notice obligations are independently reviewed.
 
 No executable source changed. No full dependency inventory, legal review, compile, runtime, Strategy Tester or demo test was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 30 — Targeted dependency header findings
+
+Added `docs/DEPENDENCY_HEADER_FINDINGS_PASS30_20261009.md`. Targeted header inspection confirmed that multiple bundled ALGLIB headers explicitly state GPL version 2 or later and credit Sergey Bochkanov / ALGLIB plus MetaQuotes. This is a concrete dependency-review gate, not proof that the EA uses ALGLIB in its compiled dependency closure or that a specific release is compliant/noncompliant. The report also records MetaQuotes copyright headers in standard trade/control/shader files and leaves STB module origin/permission unresolved. Next work must inventory the complete ALGLIB family, trace actual include/reference closure, inspect distribution contents, and verify authoritative terms. BL-06 remains OPEN.
+
+No executable source changed. No full-tree license scan, legal review, compile, Strategy Tester, runtime or demo test was performed. Release remains `BLOCKED / NOT VERIFIED`.
