@@ -3747,6 +3747,62 @@ bool STB_HasManagedPendingDirection(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_ResolveManualPendingEntry(const string symbol,
+                                     const ENUM_ORDER_TYPE orderType,
+                                     const double requestedEntry,
+                                     const MqlTick &tick,
+                                     double &entry)
+  {
+   entry=0.0;
+   if(symbol=="" || requestedEntry<=0.0 ||
+      tick.bid<=0.0 || tick.ask<=0.0)
+      return false;
+
+   double minDist=TradeMinDistance(symbol);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(minDist<=0.0 || point<=0.0)
+      return false;
+
+   // Keep one full tradable price increment beyond the broker boundary so
+   // tick rounding cannot place the manual order exactly on the rejection edge.
+   double safety=MathMax(point,tickSize>0.0 ? tickSize:point);
+   double candidate=requestedEntry;
+
+   switch(orderType)
+     {
+      case ORDER_TYPE_BUY_STOP:
+         candidate=MathMax(candidate,tick.ask+minDist+safety);
+         break;
+      case ORDER_TYPE_SELL_STOP:
+         candidate=MathMin(candidate,tick.bid-minDist-safety);
+         break;
+      case ORDER_TYPE_BUY_LIMIT:
+         candidate=MathMin(candidate,tick.bid-minDist-safety);
+         break;
+      case ORDER_TYPE_SELL_LIMIT:
+         candidate=MathMax(candidate,tick.ask+minDist+safety);
+         break;
+      default:
+         return false;
+     }
+
+   entry=NormalizePrice(symbol,candidate);
+   if(entry<=0.0)
+      return false;
+
+   if(orderType==ORDER_TYPE_BUY_STOP)
+      return entry>tick.ask+minDist;
+   if(orderType==ORDER_TYPE_SELL_STOP)
+      return entry<tick.bid-minDist;
+   if(orderType==ORDER_TYPE_BUY_LIMIT)
+      return entry<tick.bid-minDist;
+   if(orderType==ORDER_TYPE_SELL_LIMIT)
+      return entry>tick.ask+minDist;
+
+   return false;
+  }
+
 bool OneClickHedge()
   {
    if(!InpAllowOneClickHedge || !IsHedgingAccount())
@@ -3798,18 +3854,15 @@ bool OneClickHedge()
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
       return false;
 
-   double entry=(hedgeType==POSITION_TYPE_BUY)
-                ? tick.ask+InpManualPendingGapPips*pip
-                : tick.bid-InpManualPendingGapPips*pip;
-   entry=NormalizePrice(symbol,entry);
-
-   if((hedgeType==POSITION_TYPE_BUY && entry<=tick.ask+minDist) ||
-      (hedgeType==POSITION_TYPE_SELL && entry>=tick.bid-minDist))
-      return false;
-
    ENUM_ORDER_TYPE orderType=(hedgeType==POSITION_TYPE_BUY)
                               ? ORDER_TYPE_BUY_STOP
                               : ORDER_TYPE_SELL_STOP;
+   double requestedEntry=(hedgeType==POSITION_TYPE_BUY)
+                         ? tick.ask+InpManualPendingGapPips*pip
+                         : tick.bid-InpManualPendingGapPips*pip;
+   double entry=0.0;
+   if(!STB_ResolveManualPendingEntry(symbol,orderType,requestedEntry,tick,entry))
+      return false;
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(symbol,orderType,entry,sl))
@@ -6231,12 +6284,13 @@ bool PlaceManualPendingDirection(const int direction)
          return false;
      }
 
-   double entry=(direction>0 ? tick.ask+InpManualPendingGapPips*pip
-                             : tick.bid-InpManualPendingGapPips*pip);
-   entry=NormalizePrice(_Symbol,entry);
-
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_STOP
                                           : ORDER_TYPE_SELL_STOP);
+   double requestedEntry=(direction>0 ? tick.ask+InpManualPendingGapPips*pip
+                                      : tick.bid-InpManualPendingGapPips*pip);
+   double entry=0.0;
+   if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
+      return false;
 
    double sl=0.0;
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
@@ -6319,12 +6373,13 @@ bool PlaceManualLimitDirection(const int direction)
          return false;
      }
 
-   double entry=(direction>0 ? tick.bid-InpManualPendingGapPips*pip
-                             : tick.ask+InpManualPendingGapPips*pip);
-   entry=NormalizePrice(_Symbol,entry);
-
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_LIMIT
                                           : ORDER_TYPE_SELL_LIMIT);
+   double requestedEntry=(direction>0 ? tick.bid-InpManualPendingGapPips*pip
+                                      : tick.ask+InpManualPendingGapPips*pip);
+   double entry=0.0;
+   if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
+      return false;
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
