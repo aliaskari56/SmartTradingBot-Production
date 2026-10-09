@@ -926,3 +926,8 @@ EA | چارت | دسکتاپ | موبایل | رویداد سرور
 4. هر فایل فاقد منشأ روشن را تا تعیین تکلیف از انتشار بستهٔ توزیعی مستثنا یا برای آن مجوز مناسب اخذ کنید.
 
 **وضعیت گذر ۱۵:** ردگیری includeهای مستقیم و وابستگی استاندارد اصلی انجام شد؛ بازبینی کامل منشأ/مجوز تمام includeها هنوز باز است. هیچ کد اجرایی تغییر نکرد، build یا runtime test اجرا نشد و `main` دست‌نخورده ماند.
+
+
+## Pass 18 — event lifecycle and reconciliation trace
+
+Added `docs/EVENT_LIFECYCLE_TRACE_PASS18_20261009.md`. Static trace covers `OnInit`, `OnDeinit`, `OnTick`, `OnTimer`, `OnTradeTransaction`, `OnChartEvent`, `OnTester`, and `STB_RunManagementCycle()`. Notable test obligations: tick/timer cross-cycle idempotence, timer reconciliation occurring after its management cycle, transaction callback reordering/duplication, partial-close/reversal accounting, and multi-chart lease recovery. No source code changed and no compile/runtime test was performed. Platform transaction-order caveat linked to official MQL5 documentation. Status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
