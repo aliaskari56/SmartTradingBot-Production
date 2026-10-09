@@ -4102,7 +4102,8 @@ double PositionCommissionMoney(const ulong ticket)
 
       long entryType=HistoryDealGetInteger(deal,DEAL_ENTRY);
       if(entryType==DEAL_ENTRY_IN)
-         commission+=HistoryDealGetDouble(deal,DEAL_COMMISSION);
+         commission+=HistoryDealGetDouble(deal,DEAL_COMMISSION)+
+                     HistoryDealGetDouble(deal,DEAL_FEE);
      }
 
    return commission;
@@ -4619,11 +4620,14 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
      {
       g_modifyWasNoChanges=true;
       if(PositionSelectByTicket(ticket))
+        {
          STB_GeomStore(ticket,true,
                        PositionGetDouble(POSITION_PRICE_OPEN),
                        PositionGetDouble(POSITION_SL),
                        PositionGetDouble(POSITION_TP));
-       GlobalVariableDel(gv);
+         STB_CycleMarkWritten(ticket); // one broker modify request per cycle, even if unchanged
+        }
+      GlobalVariableDel(gv);
       return true;
      }
 
