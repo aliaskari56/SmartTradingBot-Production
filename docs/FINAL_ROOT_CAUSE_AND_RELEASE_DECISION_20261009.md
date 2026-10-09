@@ -9,7 +9,7 @@ Primary source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 
 **Release status: BLOCKED / NOT VERIFIED.**
 
-The highest-priority source-structure findings tracked in earlier root-cause reports have been remediated on the audit branch in the areas of delete authorization, shared directional-volume preflight, and same-cycle SL arbitration. The latest associated GitHub Actions run, [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269), passed 26 static checks on the current source/checker content.
+The highest-priority source-structure findings tracked in earlier root-cause reports have been remediated on the audit branch in the areas of delete authorization, shared directional-volume preflight, and same-cycle SL arbitration. A verified source/checker GitHub Actions run, [37950552410](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37950552410), passed 26 static checks on the current source/checker content.
 
 That is not a compiler result or runtime test. MetaEditor is not available in this execution environment. No fresh compile, Strategy Tester run, demo test, broker compatibility test, package extraction, licensing decision, or independent release sign-off was performed in this pass. The checked-in EX5 is not proven to come from the source revision below.
 
@@ -22,7 +22,7 @@ No repository paths were added by this integration. The source and existing audi
 - Source-changing commit: 30d683029158bc4a1cab64e8d3d190af04b07479
 - Static checker: tools/audit_static_checks.py
 - Static checker Git blob: 7f5092f1663f8a899449a16f3b6588df80c19bef
-- Latest checked static run: [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269) — 24 PASS checks
+- Latest checked static run: [37950552410](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37950552410) — 24 PASS checks
 - Source tree reports 9,208 decoded lines; Git tree records a 305,927-byte source blob. A Git blob identifier must not be reported as a raw SHA-256.
 - Existing tracked EX5: MQL5/Experts/SmartTradingBot_FINAL.ex5, blob 348bb13126ba73b9502f82466f2d1a2bea1e8f6f. Its source/build provenance is unknown; the compile runbook does not overwrite it.
 
@@ -125,7 +125,7 @@ The EA source header still has generic ProjectName / CompanyName / companyname.n
 
 | Gate | Current status | Closure evidence |
 |---|---|---|
-| Static structural checks | PASS — 24 checks in run 37949430269 | Checks only the encoded source properties |
+| Static structural checks | PASS — 24 checks in run 37950552410 | Checks only the encoded source properties |
 | Exact-source MetaEditor compile | NOT RUN HERE | Full local log, toolchain identity, exit code, raw source and EX5 hashes |
 | SL arbitration runtime suite | NOT RUN | SL-01 through SL-11 results, including permutation and lifecycle tests |
 | Shared volume limit | STRUCTURALLY PRESENT; NOT RUN | All four creation paths under netting/hedging and race scenarios |
