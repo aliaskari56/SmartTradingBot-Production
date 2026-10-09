@@ -4065,19 +4065,37 @@ string STB_ExposureSymbolOf(const ulong ticket)
    return "";
   }
 
+string STB_OverrideLegacyKey(const ulong ticket,const string symbol)
+  {
+   if(ticket==0 || symbol=="")
+      return "";
+   // Legacy key format retained only for safe migration from older builds.
+   return g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+          (string)InpMagic+"_"+symbol+"_"+IntegerToString((int)ticket);
+  }
+
 string STB_OverrideKey(const ulong ticket,const string symbol)
   {
    if(ticket==0 || symbol=="")
       return "";
-   return g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-          (string)InpMagic+"_"+symbol+"_"+IntegerToString((int)ticket);
+
+   // Compact account+magic scope keeps the key safely under MT5's 63-char
+   // terminal-global-variable limit even with long broker symbols/tickets.
+   return ScopedStateName("OVR")+"_"+(string)ticket;
   }
 
 void STB_OverridePersistSet(const ulong ticket,const string symbol)
   {
    string key=STB_OverrideKey(ticket,symbol);
-   if(key!="")
-      GlobalVariableSet(key,1.0);
+   if(key=="")
+      return;
+
+   if(GlobalVariableSet(key,1.0)!=0)
+     {
+      string legacy=STB_OverrideLegacyKey(ticket,symbol);
+      if(legacy!="")
+         GlobalVariableDel(legacy);
+     }
   }
 
 void STB_OverridePersistDel(const ulong ticket,const string symbol)
@@ -4085,32 +4103,58 @@ void STB_OverridePersistDel(const ulong ticket,const string symbol)
    string key=STB_OverrideKey(ticket,symbol);
    if(key!="")
       GlobalVariableDel(key);
+
+   string legacy=STB_OverrideLegacyKey(ticket,symbol);
+   if(legacy!="")
+      GlobalVariableDel(legacy);
   }
 
 bool STB_OverridePersistOn(const ulong ticket,const string symbol)
   {
    string key=STB_OverrideKey(ticket,symbol);
-   return (key!="" && GlobalVariableCheck(key) && GlobalVariableGet(key)>0.5);
+   if(key=="" )
+      return false;
+
+   if(GlobalVariableCheck(key))
+      return GlobalVariableGet(key)>0.5;
+
+   // Lazy migration keeps manual authority across an update/recompile.
+   string legacy=STB_OverrideLegacyKey(ticket,symbol);
+   if(legacy!="" && GlobalVariableCheck(legacy) &&
+      GlobalVariableGet(legacy)>0.5)
+     {
+      if(GlobalVariableSet(key,1.0)!=0)
+         GlobalVariableDel(legacy);
+      return true;
+     }
+
+   return false;
   }
 
 // Purge persisted overrides. all=true removes every stored key (AUTO clear);
 // all=false removes only tickets that no longer exist in the terminal.
 void STB_OverridePersistPrune(const bool all)
   {
-   // Only prune overrides belonging to this account + EA magic. A broad
-   // STB_OVR_ prefix would erase manual-authority records for other instances.
-   string pref=g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-               (string)InpMagic+"_";
+   // Scope cleanup to this account + magic, covering the compact current key
+   // and the legacy human-readable key. Other EA-instance records are untouched.
+   string compactPref=ScopedStateName("OVR")+"_";
+   string legacyPref=g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+                     (string)InpMagic+"_";
+
    for(int i=GlobalVariablesTotal()-1;i>=0;i--)
      {
       string name=GlobalVariableName(i);
-      if(StringFind(name,pref)!=0)
+      bool compact=(StringFind(name,compactPref)==0);
+      bool legacy=(StringFind(name,legacyPref)==0);
+      if(!compact && !legacy)
          continue;
+
       if(all)
         {
          GlobalVariableDel(name);
          continue;
         }
+
       int p=-1;
       for(int k=StringLen(name)-1;k>=0;k--)
          if(StringGetCharacter(name,k)=='_')
@@ -4118,11 +4162,14 @@ void STB_OverridePersistPrune(const bool all)
             p=k;
             break;
            }
+
       if(p<0)
          continue;
+
       ulong ticket=(ulong)StringToInteger(StringSubstr(name,p+1));
       if(ticket==0)
          continue;
+
       if(!PositionSelectByTicket(ticket) && !OrderSelect(ticket))
          GlobalVariableDel(name);
      }
