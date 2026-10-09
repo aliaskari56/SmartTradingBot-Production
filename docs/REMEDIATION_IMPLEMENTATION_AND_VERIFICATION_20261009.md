@@ -3,7 +3,7 @@
 ## Status
 
 - **Static remediation:** implemented on the audit branch.
-- **Static structural checks:** passed.
+- **Static structural checks:** prior baseline passed; latest run intentionally FAILS on the unresolved SL-arbitration blocker.
 - **MetaEditor compilation:** NOT RUN.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
@@ -71,9 +71,13 @@ Checks were run against the fetched post-remediation source:
 
 These are static structural checks only. They are not a substitute for MetaEditor, Strategy Tester, demo, or broker integration testing.
 
+### Fail-closed regression gate added (2026-10-09)
+
+The static checker now treats the confirmed one-proposal SL resolver call pattern as a hard failure instead of only printing an informational `OPEN` line. Latest run `37927127485` failed for exactly this reason: all other listed structural checks and lexical balance passed, while `SL submit does not force single-proposal arbitration` failed. This is intentional: CI no longer gives a green result while the known SL arbitration root cause remains in the source. See [run 37927127485](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37927127485). The gate is a regression tripwire, not the fix itself.
+
 ## Root causes still open
 
-1. **SL proposal arbitration:** `STB_SubmitPositionSL` still passes one proposal at a time to `STB_ResolvePositionSL`; no complete same-cycle collection/arbitration across initial protection, profit protection, and trailing was established. Do not mark this item closed.
+1. **SL proposal arbitration:** `STB_SubmitPositionSL` still passes one proposal at a time to `STB_ResolvePositionSL`; no complete same-cycle collection/arbitration across initial protection, profit protection, and trailing was established. A fail-closed CI regression gate now fails on this pattern. The design and acceptance criteria are recorded in `docs/SAME_CYCLE_SL_ARBITRATION_REMEDIATION_DESIGN_20261009.md`, but the source fix is still open.
 2. **Cross-event/cross-instance behavior:** per-cycle write deduplication does not by itself prove no duplicate request across `OnTick`, `OnTimer`, restarts, or multiple EA instances.
 3. **Build provenance:** the exact post-remediation source has not been compiled into a newly hashed EX5 with a recorded MetaEditor/toolchain version and raw compile log.
 4. **Dependency/package provenance:** the backup ZIP has not been extracted and independently inventoried; ALGLIB presence in the repository alone does not establish whether the distributed package uses or ships it. License and attribution review remains open.
