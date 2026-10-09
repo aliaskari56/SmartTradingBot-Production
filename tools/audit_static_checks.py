@@ -119,6 +119,12 @@ def main() -> int:
              "g_stbSLQueue[n].ticket=ticket",
              "g_stbSLQueue[n].cycle=g_stbCycleId",
              "STB_QueuePositionSL(ticket,candidateSL,source,reason)"))),
+        ("non-initial automatic SL requests cannot bypass arbitration outside a cycle",
+         all(token in source for token in (
+             "if(source!=STB_SL_SRC_INITIAL)",
+             "STB SL request blocked outside arbitration cycle",
+             "if(g_stbCollectingSLProposals)",
+             "if(isUserAction)"))),
         ("queue allocation failure aborts the incomplete arbitration batch",
          all(token in source for token in (
              "bool g_stbSLCollectionFaulted=false;",
