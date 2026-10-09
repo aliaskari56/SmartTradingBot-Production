@@ -1,56 +1,52 @@
-# Same-Cycle Stop-Loss Arbitration — Remediation Design
+# Same-Cycle Stop-Loss Arbitration — Remediation and Verification Status
 
 Date: 2026-10-09  
 Branch: `audit/expose-cleaned-source-20261009`  
-Status: **DESIGN ONLY — implementation and runtime verification are still required**  
+Status: **IMPLEMENTED ON AUDIT BRANCH; STATIC CHECKS PASS; COMPILE/RUNTIME NOT VERIFIED**  
 Related blocker: [Issue #5](https://github.com/aliaskari56/SmartTradingBot-Production/issues/5)
 
-## 1. Confirmed root cause
+## 1. Historical root cause
 
-In `MQL5/Experts/SmartTradingBot_FINAL.mq5`, `STB_SubmitPositionSL()` currently creates an array with exactly one proposal and calls `STB_ResolvePositionSL(ticket, props, 1, ...)`. The resolver's geometry selection can compare multiple entries, but callers never supply multiple source candidates in that path.
+The reviewed baseline had `STB_SubmitPositionSL()` pass one proposal at a time to `STB_ResolvePositionSL(ticket, props, 1, ...)`. Because initial protection, profit protection, and trailing were called sequentially and a ticket could receive only one broker modification per cycle, source ordering could determine which stop proposal reached the broker.
 
-`ManagePositions()` calls initial protection, profit protection, and trailing in sequence. The single-write-per-ticket-per-cycle guard can make this call order affect which source gets to request a modification. This is not a proven same-cycle arbitration mechanism.
+The audit branch now collects the automatic candidates generated in `ManagePositions()` before resolving them. The original one-proposal call pattern is no longer present in the current source.
 
-## 2. Required design invariants
+## 2. Current implementation
 
-1. **Collect, then commit:** candidate-generation functions must not write SL/TP to the broker.
-2. **One candidate set per ticket and cycle:** include source, reason, cycle id, candidate price, and validation status.
-3. **Re-read live state:** immediately before resolution, reselect the position and read side, SL, TP, symbol specification, and current tick.
-4. **Monotonicity:** for BUY, only consider candidates strictly above current SL; for SELL, only candidates strictly below current SL. A missing current SL permits any otherwise-valid candidate.
-5. **Deterministic geometry:** BUY chooses the highest valid improving candidate; SELL chooses the lowest valid improving candidate. Equal-price ties use a stable source priority (initial protection, profit protection, trailing) and never arrival order.
-6. **Broker constraints:** validate tick-size normalization, stops level, freeze level, and current bid/ask immediately before submission. Candidate selection must not bypass existing `IsValidSLForPosition`.
-7. **Single writer:** only the existing centralized modify bridge may submit the selected SL, retaining ownership, manual override, retry/backoff, retcode, and terminal-state verification checks.
-8. **No speculative state:** profit-lock bookkeeping, success logs, and manual override must reflect confirmed terminal state, not merely a queued proposal.
-9. **Cycle boundaries:** explicitly begin and flush a management cycle in the relevant event paths. Manual SAVE must remain synchronous from the user's perspective and must not accidentally join the automatic proposal batch.
-10. **Failure recovery:** after rejected, timed-out, or ambiguous requests, reselect the live position and reconcile cached geometry and lock state before another decision.
+Source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
+Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf`  
+Latest source-changing commit: `9b91af646a0362bbf38b184cdc2d3effebd28239`  
+Static-checker update: `6c7213801bf5b405e88b00e34f0d4e3f74134831`
 
-## 3. Implementation sequence
+The source implementation includes these controls:
 
-1. Introduce a bounded proposal store keyed by ticket and cycle id; clear it on cycle start and after flush.
-2. Refactor `EnsureInitialSL`, `ApplyProfitLock`, and `TrailPositionByLivePrice` to calculate/submit proposals without direct broker writes during automatic management.
-3. Add one flush pass after all three candidate producers have run. Resolve the complete set per ticket, validate the selected candidate again, and invoke the centralized writer once.
-4. Move profit-lock state updates and “updated” logs to the post-write confirmation path. If a stronger existing SL already satisfies the lock target, record that only after re-reading it.
-5. Keep manual SAVE as a separate explicit synchronous path, with its own confirmation semantics and no automatic queue leakage.
-6. Add static checks for proposal collection, exactly one automatic flush point, no direct writer calls in candidate producers, and no premature lock-state commit.
-7. Compile with MetaEditor, fix every error/warning, and run SL-01 through SL-10 from the acceptance matrix on both BUY/SELL and supported account modes.
+1. **Cycle-scoped collection.** `EnsureInitialSL()`, `ApplyProfitLock()`, and `TrailPositionByLivePrice()` submit proposals while automatic management is collecting. Candidates carry ticket, cycle, source, reason, and price.
+2. **Complete per-ticket resolution.** The flush builds the full candidate set for each ticket and passes its actual count to `STB_ResolvePositionSL()`. It does not silently submit a subset if the per-ticket candidate array cannot be allocated.
+3. **Deterministic selection.** BUY positions select the highest valid SL that improves on the installed stop; SELL positions select the lowest valid improving SL. Equal-price candidates use the source-order tie-break: initial protection, profit protection, then trailing. Candidate prices are normalized and revalidated against live broker constraints.
+4. **Single central write.** The automatic batch flushes once after initial protection, profit protection, and trailing have generated their proposals. The selected change still passes through the existing modify bridge, which rechecks live position/TP state, ownership, manual override, current SL, broker constraints, retcodes, and terminal state.
+5. **No silent partial batch on allocation failure.** If the queue itself cannot grow, the cycle aborts the automatic batch rather than arbitrating incomplete input. If the temporary per-ticket proposal array cannot hold the full set, that ticket is skipped and the failure is logged.
+6. **No automatic bypass outside the cycle.** Non-initial automatic requests are rejected when collection is inactive. Two deliberate synchronous paths remain: explicit user SAVE, and initial protective SL for a newly-created position before the next scheduled management cycle. The latter is a lifecycle exception; it is not evidence of same-cycle arbitration for that pre-cycle event.
+7. **Confirmed lock state.** Automatic profit-lock bookkeeping is deferred while candidates are collected. Existing SL that already satisfies a lock is re-read before state is credited. The flush rejects a missing terminal SL before it can commit profit-lock bookkeeping or log arbitration as confirmed.
 
-## 4. Required tests
+## 3. Static verification evidence
 
-- Multiple proposals supplied in every permutation resolve to the same price/source.
-- BUY and SELL choose the strongest valid improving SL and never loosen an existing SL.
-- Initial protection plus trailing in one cycle.
-- Profit protection plus trailing in one cycle.
-- Equal-price candidates and invalid/expired candidates.
-- Stop/freeze-level and tick-size boundary cases.
-- TP update between collection and flush.
-- Broker rejection, timeout, no-changes, and delayed transaction events.
-- Manual override, manual SAVE, restart recovery, and two instances competing for the same symbol.
-- A failed modification does not persist a lock value or success log.
+GitHub Actions run [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375) completed with **success** on checker commit `6c7213801bf5b405e88b00e34f0d4e3f74134831`. Its log reports 22 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
 
-## 5. Why source implementation is not marked complete here
+This is source-level structural evidence only. It does not execute the MQL resolver or prove permutation-independent runtime behavior.
 
-This is a stateful trading path, and the refactor changes when the broker write occurs relative to the current synchronous return values. Without an available MetaEditor compiler and Strategy Tester in this environment, making a speculative source rewrite and calling it “fixed” would not be responsible. This design records the exact root cause and the acceptance criteria; the code-level fix remains open until it can be implemented and verified against the compiler and tests.
+## 4. Required validation still outstanding
 
-## 6. Release decision
+- Multiple candidate permutations with identical expected price/source results.
+- BUY and SELL monotonicity with and without an existing SL.
+- Initial protection plus trailing, and profit protection plus trailing, during one management cycle.
+- Equal-price ties, invalid candidates, changing ticks, stop/freeze levels, and tick-size boundaries.
+- TP changes between collection and submission; broker rejection, no-changes, timeout, and delayed transaction results.
+- Manual override, user SAVE, restart/reconnect, netting/hedging, and multi-instance ownership.
+- Exact-source MetaEditor compilation with complete compiler log and reviewed warnings.
+- Strategy Tester and demo results, EX5 provenance, full package/include inventory, dependency license review, and independent code review.
 
-**BLOCKED / NOT VERIFIED.** Static CI is not a substitute for exact-source compilation, tester evidence, demo verification, EX5 provenance, and dependency/license review.
+The current environment does not have MetaEditor or Wine available, so exact-source compilation was not run here. Strategy Tester and broker/demo scenarios were also not run.
+
+## 5. Release decision
+
+**BLOCKED / NOT VERIFIED.** The source now has an implemented same-cycle arbitration path and the encoded static checks pass. Do not interpret this as compiler, broker, runtime, profitability, or release approval. Keep the release blocked until the exact source is compiled and the acceptance scenarios above have evidence.
