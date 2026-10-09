@@ -5098,6 +5098,21 @@ bool EnsureInitialSL(const ulong ticket)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_RecordPendingInitialSLFailure(const int stateIdx)
+  {
+   if(stateIdx<0 || stateIdx>=ArraySize(g_stbPendingTrail))
+      return;
+
+   g_stbPendingTrail[stateIdx].failureCount++;
+
+   int fc=g_stbPendingTrail[stateIdx].failureCount;
+   int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
+                         : (fc==2 ? STB_PEND_BACKOFF_2_SEC
+                                  : STB_PEND_BACKOFF_3_SEC));
+
+   g_stbPendingTrail[stateIdx].nextRetryTime=TimeCurrent()+backoffSec;
+  }
+
 bool EnsureInitialSLForPendingOrder(const ulong ticket)
   {
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
@@ -5120,11 +5135,26 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
    if(currentSL>0.0)
       return VerifyPendingInitialSL(ticket);
 
-   // Do not re-create missing geometry on an order explicitly under user control.
+   // Do not impose protection on an order explicitly assigned to the user.
    if(STB_ManualOverrideIs(ticket))
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL);
+
+   // Register missing-SL orders so failed protection attempts share the
+   // pending engine's bounded 5/15/60-second retry policy.
+   int stateIdx=STB_PendingTrailFind(ticket);
+   if(stateIdx<0)
+     {
+      STB_PendingTrailRegister(ticket,"INITIAL_PROTECTION");
+      stateIdx=STB_PendingTrailFind(ticket);
+     }
+
+   datetime now=TimeCurrent();
+   if(stateIdx>=0 &&
+      g_stbPendingTrail[stateIdx].nextRetryTime>now)
+      return false;
+
    double entry=OrderGetDouble(ORDER_PRICE_OPEN);
    double candidate=0.0;
 
@@ -5133,16 +5163,37 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       Print("STB pending initial SL unavailable ticket=",ticket,
             " symbol=",symbol,
             " type=",EnumToString(orderType));
+      STB_RecordPendingInitialSLFailure(stateIdx);
       return false;
      }
 
    if(!STB_ModifyPendingOrderGeometry(ticket,
                                       entry,
                                       candidate,
-                                      OrderGetDouble(ORDER_TP)))
+                                      OrderGetDouble(ORDER_TP)) ||
+      !VerifyPendingInitialSL(ticket))
+     {
+      STB_RecordPendingInitialSLFailure(stateIdx);
       return false;
+     }
 
-   return VerifyPendingInitialSL(ticket);
+   if(stateIdx>=0 && OrderSelect(ticket))
+     {
+      double verifiedEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+      double verifiedSL=OrderGetDouble(ORDER_SL);
+      double pip=PipSize(symbol);
+
+      g_stbPendingTrail[stateIdx].lastEntry=verifiedEntry;
+      g_stbPendingTrail[stateIdx].lastSL=verifiedSL;
+      if(pip>0.0)
+         g_stbPendingTrail[stateIdx].slBufferPips=
+            MathAbs(verifiedEntry-verifiedSL)/pip;
+      g_stbPendingTrail[stateIdx].failureCount=0;
+      g_stbPendingTrail[stateIdx].nextRetryTime=0;
+      g_stbPendingTrail[stateIdx].lastModifyTime=TimeCurrent();
+     }
+
+   return true;
   }
 
 
@@ -5308,6 +5359,17 @@ void ManagePendingOrders()
 
       string symbol=OrderGetString(ORDER_SYMBOL);
       if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
+
+      // Protect every managed pending order with no SL, not only orders created
+      // by this EA. The helper respects manual overrides and throttles failures.
+      if(OrderGetDouble(ORDER_SL)<=0.0)
+        {
+         EnsureInitialSLForPendingOrder(ticket);
+         if(!OrderSelect(ticket))
+            continue;
+         symbol=OrderGetString(ORDER_SYMBOL);
+        }
+
       datetime setupTime=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
       int profileId=STB_AdaptiveParseProfileFromComment(OrderGetString(ORDER_COMMENT));
       int maxBars=InpMaxPendingBars;
