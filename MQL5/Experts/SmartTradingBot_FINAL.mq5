@@ -5840,11 +5840,19 @@ bool PlaceSetup(Setup &s)
    trade.SetAsyncMode(false);
 
    double commentPip=PipSize(s.symbol);
-   double commentAnchor=(s.direction>0 ? s.originHigh:s.originLow);
-   double effectiveEntryBuffer=(commentPip>0.0 && commentAnchor>0.0)
-                               ? MathAbs(s.entry-commentAnchor)/commentPip
-                               : MathMax(0.0,s.entryBufferPips);
-   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile)+"|EB"+DoubleToString(effectiveEntryBuffer,8);
+   MqlTick commentTick;
+   if(!SymbolInfoTick(s.symbol,commentTick) || commentPip<=0.0)
+      return STB_LogPlaceReject(s,"NO_TICK_BEFORE_PLACEMENT");
+
+   // EB is the distance from the pending entry to the pending-trail's live
+   // anchor at registration: Bid for BUY-side orders, Ask for SELL-side.
+   // Storing the pattern-zone distance here can make restart recovery infer an
+   // old extreme and cause an immediate unintended entry jump.
+   double commentAnchor=(s.direction>0 ? commentTick.bid:commentTick.ask);
+   double effectiveEntryBuffer=MathAbs(s.entry-commentAnchor)/commentPip;
+   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+
+                  IntegerToString(s.adaptiveProfile)+"|EB"+
+                  DoubleToString(effectiveEntryBuffer,8);
 
    bool ok=false;
 
