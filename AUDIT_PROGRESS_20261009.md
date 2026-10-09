@@ -1022,3 +1022,10 @@ No executable source changed. No archive extraction, full recursive include scan
 Added `docs/RECURSIVE_INCLUDE_CLOSURE_AND_ALGLIB_STATUS_PASS32_20261009.md`. Recursively inspected the primary EA's direct include graph: `Trade.mqh` → `Object.mqh` → `StdLibErr.mqh`, plus `OrderInfo.mqh`, `HistoryOrderInfo.mqh`, `PositionInfo.mqh`, and `DealInfo.mqh`, which each include `Object.mqh). The two direct STB includes have no include directives in their inspected contents. No ALGLIB include was observed in this traced graph; ALGLIB headers remain separately present in the repository's bundled Include tree and contain their own internal include chain. This narrows the source-level finding but does not determine archive or EX5 contents. Binary ZIP retrieval/extraction was not achieved. BL-06 remains OPEN.
 
 No executable source changed. No compilation, runtime, Strategy Tester, demo test, archive extraction or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 33 — ALGLIB license notice inventory and release gate
+
+Added `docs/ALGLIB_LICENSE_NOTICE_INVENTORY_AND_RELEASE_DECISION_PASS33_20261009.md`. Six inspected ALGLIB-family headers explicitly state GPL v2-or-later terms and credit Sergey Bochkanov / ALGLIB plus MetaQuotes. The traced source include closure still does not visibly reference this family, but these headers are bundled in the repository; whether they ship in the actual ZIP remains unknown. This is a confirmed license-review gate, not a conclusion of infringement or noncompliance. BL-06 remains OPEN pending exact package inventory and qualified review.
+
+No executable source changed. No ZIP extraction, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
