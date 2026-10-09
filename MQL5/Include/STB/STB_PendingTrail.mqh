@@ -228,16 +228,37 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
       return false;
 
    string comment=OrderGetString(ORDER_COMMENT);
-
-   // P4 EB contract: the creator stores the effective entry buffer in the
-   // order comment ("|EB<value>"); fall back to the configured input only
-   // for legacy/manual orders created before the contract existed.
-   double entryBufferPips=STB_ParsePendingEntryBufferPips(comment,InpEntryBufferPips);
-   if(entryBufferPips<0.0)
-      return false;
-
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double currentSL=OrderGetDouble(ORDER_SL);
+
+   // P4 EB contract: this EA writes the effective offset to the order comment.
+   // For older manual/foreign orders without EB, infer a stable offset from
+   // their current entry versus the appropriate live quote. This avoids
+   // snapping an inherited order toward the EA's tiny default buffer.
+   double fallbackEntryBufferPips=MathMax(0.0,InpEntryBufferPips);
+   if(StringFind(comment,"|EB")<0 && currentEntry>0.0)
+     {
+      MqlTick currentTick;
+      if(!SymbolInfoTick(symbol,currentTick) || pip<=0.0)
+         return false;
+
+      bool buySide=STB_PendingIsBuySide((ENUM_ORDER_TYPE)orderType);
+      bool stopKind=STB_PendingIsStopKind((ENUM_ORDER_TYPE)orderType);
+      double anchorQuote=buySide
+                         ? (stopKind ? currentTick.ask:currentTick.bid)
+                         : (stopKind ? currentTick.bid:currentTick.ask);
+      fallbackEntryBufferPips=MathAbs(currentEntry-anchorQuote)/pip;
+
+      double minDistance=TradeMinDistance(symbol);
+      if(minDistance>0.0)
+         fallbackEntryBufferPips=MathMax(fallbackEntryBufferPips,
+                                         minDistance/pip);
+     }
+
+   double entryBufferPips=STB_ParsePendingEntryBufferPips(comment,
+                                                          fallbackEntryBufferPips);
+   if(entryBufferPips<0.0)
+      return false;
 
    // P4 STB-002: the pending SL distance is the STRUCTURAL risk of the order
    // (|Entry-SL|), never an arbitrary constant. A constant could otherwise
@@ -471,11 +492,6 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    long orderType=OrderGetInteger(ORDER_TYPE);
 
-   // Initial structural protection owns unprotected pending orders. Do not
-   // let the trail fallback silently install a generic fixed-distance SL.
-   if(OrderGetDouble(ORDER_SL)<=0.0)
-      return true;
-
    if(!STB_PendingTrailIsManagedType(orderType))
    {
       Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
@@ -493,6 +509,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       g_stbPendingTrail[idx].active=false;
       return false;
    }
+
+   // Initial structural protection owns unprotected pending orders. Do not
+   // let the trail fallback silently install a generic fixed-distance SL.
+   if(OrderGetDouble(ORDER_SL)<=0.0)
+      return true;
 
    g_stbPendingTrail[idx].orderType=orderType;
 
