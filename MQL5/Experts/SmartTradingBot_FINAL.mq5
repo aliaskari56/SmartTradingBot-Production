@@ -3430,8 +3430,14 @@ void STB_ReconcileTradeRegistry()
       if(!IsManagedPosition(ticket))
          continue;
 
-      // SIMPLIFIED: origin registry call removed.
+      // Seed recovery state from the actual terminal geometry. Otherwise the
+      // registry's initial zero values can misclassify the next routine server
+      // POSITION update as an external/manual geometry edit.
       STB_ExposureEnsure(ticket,true); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
+      STB_GeomStore(ticket,true,
+                    PositionGetDouble(POSITION_PRICE_OPEN),
+                    PositionGetDouble(POSITION_SL),
+                    PositionGetDouble(POSITION_TP));
      }
 
    for(int i=0;i<OrdersTotal();i++)
@@ -3442,15 +3448,13 @@ void STB_ReconcileTradeRegistry()
       if(!IsManagedOrder(ticket))
          continue;
 
-      // SIMPLIFIED: origin registry call removed.
+      // Seed recovery state from the actual pending-order geometry.
       STB_PendingTrailRegister(ticket,"RECONCILE");
       STB_ExposureEnsure(ticket,false); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
-
-
-
-
-
-
+      STB_GeomStore(ticket,false,
+                    OrderGetDouble(ORDER_PRICE_OPEN),
+                    OrderGetDouble(ORDER_SL),
+                    OrderGetDouble(ORDER_TP));
      }
 
    // SIMPLIFIED: origin registry prune loop removed.
