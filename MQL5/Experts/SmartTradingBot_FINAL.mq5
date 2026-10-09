@@ -4937,6 +4937,14 @@ void STB_FlushPositionSLProposals()
             hasProfitCandidate=true;
       if(!ModifyPositionSL(ticket,chosenSL,false) || !PositionSelectByTicket(ticket)) continue;
       double actualSL=PositionGetDouble(POSITION_SL);
+      // A missing SL must never be treated as a confirmed protective stop;
+      // this is especially important for SELL-side lock-pips bookkeeping.
+      if(actualSL<=0.0)
+        {
+         Print("STB SL arbitration verification failed: position has no SL ticket=",ticket,
+               " cycle=",g_stbCycleId);
+         continue;
+        }
       double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
       double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
       double tolerance=MathMax(point*0.5,tickSize>0.0 ? tickSize*0.5:point*0.5);
