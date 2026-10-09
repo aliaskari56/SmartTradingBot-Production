@@ -4942,7 +4942,25 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 
       if(currentSL>0.0 && targetSL<=currentSL)
       {
-         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
+         // The observed SL may change outside this EA between the initial read
+         // and the bookkeeping update. Re-read terminal state before crediting
+         // a lock that is already satisfied without a broker write.
+         if(!PositionSelectByTicket(ticket))
+            return false;
+         long liveType=PositionGetInteger(POSITION_TYPE);
+         double liveSL=PositionGetDouble(POSITION_SL);
+         double liveEntry=PositionGetDouble(POSITION_PRICE_OPEN);
+         double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+         double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+         double tolerance=MathMax(point*0.5,
+                                  tickSize>0.0 ? tickSize*0.5:point*0.5);
+         if(liveType!=POSITION_TYPE_BUY || liveSL<=0.0 ||
+            liveSL+tolerance<targetSL)
+            return false;
+         double achieved=(liveSL-liveEntry)/pip;
+         if(achieved<=0.0)
+            return false;
+         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
          return true;
       }
    }
@@ -4953,7 +4971,24 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 
       if(currentSL>0.0 && targetSL>=currentSL)
       {
-         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
+         // Confirm the live SELL stop still protects at least the requested
+         // lock before persisting lock bookkeeping.
+         if(!PositionSelectByTicket(ticket))
+            return false;
+         long liveType=PositionGetInteger(POSITION_TYPE);
+         double liveSL=PositionGetDouble(POSITION_SL);
+         double liveEntry=PositionGetDouble(POSITION_PRICE_OPEN);
+         double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+         double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+         double tolerance=MathMax(point*0.5,
+                                  tickSize>0.0 ? tickSize*0.5:point*0.5);
+         if(liveType!=POSITION_TYPE_SELL || liveSL<=0.0 ||
+            liveSL-tolerance>targetSL)
+            return false;
+         double achieved=(liveEntry-liveSL)/pip;
+         if(achieved<=0.0)
+            return false;
+         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
          return true;
       }
    }
