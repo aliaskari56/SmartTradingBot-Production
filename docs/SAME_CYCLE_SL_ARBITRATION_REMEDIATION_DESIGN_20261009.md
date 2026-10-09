@@ -14,15 +14,15 @@ The audit branch now collects the automatic candidates generated in `ManagePosit
 ## 2. Current implementation
 
 Source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
-Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf`  
-Latest source-changing commit: `9b91af646a0362bbf38b184cdc2d3effebd28239`  
+Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `20a21c47bd576ca804465cc94940d3b4ea1ca6e1`  
+Latest source-changing commit: `aa09b2c95b2e00d9a4789c66ca9d6264c29cb20b`  
 Static-checker update: `6c7213801bf5b405e88b00e34f0d4e3f74134831`
 
 The source implementation includes these controls:
 
 1. **Cycle-scoped collection.** `EnsureInitialSL()`, `ApplyProfitLock()`, and `TrailPositionByLivePrice()` submit proposals while automatic management is collecting. Candidates carry ticket, cycle, source, reason, and price.
 2. **Complete per-ticket resolution.** The flush builds the full candidate set for each ticket and passes its actual count to `STB_ResolvePositionSL()`. It does not silently submit a subset if the per-ticket candidate array cannot be allocated.
-3. **Deterministic selection.** BUY positions select the highest valid SL that improves on the installed stop; SELL positions select the lowest valid improving SL. Equal-price candidates use the source-order tie-break: initial protection, profit protection, then trailing. Candidate prices are normalized and revalidated against live broker constraints.
+3. **Deterministic selection.** BUY positions select the highest valid SL that improves on the installed stop; SELL positions select the lowest valid improving SL. Equal-price candidates use the source-order tie-break: initial protection, profit protection, then trailing. Candidate prices are normalized and evaluated against one shared tick/stops/freeze snapshot for the candidate set; the chosen SL must still pass `IsValidSLForPosition()` at resolution and is revalidated again at the write boundary. This avoids candidate-order-dependent validation caused by reading a moving tick separately for each proposal. If the tick moves enough to invalidate the chosen candidate after resolution, the cycle fails closed rather than trying another candidate against a different snapshot.
 4. **Single central write.** The automatic batch flushes once after initial protection, profit protection, and trailing have generated their proposals. The selected change still passes through the existing modify bridge, which rechecks live position/TP state, ownership, manual override, current SL, broker constraints, retcodes, and terminal state.
 5. **No silent partial batch on allocation failure.** If the queue itself cannot grow, the cycle aborts the automatic batch rather than arbitrating incomplete input. If the temporary per-ticket proposal array cannot hold the full set, that ticket is skipped and the failure is logged.
 6. **No automatic bypass outside the cycle.** Non-initial automatic requests are rejected when collection is inactive. Two deliberate synchronous paths remain: explicit user SAVE, and initial protective SL for a newly-created position before the next scheduled management cycle. The latter is a lifecycle exception; it is not evidence of same-cycle arbitration for that pre-cycle event.
