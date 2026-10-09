@@ -56,6 +56,9 @@ Before `trade.PositionModify(ticket,newSL,tp)`, the writer now reselects the pos
 
 Checks were run against the fetched post-remediation source:
 
+- A repeatable static-check script was added at `tools/audit_static_checks.py` and wired into `.github/workflows/mql5-static-audit.yml`.
+- GitHub Actions run `37925518037` completed with **success** on workflow commit `0924bba5beae1392b31df82af3ee8cdaa7812904`. The job log shows all nine structural guardrails passed and explicitly reports SL arbitration and all runtime/build/legal checks as still open. This run validated the script and source state at that workflow commit; later report-only commits do not alter the source or script.
+
 - Delimiter/comment/string lexical balance: **PASS** (no unmatched braces, brackets, parentheses, or unterminated comments/literals).
 - `trade.OrderDelete(...)` write sites: **1**.
 - `trade.PositionModify(...)` write sites: **1**.
