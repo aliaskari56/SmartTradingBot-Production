@@ -790,3 +790,20 @@ The logical-house map now has source anchors for several major entry points, but
 The documentation pass is complete for its declared scope; the technical audit remains open. The current source reference was rechecked on this branch: `MQL5/Experts/SmartTradingBot_FINAL.mq5`, 8,665 lines, blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`.
 
 Still open: complete source-path coverage, confirmed exclusive ownership of shared state, event convergence/recovery evidence, build/runtime verification, and independent review. No compile, runtime, or Strategy Tester result is claimed. This closure note does not modify the EA and does not imply release readiness.
+
+
+## Static pass 8 — Event and mutation-boundary inventory (2026-10-09)
+
+Source re-fetched from branch `audit/expose-cleaned-source-20261009`: `MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob SHA `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`, 8,665 lines.
+
+- The central management cycle is called from `OnInit`, `OnTick`, and `OnTimer`; it calls `STB_BeginCycle`, `ManagePositions`, `ManagePendingOrders`, and `STB_PendingTrailProcess`. This proves source wiring only, not runtime correctness.
+- `EventSetTimer(MathMax(1,InpScanSeconds))` is present in `OnInit`; `OnDeinit` calls `EventKillTimer`.
+- `STB_ReconcileTradeRegistry` is called in `OnInit` and `OnTimer`, and in `OnTick` only inside the new-M15-bar condition. Coverage under missed events, reconnects, reinitialization, and external account changes remains unproven.
+- `OnTradeTransaction` delegates first to `STB_TradeIntakeFromTransaction(trans)`, then performs additional deal/profile/lifecycle processing. Callback presence does not prove event-order independence or convergence.
+- Direct order creation is distributed across four function families: `OneClickHedge`, `PlaceSetup`, `PlaceManualPendingDirection`, and `PlaceManualLimitDirection`. A common post-creation hook exists, but a single pre-submission mutation gateway is not established by this evidence.
+- One direct `trade.OrderModify` call is visible in `STB_ModifyPendingOrderGeometry`, with a lease check on that path.
+- One direct `trade.PositionModify` call is visible in `ModifyPositionSL`, with a lease check; the call passes both SL and TP, leaving stale-snapshot/concurrent-writer conflict handling open.
+- One direct `trade.OrderDelete` call is visible in `STB_ExecuteOrderDelete`. It checks the trade retcode and confirms the active ticket is no longer selectable, but no explicit symbol-lease/authorization check is visible at that write boundary. `STB_RequestOrderDelete` delegates directly to this writer. A future guard must account for creator rollback paths so it does not prevent cleanup of a newly-created invalid order.
+- Counts above are limited to the re-fetched primary EA source and are static search observations; included headers, dynamic behavior, server outcomes, and build behavior are not proven by this pass.
+
+**Pass conclusion:** event and mutation paths are now better indexed, but deletion authorization, SL/TP conflict resolution, complete creation-path control, event convergence/recovery, and build/runtime evidence remain open. Documentation only; no executable source changed.
