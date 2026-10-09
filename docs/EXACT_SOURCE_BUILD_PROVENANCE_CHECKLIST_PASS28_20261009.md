@@ -7,10 +7,11 @@ EA source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 ## Frozen source identity for this audit
 
 - Repository: aliaskari56/SmartTradingBot-Production
-- Reviewed source Git blob: 17059923ccb18e1b717947e4581d9790df26a368 (Git blob ID, **not** raw-file SHA-256)
-- Source-changing commit: d57b5c8c588a9cfa17e6a357d26ba2b87fd00155
-- Static checker blob: 179a6f2d05e75ea0a458ff72d1a2cf87aec0494d
-- Static CI run for this source/checker combination: [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490) — 24 structural checks passed.
+- Reviewed source Git blob: 6bca33bc8e0c961f317b0828e46faf7a6b9929b4 (Git blob ID, **not** raw-file SHA-256)
+- Source-changing commit: 30d683029158bc4a1cab64e8d3d190af04b07479
+- Static checker blob: 7f5092f1663f8a899449a16f3b6588df80c19bef
+- Static CI run for this source/checker combination: [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269) — 26 structural checks passed.
+- The current resolver also enforces the active profit-lock floor and only persists lock-pips after the final terminal SL meets the normalized target. The current delete writer rechecks expiry source, managed-order scope and symbol lease at the final writer boundary.
 - The previously tracked MQL5/Experts/SmartTradingBot_FINAL.ex5 is **not** proven to correspond to this source. Do not treat it as the output of the build below.
 
 A fresh local compile has **not** been performed here because MetaEditor is not available in this execution environment. The automation below is designed for the Windows machine that has MetaEditor installed. It does not add a .ps1 file to the repository and does not overwrite the tracked EX5 or compile directly into the terminal's live Experts folder.
@@ -43,7 +44,7 @@ function Invoke-STBMetaEditorCompile {
 
     $ErrorActionPreference = 'Stop'
     $ExpectedBranch = 'audit/expose-cleaned-source-20261009'
-    $ExpectedBlob = '17059923ccb18e1b717947e4581d9790df26a368'
+    $ExpectedBlob = '6bca33bc8e0c961f317b0828e46faf7a6b9929b4'
     $RelativeSource = 'MQL5/Experts/SmartTradingBot_FINAL.mq5'
 
     $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
