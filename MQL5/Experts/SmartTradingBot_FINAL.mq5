@@ -8491,26 +8491,35 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
      }
    else if(reason==STB_DEL_SERVER_EXPIRATION)
      {
-      bool serverExpired=(timeType==ORDER_TIME_SPECIFIED &&
-                          expiry>0 && TimeCurrent()>=expiry);
-      bool localAgeExpired=false;
-      if(source=="ManagePendingOrders" && autoCreated &&
-         !STB_ManualOverrideIs(ticket) && setupTime>0)
+      // Expiry deletion is only valid through the owned pending manager.
+      // Recheck scope and lease at the final writer boundary, not only in
+      // ManagePendingOrders before it calls this function.
+      string symbol=OrderGetString(ORDER_SYMBOL);
+      bool expiryAuthority=(source=="ManagePendingOrders" &&
+                           IsManagedOrder(ticket) &&
+                           STB_SymbolManagementOwnedVerified(symbol));
+      if(expiryAuthority)
         {
-         int maxBars=InpMaxPendingBars;
-         int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
-         if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
+         bool serverExpired=(timeType==ORDER_TIME_SPECIFIED &&
+                             expiry>0 && TimeCurrent()>=expiry);
+         bool localAgeExpired=false;
+         if(autoCreated && !STB_ManualOverrideIs(ticket) && setupTime>0)
            {
-            STB_AP_SetActive(profileId);
-            maxBars=STB_EffectiveMaxPendingBars();
-            STB_AP_ClearActive();
+            int maxBars=InpMaxPendingBars;
+            int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
+            if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
+              {
+               STB_AP_SetActive(profileId);
+               maxBars=STB_EffectiveMaxPendingBars();
+               STB_AP_ClearActive();
+              }
+            localAgeExpired=(maxBars>0 &&
+                             TimeCurrent()-setupTime>=maxBars*15*60);
            }
-         localAgeExpired=(maxBars>0 &&
-                          TimeCurrent()-setupTime>=maxBars*15*60);
+         // Server expiry remains honored for allowed managed orders;
+         // local-age expiry remains restricted to unoverridden EA creations.
+         authorized=serverExpired || localAgeExpired;
         }
-      // Revalidate the same expiration condition at the writer boundary;
-      // callers cannot use this reason to delete an arbitrary STB pending.
-      authorized=serverExpired || localAgeExpired;
      }
 
    if(!authorized)
