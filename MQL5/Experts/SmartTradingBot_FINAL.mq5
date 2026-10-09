@@ -1435,6 +1435,8 @@ bool   g_autoTrading = false;
 datetime g_lastM15Bar = 0;
 STBIndicatorCache g_indicatorCache[];
 datetime g_lastChartBar = 0;
+bool g_stbManagementCycleActive = false;
+bool g_stbManagementCyclePending = false;
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -3541,7 +3543,7 @@ void STB_ReconcileTradeRegistry()
       ulong ticket=PositionGetTicket(i);
       if(ticket==0 || !PositionSelectByTicket(ticket))
          continue;
-      if(!IsManagedPosition(ticket))
+      if(!STB_IsProtectionPosition(ticket)
          continue;
 
       // Seed recovery state from the actual terminal geometry. Otherwise the
@@ -3588,18 +3590,19 @@ void STB_ReconcileTradeRegistry()
 //+------------------------------------------------------------------+
 void STB_ManagePositionImmediately(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return;
-
-   // Blueprint 28: intake only (Discover/Sync/Register). Initial protection + management run in STB_RunManagementCycle().
-
-
-
-
-
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   STB_ExposureEnsure(ticket,true);
+   STB_GeomStore(ticket,true,
+                 PositionGetDouble(POSITION_PRICE_OPEN),
+                 PositionGetDouble(POSITION_SL),
+                 PositionGetDouble(POSITION_TP));
    Print("STB POSITION HANDOFF ACTIVE ticket=",ticket,
-         " symbol=",PositionGetString(POSITION_SYMBOL),
-         " side=",(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "BUY":"SELL"));
+         " symbol=",symbol,
+         " side=",(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "BUY":"SELL"),
+         " action=IMMEDIATE_MANAGEMENT_CYCLE");
+   STB_RunManagementCycle();
   }
 
 void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
@@ -3656,7 +3659,7 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
 
       if(trans.position>0 && PositionSelectByTicket(trans.position))
         {
-         if(IsManagedPosition(trans.position))
+         if(STB_IsProtectionPosition(trans.position))
            {
             string positionSymbol=PositionGetString(POSITION_SYMBOL);
             double positionEntry=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -3726,7 +3729,18 @@ bool STB_IsSymbolAllowed(const string s)
      }
 
    return false;
-  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
+  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   // Live protection covers all account positions regardless of origin/symbol.
+   // Respect the explicit chart-only isolation setting in Strategy Tester.
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+      return PositionGetString(POSITION_SYMBOL)==_Symbol;
+   return true;
+  }
+
+bool IsManagedPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
    return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
@@ -4204,6 +4218,30 @@ double PositionCommissionMoney(const ulong ticket)
    return commission;
   }
 
+double STB_PositionPriceMovePips(const ulong ticket)
+  {
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
+      return 0.0;
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long type=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double pip=PipSize(symbol);
+   if(entry<=0.0 || pip<=0.0)
+      return 0.0;
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return 0.0;
+   // Executable close-side quote: Bid for BUY, Ask for SELL.
+   double closePrice=(type==POSITION_TYPE_BUY ? tick.bid : tick.ask);
+   if(closePrice<=0.0)
+      return 0.0;
+   if(type==POSITION_TYPE_BUY)
+      return (closePrice-entry)/pip;
+   if(type==POSITION_TYPE_SELL)
+      return (entry-closePrice)/pip;
+   return 0.0;
+  }
+
 double PositionNetProfitPips(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket))
@@ -4554,7 +4592,7 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
    if(trans.type==TRADE_TRANSACTION_POSITION && trans.position>0)
      {
       ulong ticket=trans.position;
-      if(!PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      if( !STB_IsProtectionPosition(ticket))
          return;
       string symbol=PositionGetString(POSITION_SYMBOL);
       double e=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -4661,7 +4699,7 @@ void STB_BeginCycle()
 bool STB_QueuePositionSL(const ulong ticket,const double candidateSL,const int source,const string reason)
   {
    if(!g_stbCollectingSLProposals || ticket==0 || candidateSL<=0.0 ||
-      !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+       !STB_IsProtectionPosition(ticket))
       return false;
    int n=ArraySize(g_stbSLQueue);
    if(ArrayResize(g_stbSLQueue,n+1)!=n+1)
@@ -4734,10 +4772,10 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    // When the existing position has no SL at all, retain the strongest valid
    // non-profit-lock candidate as a last-resort protection fallback if broker
    // geometry makes the profit-lock target impossible this cycle.
-   double decisionNetProfitPips=PositionNetProfitPips(ticket);
+   double decisionPriceMovePips=STB_PositionPriceMovePips(ticket);
    double pip=PipSize(symbol);
    bool enforceProfitLockFloor=
-      (decisionNetProfitPips>=STB_ProfitLockTriggerPips() && pip>0.0);
+      (decisionPriceMovePips>=STB_ProfitLockTriggerPips() && pip>0.0);
    double profitLockTarget=0.0;
    if(enforceProfitLockFloor)
      {
@@ -4842,7 +4880,7 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
 
 bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+   if(ticket==0 ||  !STB_IsProtectionPosition(ticket))
       return false;
 
    // Explicit user SAVE remains synchronous and isolated from automatic batches.
@@ -4867,24 +4905,21 @@ bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int 
 
 void STB_ProfitProtectionOne(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return;
-   if(STB_ManualOverrideIs(ticket))
-      return; // MANUAL_OVERRIDE
-
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
    double currentSL=PositionGetDouble(POSITION_SL);
-   double profit=PositionNetProfitPips(ticket);
+   double priceMovePips=STB_PositionPriceMovePips(ticket);
+   double netProfitPips=PositionNetProfitPips(ticket);
    double locked=GetLockedPips(ticket);
    double triggerPips=STB_ProfitLockTriggerPips();
    double lockPips=STB_ProfitLockLockPips();
    double pip=PipSize(symbol);
 
-   // The persisted lock counter is only a hint. Older executions may have
-   // credited a sub-minimum SL after a competing candidate won arbitration.
-   // Reconcile that state with the actual live SL every time the trigger is met.
+   // Trigger from executable price movement, not cash PnL divided by pip value.
+   // Net pips are diagnostic because commission and swap can differ.
    bool liveStopSatisfiesPolicy=false;
    if(pip>0.0 && entry>0.0 && currentSL>0.0)
      {
@@ -4899,13 +4934,14 @@ void STB_ProfitProtectionOne(const ulong ticket)
       else if(type==POSITION_TYPE_SELL)
          liveStopSatisfiesPolicy=(policySL>0.0 && currentSL-tolerance<=policySL);
      }
-
-   if(profit>=triggerPips && (locked<lockPips || !liveStopSatisfiesPolicy))
+   if(priceMovePips>=triggerPips && (locked<lockPips || !liveStopSatisfiesPolicy))
      {
       Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
             " symbol=",symbol,
             " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-            " profitPips=",DoubleToString(profit,1),
+            " priceMovePips=",DoubleToString(priceMovePips,1),
+            " netProfitPips=",DoubleToString(netProfitPips,1),
+            " pipSize=",DoubleToString(pip,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
             " triggerPips=",DoubleToString(triggerPips,1),
             " lockPips=",DoubleToString(lockPips,1),
             " lockedPips=",DoubleToString(locked,1),
@@ -4918,15 +4954,15 @@ void STB_ProfitProtectionOne(const ulong ticket)
 /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
-
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
-      return false; // MANUAL_OVERRIDE: auto modify blocked
-
-   if(ticket==0 || !PositionSelectByTicket(ticket))
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return false;
-
-   string symbol=PositionGetString(POSITION_SYMBOL); if(!STB_IsSymbolAllowed(symbol)) return false; if(!IsManagedPosition(ticket)) return false; // P1 writer safety barrier
-   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single position writer
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB MODIFY WAIT: symbol-management lease not owned ticket=",ticket,
+            " symbol=",symbol," chart=",ChartID());
+      return false;
+     }
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
    double tp=PositionGetDouble(POSITION_TP);
@@ -4940,13 +4976,36 @@ void STB_ProfitProtectionOne(const ulong ticket)
      }
 
    if(!IsValidSLForPosition(symbol,type,newSL))
+     {
+      MqlTick invalidTick;
+      SymbolInfoTick(symbol,invalidTick);
+      Print("STB MODIFY WAIT: invalid SL geometry ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " candidateSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " bid=",DoubleToString(invalidTick.bid,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " ask=",DoubleToString(invalidTick.ask,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopsLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL),
+            " freezeLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL));
       return false;
-
+     }
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
+      !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
+      !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
+      !AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
+     {
+      Print("STB MODIFY BLOCKED: trading permissions unavailable ticket=",ticket,
+            " terminal=",TerminalInfoInteger(TERMINAL_TRADE_ALLOWED),
+            " expert=",MQLInfoInteger(MQL_TRADE_ALLOWED),
+            " account=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED),
+            " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT));
+      return false;
+     }
    string gv=ScopedStateName("MODFAIL_"+IntegerToString((long)ticket));
    if(GlobalVariableCheck(gv))
      {
       double lastFail=GlobalVariableGet(gv);
-      if(lastFail>0.0 && (TimeCurrent()-lastFail)<30)
+      if(lastFail>0.0 && (TimeCurrent()-lastFail)<2)
          return false;
      }
 
@@ -5025,6 +5084,11 @@ void STB_ProfitProtectionOne(const ulong ticket)
                        PositionGetDouble(POSITION_SL),
                        PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
+      Print("STB MODIFY REJECTED ticket=",ticket,
+            " symbol=",symbol,
+            " ret=",trade.ResultRetcode()," ",
+            trade.ResultRetcodeDescription(),
+            " requestedSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
      }
        GlobalVariableDel(gv);
@@ -5067,7 +5131,7 @@ void STB_FlushPositionSLProposals()
       bool seen=false;
       for(int j=0;j<i;j++)
          if(g_stbSLQueue[j].ticket==ticket && g_stbSLQueue[j].cycle==g_stbCycleId) { seen=true; break; }
-      if(seen || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket)) continue;
+      if(seen ||  !STB_IsProtectionPosition(ticket)) continue;
       STBSLProposal props[];
       int count=0;
       for(int j=i;j<ArraySize(g_stbSLQueue);j++)
@@ -5090,7 +5154,13 @@ void STB_FlushPositionSLProposals()
          props[propIndex].reason=g_stbSLQueue[j].reason; propIndex++;
         }
       double chosenSL=0.0; int chosenSource=-1;
-      if(count<=0 || !STB_ResolvePositionSL(ticket,props,count,chosenSL,chosenSource)) continue;
+      if(count<=0 || !STB_ResolvePositionSL(ticket,props,count,chosenSL,chosenSource))
+        {
+         Print("STB SL arbitration WAIT: no valid candidate ticket=",ticket,
+               " cycle=",g_stbCycleId,
+               " candidates=",count);
+         continue;
+        }
       string symbol=PositionGetString(POSITION_SYMBOL);
       long side=PositionGetInteger(POSITION_TYPE);
       double entry=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -5270,7 +5340,7 @@ void AutoProfitProtection()
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !IsManagedPosition(ticket))
+      if(ticket==0 || !STB_IsProtectionPosition(ticket))
          continue;
 
       STB_ProfitProtectionOne(ticket);
@@ -5321,17 +5391,9 @@ void ManualSavePlus20()
 //+------------------------------------------------------------------+
 bool TrailPositionByLivePrice(const ulong ticket)
 {
-   if(ticket==0 || !PositionSelectByTicket(ticket))
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return false;
-
-   if(!IsManagedPosition(ticket))
-      return false;
-
-   // Manual authority is terminal for automatic trailing until AUTO is
-   // explicitly enabled again; avoid repeated blocked-write work each tick.
-   if(STB_ManualOverrideIs(ticket))
-      return false;
-
+   // Manual SL/TP edits do not disable automated protection/trailing.
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
@@ -5345,7 +5407,7 @@ bool TrailPositionByLivePrice(const ulong ticket)
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
-   double profit=PositionNetProfitPips(ticket);
+   double profit=STB_PositionPriceMovePips(ticket);
 
    if(profit < InpTrailStartPips)
       return false;
@@ -5776,33 +5838,31 @@ bool CalculateBrokerFallbackSL(const string symbol,
 //+------------------------------------------------------------------+
 bool EnsureInitialSL(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket))
-      return false;
-   if(!IsManagedPosition(ticket))
+   if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return false;
    if(PositionGetDouble(POSITION_SL)>0.0)
       return true;
-
-   // A user override owns the geometry; do not keep retrying to add a stop
-   // the user intentionally removed or has chosen to manage manually.
-   if(STB_ManualOverrideIs(ticket))
-      return false;
-
+   // A live position without SL is automatically repaired; manual edits never
+   // silently opt an open position out of protection.
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
    double candidate=0.0;
-
    if(!CalculateInitialProtectionSL(symbol,type,entry,candidate))
+     {
+      Print("STB INITIAL SL WAIT: unable to calculate valid stop ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " entry=",DoubleToString(entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " pipSize=",DoubleToString(PipSize(symbol),(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopsLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL),
+            " freezeLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL));
       return false;
-
+     }
    if(!STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_INITIAL,"INITIAL"))
       return false;
-
-   if(!PositionSelectByTicket(ticket) ||
-      PositionGetDouble(POSITION_SL)<=0.0)
+   if(!PositionSelectByTicket(ticket) || PositionGetDouble(POSITION_SL)<=0.0)
       return false;
-
    Print("STB initial SL active ticket=",ticket,
          " symbol=",symbol,
          " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
@@ -5810,9 +5870,6 @@ bool EnsureInitialSL(const ulong ticket)
    return true;
   }
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
 void STB_RecordPendingInitialSLFailure(const int stateIdx);
 
 bool EnsureInitialSLForPendingOrder(const ulong ticket)
@@ -6055,7 +6112,7 @@ void ManagePositions()
    {
       ulong ticket=PositionGetTicket(i);
 
-      if(ticket==0 || !IsManagedPosition(ticket))
+      if(ticket==0 || !STB_IsProtectionPosition(ticket))
          continue;
 
       EnsureInitialSL(ticket);
@@ -6070,7 +6127,7 @@ void ManagePositions()
       if(ticket==0)
          continue;
 
-      if(!IsManagedPosition(ticket))
+      if(!STB_IsProtectionPosition(ticket))
          continue;
 
       TrailPositionByLivePrice(ticket);
@@ -8750,10 +8807,24 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
 // this and never run a management engine directly.
 void STB_RunManagementCycle()
   {
-   STB_BeginCycle(); // Blueprint 8/33: fresh per-cycle dedup scope
-   ManagePositions();
-   ManagePendingOrders();
-   STB_PendingTrailProcess();
+   if(g_stbManagementCycleActive)
+     {
+      g_stbManagementCyclePending=true;
+      return;
+     }
+   g_stbManagementCycleActive=true;
+   int pass=0;
+   do
+     {
+      g_stbManagementCyclePending=false;
+      STB_BeginCycle();
+      ManagePositions();
+      ManagePendingOrders();
+      STB_PendingTrailProcess();
+      pass++;
+     }
+   while(g_stbManagementCyclePending && pass<2);
+   g_stbManagementCycleActive=false;
   }
 
 void OnTick()
