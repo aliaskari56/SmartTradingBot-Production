@@ -128,6 +128,13 @@ def main() -> int:
          "IsValidSLForPosition(symbol,side,c)" in source),
         ("automatic profit-lock state is deferred during collection",
          "if(!g_stbCollectingSLProposals || isUserAction)" in source),
+        ("already-satisfied profit lock re-reads live SL before state commit",
+         (lambda body: body.count("PositionSelectByTicket(ticket)") >= 3 and
+          body.count("double liveSL=PositionGetDouble(POSITION_SL);") == 2 and
+          body.count("SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));") == 2)
+          (source[source.find("bool ApplyProfitLock("):source.find("void AutoProfitProtection()",
+             source.find("bool ApplyProfitLock("))]) if "bool ApplyProfitLock(" in source and
+          "void AutoProfitProtection()" in source else False),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
