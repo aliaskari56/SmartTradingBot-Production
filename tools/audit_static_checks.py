@@ -125,6 +125,19 @@ def main() -> int:
              "STB SL request blocked outside arbitration cycle",
              "if(g_stbCollectingSLProposals)",
              "if(isUserAction)"))),
+        ("candidate producers do not call the broker modify bridge directly",
+         all((lambda a, b, need_submit:
+              a >= 0 and b > a and
+              "ModifyPositionSL(" not in source[a:b] and
+              (not need_submit or "STB_SubmitPositionSL(" in source[a:b]))
+              )(source.find(start), source.find(end, source.find(start)+len(start)), need)
+             for start, end, need in (
+                 ("bool EnsureInitialSL(", "void STB_RecordPendingInitialSLFailure(", True),
+                 ("bool ApplyProfitLock(", "void AutoProfitProtection(", True),
+                 ("bool TrailPositionByLivePrice(", "void ManagePositions(", True),
+                 ("void STB_ProfitProtectionOne(", "bool ModifyPositionSL(", False)))),
+        ("central SL modify bridge has only synchronous user, initial fallback, and flush call sites",
+         len(re.findall(r"\\bModifyPositionSL\\s*\\(", source)) == 4),
         ("queue allocation failure aborts the incomplete arbitration batch",
          all(token in source for token in (
              "bool g_stbSLCollectionFaulted=false;",
