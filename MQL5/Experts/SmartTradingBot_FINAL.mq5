@@ -3501,11 +3501,20 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
         {
          ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
 
-         // Blueprint 28: no write from transaction intake; initial SL is ensured in the cycle.
+         // Capture terminal-confirmed geometry at first discovery. Without this
+         // baseline, an immediate manual entry/SL/TP edit on a newly created
+         // pending order could be mistaken for an unknown geometry snapshot.
+         if(IsManagedOrder(trans.order))
+           {
+            STB_ExposureEnsure(trans.order,false);
+            STB_GeomStore(trans.order,false,
+                          OrderGetDouble(ORDER_PRICE_OPEN),
+                          OrderGetDouble(ORDER_SL),
+                          OrderGetDouble(ORDER_TP));
 
-         if(orderType==ORDER_TYPE_BUY_STOP ||
-            STB_IsManagedPendingType((long)orderType))
-            STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
+            if(STB_IsManagedPendingType((long)orderType))
+               STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
+           }
         }
 
       return;
