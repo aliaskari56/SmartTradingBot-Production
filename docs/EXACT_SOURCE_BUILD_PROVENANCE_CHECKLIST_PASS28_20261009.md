@@ -1,231 +1,223 @@
-# Exact-Source Build Provenance Checklist — PowerShell / MetaEditor
+# Exact-Source Build Provenance and PowerShell Compile Runbook
 
-Date: 2026-10-09  
-Branch: `audit/expose-cleaned-source-20261009`  
-Status: **PREPARED FOR LOCAL METAEDITOR BUILD; NOT EXECUTED IN THIS ENVIRONMENT**
+Last integrated review: 2026-10-09  
+Branch: audit/expose-cleaned-source-20261009  
+EA source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 
-## Exact source and include identity
+## Frozen source identity for this audit
 
-- Repository: `aliaskari56/SmartTradingBot-Production`
-- Primary source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Current source Git blob: `fdce203d23a08eb4ca2966d4a09719c3e4a89397` (Git blob SHA; not raw-file SHA-256)
-- Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`
-- Observed source size: 304,511 bytes; 9,156 lines
-- Direct/transitive compile closure found by source trace: primary EA, standard `Trade/Trade.mqh` family, and two repository-owned-path STB includes. The STB modules have no further include directives in the inspected source. The resolver now enforces the configured +20-pip lock floor once net profit reaches the +50-pip trigger: weaker competing candidates are skipped while an SL already exists. If an unprotected position has no candidate that can satisfy the floor under current broker geometry, the strongest valid non-profit-lock stop may be applied as an emergency fallback; that fallback is not credited as a successful +20-pip lock.
+- Repository: aliaskari56/SmartTradingBot-Production
+- Reviewed source Git blob: 17059923ccb18e1b717947e4581d9790df26a368 (Git blob ID, **not** raw-file SHA-256)
+- Source-changing commit: d57b5c8c588a9cfa17e6a357d26ba2b87fd00155
+- Static checker blob: 179a6f2d05e75ea0a458ff72d1a2cf87aec0494d
+- Static CI run for this source/checker combination: [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490) — 24 structural checks passed.
+- The previously tracked MQL5/Experts/SmartTradingBot_FINAL.ex5 is **not** proven to correspond to this source. Do not treat it as the output of the build below.
 
-Expected tracked Git blobs used by the automated preflight/build (source, transitive include closure and static checker):
+A fresh local compile has **not** been performed here because MetaEditor is not available in this execution environment. The automation below is designed for the Windows machine that has MetaEditor installed. It does not add a .ps1 file to the repository and does not overwrite the tracked EX5 or compile directly into the terminal's live Experts folder.
 
-| Repository-relative path | Expected Git blob |
-|---|---|
-| `MQL5/Experts/SmartTradingBot_FINAL.mq5` | `fdce203d23a08eb4ca2966d4a09719c3e4a89397` |
-| `MQL5/Include/Trade/Trade.mqh` | `37cfd4c3fc15c6de9aec7390287c95530d3d31cb` |
-| `MQL5/Include/Trade/OrderInfo.mqh` | `104444612778249ff7c0abe2aa6d8f51135cc1ad` |
-| `MQL5/Include/Trade/HistoryOrderInfo.mqh` | `f570b65d72f35061ed45c5bce4dfa62d1093edd5` |
-| `MQL5/Include/Trade/PositionInfo.mqh` | `e4ee0cd008f1fca4daa9a1bcf31aa67dc9c8ed32` |
-| `MQL5/Include/Trade/DealInfo.mqh` | `f8d16df5e3f8a20bb344d81a296f23fd33aec9ca` |
-| `MQL5/Include/Object.mqh` | `2ad6ca61b3335d4947bfafd89a9fa6dcb77abc6f` |
-| `MQL5/Include/StdLibErr.mqh` | `5d96e6dcf235c69272555dc888532ae268c25908` |
-| `MQL5/Include/STB/STB_PendingDistanceResolver.mqh` | `2ed3aaefb3a83b7690409f87a3c7e428c35a895` |
-| `MQL5/Include/STB/STB_PendingTrail.mqh` | `bdb827e7871960f88f5bf9593f1e4efcc7797367` |
-| `tools/audit_static_checks.py` | `7f5092f1663f8a899449a16f3b6588df80c19bef` |
+## What the PowerShell automation does
 
-## Automated PowerShell preflight and compile
+1. Requires the audit branch, exact source Git blob, and a clean working tree.
+2. Confirms the current source's direct STB/Trade includes exist.
+3. Finds MetaEditor or accepts an explicit executable path.
+4. Copies the exact source bytes to an isolated temporary build directory outside the repository; resolves includes from the reviewed MQL5 tree.
+5. Invokes MetaEditor with /compile, /include, and /log.
+6. Prints and preserves the full compiler log plus source SHA-256, EX5 SHA-256, compiler exit code, and output paths.
+7. Fails closed if the compiler log is absent, has no parseable summary, reports errors or warnings, the EX5 is missing, or the process exit code is nonzero. Warnings must be triaged rather than silently accepted.
 
-Run this block **from a PowerShell window opened anywhere inside the Git checkout**. It creates its staging directory, the staged `.mq5`, compiler log and resulting `.ex5` under the user's system `TEMP` directory—not inside the repository. It does not modify, rename or delete repository files. Keep the staged source, full log and EX5 together as build evidence.
+MetaEditor command-line options are documented by MetaQuotes: [Compiling MQL programs in other development environments](https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide). The /include argument is the MQL5 root directory containing the Include folder; the checked source has no #resource directives.
 
-The script deliberately stops if it is on the wrong branch, if any source/include blob differs, if those files have local modifications, if MetaEditor cannot be identified unambiguously, or if the compiler log lacks an interpretable result. A successful script run is compile evidence only; it is not Strategy Tester or release approval.
+## Run it in Windows PowerShell
 
-```powershell
-$ErrorActionPreference = 'Stop'
+Open PowerShell in the local Git checkout or use the full repository path below. Paste this function into the interactive PowerShell session; it is not a new project script or repository file.
 
-# Optional override when MetaEditor is installed in a non-standard directory:
-$MetaEditorExe = $null
+~~~powershell
+function Invoke-STBMetaEditorCompile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RepoRoot,
 
-$RepoRoot = (& git rev-parse --show-toplevel 2>$null)
-if ($LASTEXITCODE -ne 0 -or -not $RepoRoot) {
-    throw 'Run this block inside a Git checkout of SmartTradingBot-Production.'
-}
-$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot.Trim()).Path
-$ExpectedBranch = 'audit/expose-cleaned-source-20261009'
-$Branch = (& git -C $RepoRoot branch --show-current).Trim()
-if ($LASTEXITCODE -ne 0 -or $Branch -ne $ExpectedBranch) {
-    throw "Wrong branch '$Branch'. Expected '$ExpectedBranch'. No compile was started."
-}
-$Head = (& git -C $RepoRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve HEAD.' }
+        [string] $MetaEditorPath
+    )
 
-$ExpectedBlobs = [ordered]@{
-    'MQL5/Experts/SmartTradingBot_FINAL.mq5' = 'fdce203d23a08eb4ca2966d4a09719c3e4a89397'
-    'MQL5/Include/Trade/Trade.mqh' = '37cfd4c3fc15c6de9aec7390287c95530d3d31cb'
-    'MQL5/Include/Trade/OrderInfo.mqh' = '104444612778249ff7c0abe2aa6d8f51135cc1ad'
-    'MQL5/Include/Trade/HistoryOrderInfo.mqh' = 'f570b65d72f35061ed45c5bce4dfa62d1093edd5'
-    'MQL5/Include/Trade/PositionInfo.mqh' = 'e4ee0cd008f1fca4daa9a1bcf31aa67dc9c8ed32'
-    'MQL5/Include/Trade/DealInfo.mqh' = 'f8d16df5e3f8a20bb344d81a296f23fd33aec9ca'
-    'MQL5/Include/Object.mqh' = '2ad6ca61b3335d4947bfafd89a9fa6dcb77abc6f'
-    'MQL5/Include/StdLibErr.mqh' = '5d96e6dcf235c69272555dc888532ae268c25908'
-    'MQL5/Include/STB/STB_PendingDistanceResolver.mqh' = '2ed3aaefb3a83b7690409f87a3c7e428c35a895'
-    'MQL5/Include/STB/STB_PendingTrail.mqh' = 'bdb827e7871960f88f5bf9593f1e4efcc7797367'
-    'tools/audit_static_checks.py' = '7f5092f1663f8a899449a16f3b6588df80c19bef'
-}
+    $ErrorActionPreference = 'Stop'
+    $ExpectedBranch = 'audit/expose-cleaned-source-20261009'
+    $ExpectedBlob = '17059923ccb18e1b717947e4581d9790df26a368'
+    $RelativeSource = 'MQL5/Experts/SmartTradingBot_FINAL.mq5'
 
-foreach ($RelativePath in $ExpectedBlobs.Keys) {
-    $AbsolutePath = Join-Path $RepoRoot ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
-    if (-not (Test-Path -LiteralPath $AbsolutePath -PathType Leaf)) {
-        throw "Required source/include is missing: $RelativePath"
+    $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $SourcePath = Join-Path $RepoRoot 'MQL5\Experts\SmartTradingBot_FINAL.mq5'
+    $MqlRoot = Join-Path $RepoRoot 'MQL5'
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Source not found: $SourcePath"
     }
-    $HeadBlob = (& git -C $RepoRoot rev-parse "HEAD:$RelativePath" 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $HeadBlob.Trim() -ne $ExpectedBlobs[$RelativePath]) {
-        throw "Committed blob mismatch for $RelativePath. No compile was started."
+    if (-not (Test-Path -LiteralPath (Join-Path $MqlRoot 'Include\Trade\Trade.mqh') -PathType Leaf)) {
+        throw 'Expected repository include missing: MQL5\Include\Trade\Trade.mqh'
     }
-    & git -C $RepoRoot diff --quiet HEAD -- $RelativePath
+    if (-not (Test-Path -LiteralPath (Join-Path $MqlRoot 'Include\STB\STB_PendingDistanceResolver.mqh') -PathType Leaf)) {
+        throw 'Expected repository include missing: STB_PendingDistanceResolver.mqh'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $MqlRoot 'Include\STB\STB_PendingTrail.mqh') -PathType Leaf)) {
+        throw 'Expected repository include missing: STB_PendingTrail.mqh'
+    }
+
+    $BranchName = (& git -C $RepoRoot branch --show-current)
     if ($LASTEXITCODE -ne 0) {
-        throw "Working-tree/index modification detected in $RelativePath. No compile was started."
+        throw 'Unable to determine current Git branch. Is Git installed and is this a Git checkout?'
+    }
+    $BranchName = ($BranchName | Out-String).Trim()
+    if ($BranchName -ne $ExpectedBranch) {
+        throw "Wrong branch '$BranchName'. Check out '$ExpectedBranch' before compiling."
+    }
+
+    $ActualBlob = (& git -C $RepoRoot rev-parse "HEAD:$RelativeSource")
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to read the source blob from HEAD.'
+    }
+    $ActualBlob = ($ActualBlob | Out-String).Trim()
+    if ($ActualBlob -ne $ExpectedBlob) {
+        throw "Source blob mismatch. Expected $ExpectedBlob; HEAD contains $ActualBlob."
+    }
+
+    $GitStatus = & git -C $RepoRoot status --porcelain
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to read Git working-tree status.'
+    }
+    if (@($GitStatus).Count -gt 0) {
+        $GitStatus | ForEach-Object { Write-Host $_ }
+        throw 'Working tree is not clean. Commit/stash/review local changes before the provenance build.'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($MetaEditorPath)) {
+        $Command = Get-Command 'metaeditor64.exe' -ErrorAction SilentlyContinue
+        if (-not $Command) {
+            $Command = Get-Command 'metaeditor.exe' -ErrorAction SilentlyContinue
+        }
+        if ($Command) {
+            $MetaEditorPath = $Command.Source
+        } else {
+            $Roots = @(
+                $env:ProgramFiles,
+                [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+            ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+            $Found = @()
+            foreach ($Root in $Roots) {
+                foreach ($Name in @('metaeditor64.exe', 'metaeditor.exe')) {
+                    $Found += Get-ChildItem -LiteralPath $Root -Filter $Name -File -Recurse -ErrorAction SilentlyContinue |
+                              Select-Object -ExpandProperty FullName
+                }
+            }
+            $Found = @($Found | Select-Object -Unique)
+            if ($Found.Count -ne 1) {
+                throw "Could not select exactly one MetaEditor executable (found $($Found.Count)). Call with -MetaEditorPath 'C:\full\path\metaeditor64.exe'."
+            }
+            $MetaEditorPath = $Found[0]
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $MetaEditorPath -PathType Leaf)) {
+        throw "MetaEditor executable not found: $MetaEditorPath"
+    }
+    $MetaEditorPath = (Resolve-Path -LiteralPath $MetaEditorPath).Path
+
+    $SourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
+    $StageRoot = Join-Path ([IO.Path]::GetTempPath()) ('STB_MetaEditor_' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $StageRoot | Out-Null
+
+    $StagedSource = Join-Path $StageRoot 'SmartTradingBot_FINAL.mq5'
+    $StagedLog = Join-Path $StageRoot 'SmartTradingBot_FINAL.log'
+    $StagedEx5 = Join-Path $StageRoot 'SmartTradingBot_FINAL.ex5'
+
+    try {
+        Copy-Item -LiteralPath $SourcePath -Destination $StagedSource
+        $StagedHash = (Get-FileHash -LiteralPath $StagedSource -Algorithm SHA256).Hash
+        if ($StagedHash -ne $SourceHash) {
+            throw 'Staged source SHA-256 differs from the repository source; compile aborted.'
+        }
+
+        $Arguments = ('/compile:"{0}" /include:"{1}" /log' -f $StagedSource, $MqlRoot)
+        $StartedAt = Get-Date
+        $Process = Start-Process -FilePath $MetaEditorPath -ArgumentList $Arguments -Wait -PassThru
+
+        if (-not (Test-Path -LiteralPath $StagedLog -PathType Leaf)) {
+            throw "MetaEditor did not produce the expected log. Exit code: $($Process.ExitCode). Stage retained at: $StageRoot"
+        }
+
+        $LogText = Get-Content -LiteralPath $StagedLog -Raw
+        Write-Host ([Environment]::NewLine + '========== COMPLETE METAEDITOR LOG ==========') -ForegroundColor Cyan
+        Write-Output $LogText
+        Write-Host '========== END METAEDITOR LOG ==========' -ForegroundColor Cyan
+
+        $SummaryMatches = [regex]::Matches(
+            $LogText,
+            '(?i)(\d+)\s+errors?,\s*(\d+)\s+warnings?'
+        )
+        if ($SummaryMatches.Count -eq 0) {
+            throw "No compiler summary could be parsed. Review the raw log: $StagedLog"
+        }
+
+        $Summary = $SummaryMatches[$SummaryMatches.Count - 1]
+        $ErrorCount = [int]$Summary.Groups[1].Value
+        $WarningCount = [int]$Summary.Groups[2].Value
+        if (Test-Path -LiteralPath $StagedEx5 -PathType Leaf) {
+            $Ex5Hash = (Get-FileHash -LiteralPath $StagedEx5 -Algorithm SHA256).Hash
+        } else {
+            $Ex5Hash = 'MISSING'
+        }
+
+        $Result = [pscustomobject]@{
+            Status             = if ($Process.ExitCode -eq 0 -and $ErrorCount -eq 0 -and $WarningCount -eq 0 -and $Ex5Hash -ne 'MISSING') { 'PASS' } else { 'BLOCKED' }
+            Branch             = $BranchName
+            SourceGitBlob      = $ActualBlob
+            SourceSHA256       = $SourceHash
+            MetaEditorPath     = $MetaEditorPath
+            MetaEditorExitCode = $Process.ExitCode
+            CompilerErrors     = $ErrorCount
+            CompilerWarnings   = $WarningCount
+            EX5SHA256          = $Ex5Hash
+            StageDirectory     = $StageRoot
+            CompilerLog        = $StagedLog
+            StartedAt          = $StartedAt
+            FinishedAt         = Get-Date
+        }
+        $Result | Format-List | Out-String | Write-Host
+
+        if ($Result.Status -ne 'PASS') {
+            throw 'Build is BLOCKED: require exit code 0, a generated EX5, and a compiler summary of 0 errors / 0 warnings. Preserve the stage directory for diagnosis.'
+        }
+
+        Write-Host 'Build PASS. This is a compile check only; it does NOT validate Strategy Tester, broker behavior, profitability, or release readiness.' -ForegroundColor Green
+        return $Result
+    }
+    catch {
+        Write-Host "BUILD BLOCKED: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Staged source/log/EX5 (if generated) retained for review: $StageRoot" -ForegroundColor Yellow
+        throw
     }
 }
+~~~
 
-$SourcePath = Join-Path $RepoRoot 'MQL5/Experts/SmartTradingBot_FINAL.mq5'
-$IncludeRoot = Join-Path $RepoRoot 'MQL5'
-$CheckerPath = Join-Path $RepoRoot 'tools/audit_static_checks.py'
-$SourceRawHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
+Call the function with the actual local checkout path and, if automatic discovery finds zero/multiple installations, the exact MetaEditor executable path:
 
-# Require the pinned static guardrail to pass before launching MetaEditor.
-$PythonExe = $null
-$PythonPrefixArgs = @()
-$PythonCmd = Get-Command 'python' -ErrorAction SilentlyContinue
-if ($PythonCmd) {
-    $PythonExe = $PythonCmd.Source
-} else {
-    $PythonCmd = Get-Command 'py' -ErrorAction SilentlyContinue
-    if ($PythonCmd) {
-        $PythonExe = $PythonCmd.Source
-        $PythonPrefixArgs = @('-3')
-    }
-}
-if (-not $PythonExe) {
-    throw 'Python 3 is required for the pinned static preflight. No compile was started.'
-}
-& $PythonExe @PythonPrefixArgs $CheckerPath $SourcePath
-if ($LASTEXITCODE -ne 0) {
-    throw "Static guardrails failed (exit $LASTEXITCODE). No compile was started."
-}
+~~~powershell
+Invoke-STBMetaEditorCompile -RepoRoot 'C:\path\to\SmartTradingBot-Production' -MetaEditorPath 'C:\path\to\metaeditor64.exe'
+~~~
 
-# Capture raw SHA-256 for every pinned input file, in addition to Git blob IDs.
-$InputRawHashes = [ordered]@{}
-foreach ($RelativePath in $ExpectedBlobs.Keys) {
-    $AbsolutePath = Join-Path $RepoRoot ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
-    $InputRawHashes[$RelativePath] = (Get-FileHash -LiteralPath $AbsolutePath -Algorithm SHA256).Hash
-}
+Use the exact directory shown by your installation. Do not guess a terminal hash or copy the output into the live MQL5\Experts folder as part of this compile check. After a PASS, the generated EX5 and raw log are retained under the reported OS temporary stage directory for inspection; no repository EX5 is overwritten. Delete that temporary directory manually only after preserving the evidence you need.
 
-if (-not $MetaEditorExe) {
-    $OnPath = Get-Command 'metaeditor64.exe' -ErrorAction SilentlyContinue
-    if ($OnPath) { $MetaEditorExe = $OnPath.Source }
-}
-if (-not $MetaEditorExe) {
-    $SearchRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) |
-        Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) }
-    $FoundEditors = @()
-    foreach ($SearchRoot in $SearchRoots) {
-        $FoundEditors += Get-ChildItem -LiteralPath $SearchRoot -Filter 'metaeditor64.exe' -File -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
-    }
-    $FoundEditors = @($FoundEditors | Sort-Object -Unique)
-    if ($FoundEditors.Count -eq 1) {
-        $MetaEditorExe = $FoundEditors[0]
-    } elseif ($FoundEditors.Count -gt 1) {
-        $FoundEditors | ForEach-Object { Write-Host $_ }
-        throw 'More than one MetaEditor was found. Set $MetaEditorExe explicitly, then rerun.'
-    }
-}
-if (-not $MetaEditorExe -or -not (Test-Path -LiteralPath $MetaEditorExe -PathType Leaf)) {
-    throw 'MetaEditor 64-bit was not found. Set $MetaEditorExe to the full path of metaeditor64.exe.'
-}
-$MetaEditorExe = (Resolve-Path -LiteralPath $MetaEditorExe).Path
-$EditorVersion = (Get-Item -LiteralPath $MetaEditorExe).VersionInfo.FileVersion
+## Interpreting the result
 
-$BuildRoot = Join-Path $env:TEMP ('STB-MetaEditor-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $BuildRoot | Out-Null
-$StagedSource = Join-Path $BuildRoot 'SmartTradingBot_FINAL.mq5'
-$LogPath = Join-Path $BuildRoot 'SmartTradingBot_FINAL.log'
-$Ex5Path = Join-Path $BuildRoot 'SmartTradingBot_FINAL.ex5'
-Copy-Item -LiteralPath $SourcePath -Destination $StagedSource
+- PASS means the specified MetaEditor returned exit code zero, the log summary reports zero errors and zero warnings, and a new EX5 exists in the isolated staging directory.
+- BLOCKED means the run cannot be accepted as a clean build. Inspect the preserved raw log and toolchain path; do not infer success from an EX5 file alone.
+- This is a local Windows procedure; it was **not executed from this assistant environment**.
+- A successful compile does not establish broker compatibility, runtime safety, strategy performance, or release readiness.
 
-$StagedHash = (Get-FileHash -LiteralPath $StagedSource -Algorithm SHA256).Hash
-if ($StagedHash -ne $SourceRawHash) {
-    throw 'Staged-source SHA-256 mismatch; compile stopped.'
-}
+## Evidence still required after a successful compile
 
-# Official MetaEditor CLI: /compile, /include (custom MQL5 root), /log.
-$ArgumentLine = '/compile:"' + $StagedSource + '" /include:"' + $IncludeRoot + '" /log'
-$Process = Start-Process -FilePath $MetaEditorExe -ArgumentList $ArgumentLine -Wait -PassThru
-
-for ($Attempt = 0; $Attempt -lt 30 -and -not (Test-Path -LiteralPath $LogPath -PathType Leaf); $Attempt++) {
-    Start-Sleep -Seconds 1
-}
-if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
-    throw "MetaEditor produced no compiler log. Process exit code: $($Process.ExitCode). Staging path: $BuildRoot"
-}
-$LogText = Get-Content -LiteralPath $LogPath -Raw
-$Summary = [regex]::Match($LogText, '(?im)^\s*Result:\s*(\d+)\s+errors?,\s*(\d+)\s+warnings?\b')
-if (-not $Summary.Success) {
-    Write-Host $LogText
-    throw "Compiler result could not be parsed; manual log review required. Staging path: $BuildRoot"
-}
-$ErrorCount = [int]$Summary.Groups[1].Value
-$WarningCount = [int]$Summary.Groups[2].Value
-$LogRawHash = (Get-FileHash -LiteralPath $LogPath -Algorithm SHA256).Hash
-$Ex5Exists = Test-Path -LiteralPath $Ex5Path -PathType Leaf
-$Ex5Hash = if ($Ex5Exists) { (Get-FileHash -LiteralPath $Ex5Path -Algorithm SHA256).Hash } else { 'NOT PRODUCED' }
-
-Write-Host '=== SMARTTRADINGBOT EXACT-SOURCE BUILD EVIDENCE ==='
-Write-Host "Branch:              $Branch"
-Write-Host "Repository HEAD:     $Head"
-Write-Host "Source Git blob:     $($ExpectedBlobs['MQL5/Experts/SmartTradingBot_FINAL.mq5'])"
-Write-Host "Source raw SHA-256:  $SourceRawHash"
-foreach ($RelativePath in $InputRawHashes.Keys) {
-    Write-Host "Input SHA-256 [$RelativePath]: $($InputRawHashes[$RelativePath])"
-}
-Write-Host "MetaEditor:          $MetaEditorExe"
-Write-Host "MetaEditor version:  $EditorVersion"
-Write-Host "Compiler exit code:  $($Process.ExitCode)"
-Write-Host "Compiler summary:    $($Summary.Value.Trim())"
-Write-Host "Compiler log SHA-256: $LogRawHash"
-Write-Host "EX5 SHA-256:         $Ex5Hash"
-Write-Host "Full compiler log:   $LogPath"
-Write-Host "Build staging path:  $BuildRoot"
-if ($WarningCount -gt 0) {
-    Write-Warning "$WarningCount compiler warning(s) need explicit review; retain the full log."
-}
-if ($Process.ExitCode -ne 0 -or $ErrorCount -ne 0 -or -not $Ex5Exists) {
-    Write-Host $LogText
-    throw 'BUILD FAIL/BLOCKED. Do not send this EX5 as an accepted build.'
-}
-Write-Host 'COMPILE RESULT: PASS (compile only; warnings and runtime acceptance still require review).'
-```
-
-The script uses MetaEditor's documented command-line `/compile`, `/include`, and `/log` options. It checks the compiler summary and EX5 existence, and reports both Git blob identity and raw-file SHA-256. If this runs on Windows with the exact checkout and a working MetaEditor installation, preserve the complete console output and the staging directory. Do not copy the EX5 into the repository or label it production-approved solely because compilation passed.
-
-## Evidence table
-
-| Evidence ID | Required item | Current status |
-|---|---|---|
-| BP-01 | Exact branch/commit and checked-in source/include hashes | EXPECTED BLOBS DEFINED; LOCAL CHECK NOT RUN |
-| BP-02 | Working-tree equality for all compile inputs | NOT RUN |
-| BP-03 | Raw source SHA-256 | NOT RUN |
-| BP-04 | MetaEditor executable and file version | NOT RUN |
-| BP-05 | Exact invocation and compiler exit code | COMMAND PREPARED; NOT RUN |
-| BP-06 | Complete compiler log | NOT RUN |
-| BP-07 | EX5 raw SHA-256 | NOT RUN |
-| BP-08 | Warning review and reviewer disposition | NOT RUN |
-| BP-09 | Strategy Tester and demo acceptance | NOT RUN |
-| BP-10 | Source-to-EX5 custody/reproducibility | NOT RUN |
-
-## Interpretation / gate
-
-- Git blob SHA and raw SHA-256 are different identifiers and must not be substituted for one another.
-- A tracked or pre-existing EX5 does not establish that it was built from this source.
-- Do not infer success from the PowerShell process exit code alone; verify the parsed log result and preserved EX5 hash.
-- The script runs the pinned 26-check static audit before compiling and reports raw SHA-256 values for each pinned source/include/checker input and the compiler log.
-- Warnings must be reviewed even if the compiler produces EX5.
-- Compilation does not establish trading correctness, broker compatibility or profitability.
-
-**Build gate: BLOCKED / NOT VERIFIED until the PowerShell preflight/compile actually runs on Windows and the complete evidence is reviewed.** MetaEditor, Strategy Tester, terminal/demo tests and an independent release review are not available in this execution environment.
+- Save the exact commit, source raw SHA-256, Git blob, MetaEditor/compiler version, full log, process exit code, and generated EX5 raw SHA-256.
+- Run the applicable Strategy Tester acceptance scenarios, followed by demo-account lifecycle cases.
+- Complete include/package inventory, attribution/license review, and independent code review.
+- Keep the release decision **BLOCKED / NOT VERIFIED** until these gates are evidenced.
