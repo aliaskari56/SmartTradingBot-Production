@@ -311,6 +311,10 @@ string STB_AP_Key(const string symbol,
               (direction>0 ? "B":"S")+"|"+
               scope+"|"+(string)profile;
 
+   // Do not read or mutate live adaptive statistics from Strategy Tester.
+   if(MQLInfoInteger(MQL_TESTER))
+      raw+="|TESTER";
+
    return "STB_AP2_"+(string)STB_AP_Hash(raw);
   }
 
@@ -3468,6 +3472,8 @@ string ScopedStateName(const string purpose)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
               (string)InpMagic+"|"+purpose;
+   if(MQLInfoInteger(MQL_TESTER))
+      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
@@ -3478,6 +3484,8 @@ string ScopedSymbolStateName(const string purpose,const string symbol)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
               (string)InpMagic+"|"+purpose+"|"+symbol;
+   if(MQLInfoInteger(MQL_TESTER))
+      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
@@ -4267,7 +4275,7 @@ string STB_ExposureSymbolOf(const ulong ticket)
 
 string STB_OverrideLegacyKey(const ulong ticket,const string symbol)
   {
-   if(ticket==0 || symbol=="")
+   if(ticket==0 || symbol=="" || MQLInfoInteger(MQL_TESTER))
       return "";
    // Legacy key format retained only for safe migration from older builds.
    return g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
@@ -4367,7 +4375,9 @@ void STB_OverridePersistPrune(const bool all)
      {
       string name=GlobalVariableName(i);
       bool compact=(StringFind(name,compactPref)==0);
-      bool legacy=(StringFind(name,legacyPref)==0);
+      // Tester may prune its scoped records but never LIVE legacy keys.
+      bool legacy=(!MQLInfoInteger(MQL_TESTER) &&
+                   StringFind(name,legacyPref)==0);
       if(!compact && !legacy)
          continue;
 
@@ -5498,6 +5508,9 @@ void STB_LeaseTrackSymbol(const string symbol)
 string STB_MgmtScopeKey(const string purpose,const string symbol)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|MGMT|"+purpose+"|"+symbol;
+   // A tester must not claim or release a live chart's per-symbol lease.
+   if(MQLInfoInteger(MQL_TESTER))
+      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
