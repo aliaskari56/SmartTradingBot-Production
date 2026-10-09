@@ -195,6 +195,17 @@ def main() -> int:
           body.index("if(actualSL<=0.0)") < body.index("if(hasProfitCandidate)") and
           "STB SL arbitration verification failed: position has no SL" in body)
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
+        ("partial exits preserve SL-lock state; full close and reversal clear it before magic filtering",
+         (lambda body: bool(body) and
+          body.find("if(entryType==DEAL_ENTRY_OUT") >= 0 and
+          body.find("if(entryType==DEAL_ENTRY_OUT") < body.find("if(magic!=(long)InpMagic)") and
+          "bool positionRemains=PositionSelectByTicket(closedTicket);" in body and
+          "bool exposureReversed=(entryType==DEAL_ENTRY_INOUT);" in body and
+          "if(exposureReversed || !positionRemains)" in body and
+          body.find("if(exposureReversed || !positionRemains)") <
+              body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
+              body.find("if(magic!=(long)InpMagic)"))
+          (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
