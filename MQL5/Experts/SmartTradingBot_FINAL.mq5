@@ -4247,6 +4247,28 @@ bool STB_OverridePersistOn(const ulong ticket,const string symbol)
    return false;
   }
 
+// Keep an absent ticket's state briefly so a delayed DEAL_ADD transaction
+// can transfer manual authority from a filled pending ticket to its position.
+// Cancelled/orphaned tickets are still pruned once this bounded grace expires.
+#define STB_EXPOSURE_ORPHAN_GRACE_SEC 120
+bool STB_ExposureOrphanGraceActive(const ulong ticket,const datetime now)
+  {
+   for(int i=0;i<ArraySize(g_stbExposure);i++)
+     {
+      if(g_stbExposure[i].ticket!=ticket)
+         continue;
+
+      datetime seen=g_stbExposure[i].lastSeen;
+      if(seen<=0)
+         return false;
+
+      long age=(long)(now-seen);
+      return (age>=0 && age<STB_EXPOSURE_ORPHAN_GRACE_SEC);
+     }
+
+   return false;
+  }
+
 // Purge persisted overrides. all=true removes every stored key (AUTO clear);
 // all=false removes only tickets that no longer exist in the terminal.
 void STB_OverridePersistPrune(const bool all)
@@ -4286,7 +4308,8 @@ void STB_OverridePersistPrune(const bool all)
       if(ticket==0)
          continue;
 
-      if(!PositionSelectByTicket(ticket) && !OrderSelect(ticket))
+      if(!PositionSelectByTicket(ticket) && !OrderSelect(ticket) &&
+         !STB_ExposureOrphanGraceActive(ticket,TimeCurrent()))
          GlobalVariableDel(name);
      }
   }
@@ -4408,8 +4431,15 @@ void STB_GeomPrune()
                   ? PositionSelectByTicket(g_stbExposure[i].ticket)
                   : OrderSelect(g_stbExposure[i].ticket));
       if(!alive)
-         STB_OverridePersistDel(g_stbExposure[i].ticket,g_stbExposure[i].symbol); // drop stale persisted override
-      if(!alive) ArrayRemove(g_stbExposure,i,1);
+        {
+         // A pending order may have filled just before its DEAL_ADD callback.
+         // Preserve its override record long enough for intake to transfer it.
+         if(STB_ExposureOrphanGraceActive(g_stbExposure[i].ticket,TimeCurrent()))
+            continue;
+
+         STB_OverridePersistDel(g_stbExposure[i].ticket,g_stbExposure[i].symbol);
+         ArrayRemove(g_stbExposure,i,1);
+        }
      }
   }
 
