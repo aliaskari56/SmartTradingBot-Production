@@ -9760,7 +9760,11 @@ void OnChartEvent(const int id,
      {
       g_autoTrading=!g_autoTrading;
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO clears runtime + persistent override
+
+      // Manual overrides are released ONLY when AUTO is explicitly enabled.
+      // Turning AUTO OFF must not erase a user's persisted per-ticket authority.
+      if(g_autoTrading)
+         STB_ManualOverrideClearAll();
 
       g_dashboardLastAction=(g_autoTrading ?
                              "AUTO TRADING ENABLED" :
