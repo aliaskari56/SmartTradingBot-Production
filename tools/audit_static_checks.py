@@ -211,6 +211,21 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic)"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
+        ("resolver enforces active profit-lock floor and deterministic no-SL fallback",
+         all(token in source for token in (
+             "decisionNetProfitPips=PositionNetProfitPips(ticket);",
+             "decisionNetProfitPips>=STB_ProfitLockTriggerPips()",
+             "meetsProfitLockFloor",
+             "currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION",
+             "if(!found && unprotectedFallbackFound)",
+             "props[i].source<unprotectedFallbackSource"))),
+        ("profit-lock state is committed only when the actual SL satisfies the lock target",
+         (lambda body: bool(body) and
+          "double lockTargetSL=" in body and
+          "bool lockTargetConfirmed=" in body and
+          "if(lockTargetConfirmed)" in body and
+          body.find("if(lockTargetConfirmed)") < body.find("SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));"))
+          (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
