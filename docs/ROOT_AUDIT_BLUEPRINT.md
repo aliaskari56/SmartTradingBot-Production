@@ -673,3 +673,47 @@ The foundation may be marked **documentarily complete** only when:
 6. A reviewer can trace each architectural requirement to its component and planned evidence in both directions.
 
 This gate only completes the **architecture/documentation foundation**. It does not mean the source is refactored, compiled, tested, release-ready, or suitable for any real-world financial use. Those claims require separate evidence and are outside this documentation-only update.
+
+
+## Foundation follow-through — traceability and closure register (2026-10-09)
+
+This register connects the foundation requirements to logical ownership and the evidence still needed. It is intentionally an architecture/documentation artifact, not a change to operational behavior.
+
+### Requirement-to-component traceability
+
+| Requirement | Logical owner(s) | Evidence expected | Current evidence status | Closure rule |
+|---|---|---|---|---|
+| FND-001 responsibility and mutable-state ownership | H0, H1–H9 | Responsibility and state-owner inventory | Partial: ten logical houses documented; implementation ownership not fully mapped | Every mutable state has one named owner; exceptions documented |
+| FND-002 canonical shared definitions | H0 | Shared-type and duplicate-definition review | Planned | Canonical definition and documented exceptions identified |
+| FND-003 allowed dependency direction | H0, H1–H9 | Source-backed dependency graph | Planned | No unexplained cycle or prohibited dependency remains |
+| FND-004 observed vs cached/proposed/confirmed state | H5, H9 | State vocabulary and transition model | Target contract documented; source conformance unknown | Each state transition has source and evidence |
+| FND-005 mutation boundary and authorization contract | H4, H5, H7 | Boundary inventory, caller map, negative-path review | Open: previously identified authorization-boundary gap | Every relevant path reviewed; no implicit authorization assumptions |
+| FND-006 documented component interfaces | H0, all houses | Interface register and compatibility rules | Partial: target interfaces described | Producers, consumers, schema, errors and ownership specified |
+| FND-007 duplicate/out-of-order event tolerance | H9, H5 | Reconciliation scenarios and test records | Planned; no runtime evidence | Recorded tests show convergence and no unintended duplicate effect |
+| FND-008 restart/reconnect recovery | H5, H9 | Recovery design and controlled test records | Planned; no runtime evidence | Recovery result is reconciled against authoritative observation |
+| FND-009 explicit uncertain/error outcomes | H0, H4, H9 | Result-state contract and negative-path evidence | Target vocabulary documented; source mapping incomplete | Every relevant caller handles non-success and unknown states explicitly |
+| FND-010 bidirectional requirement/evidence traceability | Audit process | This register plus source/test references | Partial: foundation IDs mapped here; code/test links remain incomplete | No orphan requirement and no untracked architecture claim |
+| FND-011 UI separation from policy/state ownership | H8, H0 | UI-to-core dependency and call-path review | Planned | UI uses documented interfaces and does not become a second authority |
+| FND-012 change-impact discipline | Audit process | Change checklist and per-change evidence | Process proposed; not validated against future changes | Every change records affected requirements, components, tests and risks |
+
+### Component inventory completion checklist
+
+For each of H0–H9, the source review must eventually record:
+- files/functions that appear to belong to the logical house;
+- state read, state written, and state owned;
+- upstream dependencies and downstream consumers;
+- externally visible side effects, if any;
+- error/unknown handling;
+- evidence source and review status;
+- unresolved ownership or dependency questions.
+
+The inventory is not complete merely because every house has a description. Each row needs a source reference and an evidence status. Do not infer implementation from the target architecture.
+
+### Foundation decision
+
+**Documentation baseline:** established and expanded.
+**Source-to-architecture conformance:** incomplete.
+**Build/runtime/test evidence:** not established in this work.
+**Foundation status:** *architecture/documentation baseline available; full foundation acceptance pending source traceability and independent evidence review.*
+
+This status is deliberately conservative. It prevents a documentation update from being mistaken for implemented or verified behavior.
