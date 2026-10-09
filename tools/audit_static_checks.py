@@ -172,9 +172,15 @@ def main() -> int:
          source.count("STB_FlushPositionSLProposals();") == 1 and
          "g_stbCollectingSLProposals=true;" in source and
          source.index("g_stbCollectingSLProposals=true;") < source.index("STB_FlushPositionSLProposals();")),
-        ("resolver has deterministic source tie-break and revalidates SL",
+        ("resolver uses one shared tick snapshot for candidate validity",
+         all(token in source for token in (
+             "MqlTick decisionTick;",
+             "STB_IsValidSLForDecisionSnapshot(side,c,decisionTick,point,stopsLevel,freezeLevel)",
+             "return sl<tick.bid && (tick.bid-sl)>=minimumDistance",
+             "return sl>tick.ask && (sl-tick.ask)>=minimumDistance"))),
+        ("resolver has deterministic source tie-break and revalidates selected SL",
          "props[i].source<finalSource" in source and
-         "IsValidSLForPosition(symbol,side,c)" in source),
+         "!IsValidSLForPosition(symbol,side,finalSL)" in source),
         ("automatic profit-lock state is deferred during collection",
          "if(!g_stbCollectingSLProposals || isUserAction)" in source),
         ("already-satisfied profit lock re-reads live SL before state commit",
