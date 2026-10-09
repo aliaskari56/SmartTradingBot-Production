@@ -14,9 +14,9 @@ The audit branch now collects the automatic candidates generated in `ManagePosit
 ## 2. Current implementation
 
 Source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
-Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7`  
-Latest source-changing commit: `a901d47128c82af4789edb4b825b73167373f3e2`  
-Static-checker update: `6d63ff904b0d376159e17ee0d5507a2838ce635b`
+Current source blob SHA (Git blob identifier, not a raw-file SHA-256): `fdce203d23a08eb4ca2966d4a09719c3e4a89397`  
+Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`  
+Static-checker update: `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`
 
 The source implementation includes these controls:
 
@@ -26,11 +26,11 @@ The source implementation includes these controls:
 4. **Single central write.** The automatic batch flushes once after initial protection, profit protection, and trailing have generated their proposals. The selected change still passes through the existing modify bridge, which rechecks live position/TP state, ownership, manual override, current SL, broker constraints, retcodes, and terminal state.
 5. **No silent partial batch on allocation failure.** If the queue itself cannot grow, the cycle aborts the automatic batch rather than arbitrating incomplete input. If the temporary per-ticket proposal array cannot hold the full set, that ticket is skipped and the failure is logged.
 6. **No automatic bypass outside the cycle.** Non-initial automatic requests are rejected when collection is inactive. Two deliberate synchronous paths remain: explicit user SAVE, and initial protective SL for a newly-created position before the next scheduled management cycle. The latter is a lifecycle exception; it is not evidence of same-cycle arbitration for that pre-cycle event.
-7. **Confirmed lock state.** Automatic profit-lock bookkeeping is deferred while candidates are collected. Existing SL that already satisfies a lock is re-read before state is credited. The flush rejects a missing terminal SL before it can commit profit-lock bookkeeping or log arbitration as confirmed. Partial exit handling preserves lock state while the position remains and clears it on full close/reversal. Server-expiry deletion additionally rechecks caller source, managed-symbol scope and the verified symbol lease at the central writer boundary. Close-deal cleanup also preserves locked-pips state during partial exits and clears it only on a full close or reversal, including close deals whose magic differs from this EA.
+7. **Confirmed lock state.** Automatic profit-lock bookkeeping is deferred while candidates are collected. Existing SL that already satisfies a lock is re-read before state is credited. The flush rejects a missing terminal SL before it can commit profit-lock bookkeeping or log arbitration as confirmed. Partial exit handling preserves lock state while the position remains and clears it on full close/reversal. Server-expiry deletion additionally rechecks caller source, managed-symbol scope and the verified symbol lease at the central writer boundary. Close-deal cleanup also preserves locked-pips state during partial exits and clears it only on a full close or reversal, including close deals whose magic differs from this EA. The resolver also enforces the normalized +20-pip lock target after net profit reaches +50 pips: weaker candidates cannot replace an existing SL. If an unprotected position has no compliant candidate because broker geometry prevents the lock, the strongest valid non-profit-lock proposal may be used only as an emergency stop, and is not credited as a completed +20-pip lock.
 
 ## 3. Static verification evidence
 
-GitHub Actions run [37938088631](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37938088631) completed with **success** on checker commit `6d63ff904b0d376159e17ee0d5507a2838ce635b`. Its log reports 24 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
+GitHub Actions run [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its log reports 26 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
 
 This is source-level structural evidence only. It does not execute the MQL resolver or prove permutation-independent runtime behavior.
 
@@ -40,6 +40,7 @@ This is source-level structural evidence only. It does not execute the MQL resol
 - BUY and SELL monotonicity with and without an existing SL.
 - Initial protection plus trailing, and profit protection plus trailing, during one management cycle.
 - Equal-price ties, invalid candidates, changing ticks, stop/freeze levels, and tick-size boundaries.
+- Active +50/+20 lock-floor contention when stop/freeze constraints invalidate the lock target; verify existing SL is not weakened and state is not credited unless the actual SL meets the target, including the no-SL emergency-stop case.
 - TP changes between collection and submission; broker rejection, no-changes, timeout, and delayed transaction results.
 - Manual override, user SAVE, restart/reconnect, netting/hedging, and multi-instance ownership.
 - Exact-source MetaEditor compilation with complete compiler log and reviewed warnings.
