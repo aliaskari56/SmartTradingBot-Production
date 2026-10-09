@@ -964,3 +964,22 @@ No SmartTradingBot executable source was changed. The scanner snippet was not ad
 Added `docs/SELECTIVE_SCANNER_REUSE_DECISION_PASS23_20261009.md`. Decision: do not wholesale-port or replace the EA with BrokerStructureScanner. Static inspection found existing swing collection, H4 structure trend, M15 structure detection, local ATR, symbol-selection helpers, and timer-driven lifecycle, so duplicate scanner engines would create redundant definitions and timing/state ownership. The useful patterns to consider are closed-bar confirmation, explicit validity/freshness, timestamped multi-timeframe diagnostics, and bounded work per cycle. ADX/H1/M5 summary remains a possible shadow-only enhancement, not an entry gate. The plan defines six evidence gates before executable changes.
 
 No executable source changed. Build, behavioral tests, benchmark, Strategy Tester, demo evaluation, and independent review were not run in this pass. Overall status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`.
+
+
+## Pass 24 — Swing/structure parity trace (2026-10-09)
+
+Added `docs/SWING_STRUCTURE_PARITY_TRACE_PASS24_20261009.md`. Compared the EA's pivot tie handling, closed-H4 trend reference, structure-break scan, local ATR calculation, and rate/symbol selection behavior with the supplied scanner. The tie-policy difference is real but is not classified as a defect without deterministic regression evidence. `GetRates` may call `SymbolSelect(symbol,true)`, which can change Market Watch state. No executable source changed; no compile or runtime tests were run.
+
+## Pass 25 — Final root-cause audit
+
+Added `docs/FINAL_ROOT_CAUSE_AUDIT_PASS25_20261009.md`. Consolidated root-cause groups: exact-source build/EX5 provenance, order-delete authorization vs rollback, SL/TP snapshot freshness and proposal arbitration, exposure-guard coverage, event/restart/pending-trail behavior, dependency provenance/licensing, and scanner/EA pivot-policy parity. The report's release decision is `BLOCKED / NOT VERIFIED`; the audit status remains `DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`. No executable source changed, and compile, Strategy Tester, demo, benchmark, and independent review were not performed.
+
+## Pass 26 — Order-write boundary trace
+
+Added `docs/ORDER_WRITE_BOUNDARY_TRACE_PASS26_20261009.md`. Static trace notes that the central delete writer verifies server response/ticket disappearance but does not visibly enforce a verified symbol lease at the writer boundary; rollback and normal cleanup require distinct, tested authorization semantics. `ModifyPositionSL` writes both SL and TP using a snapshot, so stale TP overwrite remains a concurrency risk to test, not a proven runtime incident. `STB_SubmitPositionSL` resolves a one-element proposal list; simultaneous arbitration among all SL sources is not established. Explicit `SYMBOL_VOLUME_LIMIT` coverage was found in the setup path but not clearly in inspected manual pending/OneClickHedge paths. `OnTick` and `OnTimer` both invoke the management cycle, while transaction intake is event-driven; idempotence and recovery need runtime tests.
+
+The source was re-fetched and its blob SHA remained `955d9961e3da1d855a162ac6f4acf7bf7fc852b8` (8,665 lines). Commit CI statuses were empty; this is not build evidence. No executable source changed, `main` remains untouched, and no compile/runtime/Strategy Tester/demo test or independent review was performed.
+
+## Current audit decision
+
+`DOCUMENTATION PASS COMPLETE — TECHNICAL AUDIT OPEN`; release remains `BLOCKED / NOT VERIFIED`. Next step is not an untested code patch: obtain an exact-source MetaEditor build with raw logs and hash provenance, complete dependency provenance/licensing review, then run the deterministic order-write, exposure, event-ordering, restart/recovery, Strategy Tester and demo acceptance matrix. Close each blocker only against recorded evidence.
