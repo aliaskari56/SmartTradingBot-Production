@@ -13,9 +13,9 @@ This report records source changes, not a claim of broker-tested correctness or 
 ## Source under review
 
 - File: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Post-remediation Git blob SHA: `7b1c512dbf02951a063f54f3abaa342b13727b11`
+- Post-remediation Git blob SHA: `d53f58dc514cb449c80997023275321c166e0d4c`
 - Branch: `audit/expose-cleaned-source-20261009`
-- Latest source-changing commit: `e160520609488a045ecbc10943cc79a28e635855`
+- Latest source-changing commit: `1dc1234cbfe414f5dd0678a4322894f863ab53e8`
 
 ## Implemented changes
 
@@ -37,7 +37,7 @@ The guard uses `DirectionExposureVolume()`, which includes same-symbol direction
 The single `trade.OrderDelete()` writer now:
 
 - rejects non-pending order types;
-- allows rollback only for recognized creator sources, an `STB|` comment, and a fresh order ticket (within the 120-second rollback window);
+- allows rollback only when the creator source matches the order's tag family (`STB|B|` / `STB|S|` for `PlaceSetup`, `STB|M|` for manual stop/limit, `STB|HEDGE|` for `OneClickHedge`) and the ticket is fresh (within the 120-second rollback window);
 - independently revalidates server expiration or the configured/profile-derived local-age expiration at the delete boundary;
 - blocks deletion requests that do not satisfy the reason/source policy and logs the block;
 - retains the existing server-retcode and post-delete disappearance checks.
@@ -61,9 +61,10 @@ Checks were run against the fetched post-remediation source:
 - `trade.PositionModify(...)` write sites: **1**.
 - Shared directional-volume guard definition: **1**.
 - Guard call sites: **4**, covering all four order-creation families listed above.
+- Rollback source-to-comment matching: **PASS** for automatic, manual, and hedge creator tags.
 - Delete-writer expiry revalidation present: **PASS**.
 - Fresh position TP snapshot check present: **PASS**.
-- Source size: 289,788 characters / 8,790 lines.
+- Source size after final rollback-tag correction: approximately 290 KB / 8,796 lines; re-fetch the exact blob before release and freeze its raw SHA-256.
 
 These are static structural checks only. They are not a substitute for MetaEditor, Strategy Tester, demo, or broker integration testing.
 
@@ -89,4 +90,4 @@ These are static structural checks only. They are not a substitute for MetaEdito
 
 ## Final decision
 
-**The code has been upgraded in three bounded safety areas and the static structural checks passed. The overall product is not yet confirmed as a verified final release. Release remains blocked until the open items and acceptance suite above are completed.**
+**The code has been upgraded in three bounded safety areas, the creator-specific rollback-tag policy was cross-checked against the actual order comment strings, and static structural checks passed. The overall product is not yet confirmed as a verified final release. Release remains blocked until the open items and acceptance suite above are completed.**
