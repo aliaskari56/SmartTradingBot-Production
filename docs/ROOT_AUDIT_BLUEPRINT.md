@@ -422,3 +422,57 @@ No room may be marked “complete” merely because a function or field exists. 
 ### External platform facts used
 
 The official MQL5 documentation states that trade-transaction events may arrive in multiple stages, request-to-event cardinality is not one-to-one, transaction arrival priority is not guaranteed, and account state may change while OnTradeTransaction runs. The handler therefore cannot be treated as an atomic account snapshot. References: https://www.mql5.com/en/docs/event_handlers/ontradetransaction, https://www.mql5.com/en/docs/event_handlers/ontrade, https://www.mql5.com/en/docs/basis/function/events.
+
+
+## Failure-mode and completeness forecast — architecture-only gate
+
+This section forecasts failure classes that must be covered before any claim of software completeness. It does not claim these failures have all been reproduced. Priorities are based on potential state corruption, unauthorized mutation, loss of observability, or inability to recover; they are not trading recommendations.
+
+| ID | Failure mode / trigger | Potential system impact | Required architectural control | Evidence needed to close |
+|---|---|---|---|---|
+| F-01 | Duplicate, delayed, reordered or burst event callbacks | Repeated work, stale assumptions, duplicate lifecycle accounting | Idempotent event intake; event correlation; reconcile from authoritative current state | Deterministic tests replaying duplicates and reordering; no duplicate state transitions |
+| F-02 | Terminal/server state changes during a management cycle | Decision made from stale position/order facts | Snapshot with version/identity; reselect immediately before mutation; read back after mutation | Stale-snapshot test and server read-back assertion |
+| F-03 | Two managers propose incompatible changes to one object | One manager silently overwrites another's intended state | Single arbitration boundary; proposals gathered before one write; explicit priority/conflict result | Conflict matrix tests covering every pair of proposal sources |
+| F-04 | Missing manager for a named capability | False claim of completeness; behavior silently absent | Capability inventory independent of existing code; each capability gets owner, interface and status | Every requirement maps to implementation or explicit “not implemented” decision |
+| F-05 | Mutation door bypasses authorization/scope checks | Unintended object modification/deletion | Authorization enforced at the central writer, not only at callers; narrow, auditable exceptions | Static call-site inventory plus tests proving unauthorized requests are rejected |
+| F-06 | Object disappears or changes identity between validation and write | Wrong target or failed operation | Re-select by stable identifier; validate identity, symbol, type and current state immediately before write | Race/replacement simulation; no action on mismatched identity |
+| F-07 | Server rejects a request although local API returns success-like result | Local registry diverges from authoritative state | Validate detailed result code and then read back actual state | Tests for rejection, timeout, partial/ambiguous response and successful confirmation |
+| F-08 | Stop/freeze/precision/minimum-volume or other platform constraint changes | Rejected request or invalid cached geometry | Centralize platform normalization/validation; do not duplicate rules in UI and managers | Boundary tests around every platform constraint and symbol configuration |
+| F-09 | Restart, terminal crash, power loss or interrupted persistence | Orphaned state, stale authority, duplicate recovery work | Rebuild observed facts from authority; persist only recoverable intent/metadata; version and validate persisted state | Restart tests at each lifecycle stage; corrupt/old-state recovery tests |
+| F-10 | Partial completion or transition from one object type to another | Two managers both claim an object, or neither does | Explicit lifecycle state machine and atomic ownership handoff | Tests for partial completion, activation, disappearance and repeated handoff |
+| F-11 | Manual/external change while automation is active | Unexpected overwrite or stale authority | Explicit manual-change policy; detection, scope, hold/resume semantics and audit trail | Tests for terminal, mobile and chart-origin changes under every authority mode |
+| F-12 | One input path has weaker validation than another | Behavior differs by origin; bypass of safety gate | Common validated command contracts; origin adapters cannot mutate authoritative state directly | Inventory every creation/mutation entry point; equivalent rejection tests per path |
+| F-13 | Malformed/missing/stale configuration | Undefined or unsafe behavior | Schema/range validation; explicit defaults; fail closed where safety-critical | Property/boundary tests for missing, invalid, extreme and incompatible values |
+| F-14 | Storage full, permission failure, truncated log or namespace collision | Lost diagnostics or corrupted recovery state | Persistence error reporting; versioned namespace; bounded retention; no silent failure | Injected I/O failures and recovery verification |
+| F-15 | Long-running callback or expensive scan blocks other events | Delayed reconciliation and stale UI/state | Bounded work per callback; measured execution time; timer/event overlap policy | Worst-case multi-object load test and timing thresholds |
+| F-16 | Chart/UI command repeated, stale, malformed or issued during teardown | Duplicate operation or invalid lifecycle access | Command validation, debounce/idempotency, lifecycle guard and single command gateway | UI event replay and shutdown-race tests |
+| F-17 | Build artifact does not correspond to reviewed source | Audit applies to a different binary | Reproducible build provenance, commit/hash linkage and release manifest | Build log and source-to-artifact provenance; binary hash recorded |
+| F-18 | Test suite omits negative paths or environment variation | False confidence from happy-path-only tests | Layered tests: static, unit, integration, state-machine, fault-injection, recovery | Requirement-to-test traceability and explicit pass/fail evidence |
+| F-19 | Logs lack object/cycle correlation or expose sensitive account data | Root cause cannot be reconstructed, or sensitive information leaks | Structured redacted logs with cycle/object/correlation IDs and bounded retention | Sample log audit, redaction tests and incident reconstruction exercise |
+| F-20 | Documentation and source drift apart | New code path bypasses the architecture contract | Change checklist ties each modified entry point/state owner to map and tests | CI/review checklist; re-run inventory after every mutation-path change |
+
+### Cross-cutting design decisions that must be explicit
+
+- **Authoritative truth:** terminal/server observations are facts; local registry entries are a cache/projection and must be reconciled.
+- **One mutation boundary per object class:** all write requests are validated at the last responsible moment. A caller-side check is not sufficient.
+- **Single ownership of mutable state:** each state field has one owner; other components submit intent rather than editing private state.
+- **Conflict is a first-class result:** do not silently choose the last writer when two requests disagree.
+- **Fail-safe is defined, not improvised:** every error class specifies whether to stop issuing new mutations, reconcile, retry within bounded limits, or escalate for human review. Retry must be idempotent and cannot assume the previous request failed.
+- **No false completeness:** a feature without a named owner, entry paths, dependency list, negative tests and recovery evidence remains open.
+- **Capability gaps stay visible:** break-even and independent live TP management remain “not found / not verified” in this source audit; do not mark them implemented based on similarly named or adjacent behavior.
+- **No release claim from static review:** source inspection cannot establish runtime correctness, platform compatibility, or safety under actual terminal conditions.
+
+### Evidence ladder and exit gates
+
+1. **Inventory complete:** enumerate every event handler, public command, stateful global, persistence key, and API call that can mutate external state.
+2. **Ownership complete:** every mutable field and capability has exactly one owner and a documented interface.
+3. **Static audit complete:** all direct mutation calls and all callers are enumerated; no unreviewed bypass remains.
+4. **Test design complete:** every requirement and failure mode maps to at least one positive and one negative test where applicable.
+5. **Build evidence complete:** current reviewed source compiles with recorded tool/version/settings; artifact provenance is linked to source commit.
+6. **Isolated validation complete:** tests use a controlled, non-live environment and prove idempotency, rejection paths, restart recovery and state convergence.
+7. **Independent review complete:** a second pass checks for omissions and document/source drift.
+8. **Release gate:** only after all prior gates pass may the project be described as technically validated; no profitability or outcome guarantee follows from this.
+
+### Remaining limits of this audit
+
+This pass is a static source and architecture review based on the browsable repository branch. It does not have access to the user's terminal, account, local files or physical backup media; it does not run MetaEditor, a runtime, or a simulator. It cannot prove absence of all defects. The appropriate conclusion is a bounded evidence statement, not “everything is guaranteed to work.”
