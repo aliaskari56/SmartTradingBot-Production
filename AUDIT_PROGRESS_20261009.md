@@ -752,3 +752,22 @@ EA | چارت | دسکتاپ | موبایل | رویداد سرور
 ### نتیجهٔ گذر هشتم
 
 این گذر، محل‌های کلیدی رویداد و نوشتن را در فایل اصلی دوباره شمارش و مسیرهای اصلی را به‌صورت ایستا بررسی کرد. وجود یک مسیر مرکزی مدیریت، به معنی یکسان‌بودن همهٔ مرزهای مجوز یا اثبات همگرایی رویدادها نیست. شکاف حذف سفارش، معماری حل تعارض SL/TP، پوشش کامل مسیرهای ایجاد و شواهد build/runtime همچنان باز هستند. هیچ کد اجرایی تغییر نکرده است.
+
+
+## گذر نهم — بررسی شواهد CI موجود در GitHub Actions
+
+در بررسی تاریخچهٔ CI مخزن، نتایج قبلی MetaEditor پیدا شدند. این نتایج به commitهای شاخهٔ `main` و فایل `MQL5/Experts/SmartTradingBot.mq5` مربوط‌اند، نه به فایل `SmartTradingBot_FINAL.mq5` در شاخهٔ ممیزی فعلی؛ بنابراین به‌عنوان شواهد تاریخی مرتبط ثبت می‌شوند، نه تأیید build برای نسخهٔ فعلی ممیزی.
+
+| اجرای CI | commit | نتیجهٔ گزارش‌شده در لاگ | تفسیر محدود |
+|---|---|---|---|
+| [STB UI Compile](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37322115019) | `72fb9027073646229cfa0a3b6d07970ab48751cf` | `0 errors, 4 warnings` و `COMPILE PASS` | کامپایل فایل `MQL5/Experts/SmartTradingBot.mq5` در آن commit موفق گزارش شده است؛ این نام فایل و commit با نسخهٔ فعلی ممیزی یکسان نیست. |
+| [MQL5 Temporary Compile](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37321366255) | `4638a38708a1c7fd3a1959140d8d863c305f9479` | لاگ کامپایل `0 errors, 4 warnings`، ولی اجرای job با خطای exit code غیرصفر پایان یافته است. | وضعیت job شکست خورده؛ علت دقیق با لاگ خلاصه‌شده به‌تنهایی قطعی نیست و نباید آن را pass شمرد. |
+| [MQL5 Temporary Compile](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37321142680) | `1701d07c72` | `1 errors, 4 warnings` | اجرای تاریخی شکست‌خورده؛ برای نسخهٔ ممیزی فعلی نتیجه‌گیری مستقیم نمی‌دهد. |
+| [MQL5 Compile Once](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37319978704) | `9cbfb95402` | `0 errors, 4 warnings` | کامپایل فایل `SmartTradingBot.mq5` در commit تاریخی موفق گزارش شده است؛ معادل build نسخهٔ ممیزی فعلی نیست. |
+
+### نتیجهٔ شواهد CI
+
+- وجود یک یا چند کامپایل موفق در `main`، کامپایل نسخهٔ موجود در شاخهٔ ممیزی را ثابت نمی‌کند.
+- لاگ «صفر خطا» در jobی که در نهایت شکست خورده، نتیجهٔ موفق CI محسوب نمی‌شود.
+- این بررسی فقط شواهد CI موجود را دسته‌بندی کرد؛ workflow جدیدی اجرا نشد و هیچ فایل اجرایی تغییر نکرد.
+- وضعیت build نسخهٔ ممیزی فعلی: **نامشخص / شواهد مستقیم برای commit و فایل فعلی در این بررسی پیدا نشد**.
