@@ -4863,7 +4863,9 @@ bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int 
      }
 
    return ModifyPositionSL(ticket,candidateSL,false);
-  void STB_ProfitProtectionOne(const ulong ticket)
+  }
+
+void STB_ProfitProtectionOne(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
       return;
