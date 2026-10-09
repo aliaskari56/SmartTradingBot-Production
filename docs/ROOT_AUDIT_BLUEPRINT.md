@@ -588,3 +588,88 @@ Use only these labels consistently:
 - **Blocked / Unknown** — evidence is missing, contradictory, or unavailable.
 
 Do not upgrade a status without a corresponding record. Current work remains a static architecture/source audit; build, runtime, simulator, and independent-review evidence have not been established here.
+
+
+## Foundation baseline — requirements, interfaces, dependencies, and exit gate (2026-10-09)
+
+**Status: documented baseline / static-audit planning.** This section consolidates the minimum foundation contract. It does not state that the current source conforms, and it does not authorize a runtime or release claim.
+
+### A. Stable foundation requirements
+
+| ID | Requirement | Architectural owner | Verification evidence | Current status |
+|---|---|---|---|---|
+| FND-001 | Every logical component has one stated responsibility and an owner for its mutable state. | H0 + all houses | Responsibility/ownership register | Planned; partial static inventory |
+| FND-002 | Shared concepts have one canonical definition; local duplicates are documented as exceptions. | H0 | Contract and duplicate-definition review | Planned |
+| FND-003 | Component dependencies follow the allowed direction below; cycles are identified and justified or removed. | H0 | Dependency graph / cycle review | Planned |
+| FND-004 | Observed platform state is distinguished from cached, inferred, proposed, and confirmed state. | H5/H9 | State model and transition table | Planned |
+| FND-005 | Every externally visible mutation has an identifiable boundary, authorization contract, and result classification. | H4/H5/H7 | Writer inventory and caller review | Known gap remains; not accepted |
+| FND-006 | Independent components communicate through documented contracts rather than shared undocumented assumptions. | H0 | Interface register and contract review | Planned |
+| FND-007 | Event processing tolerates duplicate, delayed, and out-of-order notifications through reconciliation. | H9/H5 | Scenario definitions and test evidence | Planned; runtime not tested |
+| FND-008 | Recovery after restart or reconnection rebuilds the internal view from authoritative observations. | H5/H9 | Recovery specification and test record | Planned; runtime not tested |
+| FND-009 | Uncertain, rejected, unsupported, and inconsistent outcomes are explicit and are not silently treated as success. | H0/H4/H9 | Result-state contract and negative-path review | Planned |
+| FND-010 | Each architecture claim traces to source evidence and, where behavior is claimed, to test evidence. | Audit process | Bidirectional traceability matrix | This document is the initial baseline |
+| FND-011 | User-interface code cannot silently become a second policy or state-ownership layer. | H8/H0 | Dependency and call-path review | Planned |
+| FND-012 | Every future change records affected requirements, components, tests, and known risks. | Audit/change process | Change-impact checklist | Planned |
+
+### B. Allowed dependency direction
+
+The following is the target dependency rule. It is not a description of proven current conformance.
+
+- **H0 — Foundation:** owns shared contracts and stable types; it must not depend on feature houses.
+- **H1/H2/H3 — Analysis and learning:** consume normalized observations and publish results; they must not bypass the central state or mutation boundaries.
+- **H5 — Inventory and ownership:** owns the normalized view and ownership decisions; it must not depend on UI presentation.
+- **H6/H7 — State-management domains:** consume normalized state and submit proposals/requests through documented shared contracts; they must not create hidden alternate mutation paths.
+- **H4 — Mutation boundary:** validates applicable authority and request contracts, records outcomes, and exposes explicit result states; it must not be duplicated by UI or feature code.
+- **H8 — Presentation:** renders state and submits user intent through public contracts; it must not own authoritative state or implement a parallel policy.
+- **H9 — Event/lifecycle coordination:** coordinates event intake, reconciliation, and lifecycle sequencing; it must not treat event order alone as proof of current state.
+
+**Cycle rule:** if two components require each other directly, identify the shared contract or coordinator that can remove the cycle. Do not introduce a new abstraction solely to satisfy a diagram; abstractions must have a documented consumer and testable contract.
+
+### C. Minimum interface register
+
+For each interface, record: stable name, producer, consumer, input schema, output/result schema, ownership of data, failure/unknown behavior, observability, and compatibility policy.
+
+| Contract | Producer → consumer | Required properties |
+|---|---|---|
+| Canonical identity/snapshot | H5 → all consumers | Stable identity, normalized fields, timestamp/source, stale-state indicator |
+| Observation/event envelope | H9 → H5 and relevant consumers | Event type, correlation identifier when available, observed time, duplicate/out-of-order tolerance |
+| Proposal/request | H1/H3/H6/H7/H8 → owning coordinator/boundary | Intent separated from execution, explicit preconditions, origin metadata where useful but not as a hidden policy fork |
+| Authorization decision | Ownership/policy contract → mutation boundary | Explicit allow/deny/unknown result, scope, reason, and freshness requirement |
+| Operation outcome | Mutation boundary → caller/coordinator | Confirmed/rejected/unknown/inconsistent/unsupported, correlation, observed final state when available |
+| Diagnostic record | All houses → diagnostics | Component, correlation, decision/result, error class, evidence context without leaking secrets |
+| Recovery/reconciliation result | H9/H5 → all consumers | Rebuilt state version, unresolved differences, and completion status |
+
+### D. Cross-cutting quality attributes
+
+- **Correctness:** internal state must not claim more certainty than available evidence supports.
+- **Maintainability:** a change should affect only the owning component and documented dependants wherever practical.
+- **Extensibility:** new capability types should implement an explicit contract instead of adding scattered source-specific branches.
+- **Observability:** important decisions and state transitions have correlatable diagnostics.
+- **Recoverability:** restart and missed-event scenarios have defined convergence behavior.
+- **Testability:** contracts can be reviewed/tested without requiring every component to run together.
+- **Compatibility:** schema/interface changes have a documented migration and regression-review policy.
+- **Fail-safe uncertainty:** when authority or state is unknown, the architecture records uncertainty and avoids assuming permission or success.
+
+### E. Known-risk register at foundation baseline
+
+| Risk ID | Finding / uncertainty | Required closure evidence | Status |
+|---|---|---|---|
+| BASE-R01 | Logical houses are not yet compiler-enforced module boundaries. | Dependency/call graph and a justified extraction plan | Open |
+| BASE-R02 | Multiple creation call families exist in the current source. | Complete inventory and architecture conformance review | Open |
+| BASE-R03 | A pending-delete writer authorization gap was found in static review. | Boundary and caller review, with negative-path evidence | Open |
+| BASE-R04 | SL proposal handling was observed as one proposal per resolver call, not proven cross-manager arbitration. | Contract and call-path evidence for arbitration claims | Open |
+| BASE-R05 | Runtime, restart/reconnect, and fault-injection behavior have not been verified here. | Recorded controlled test runs on an identified revision | Open |
+| BASE-R06 | A complete bidirectional map from requirements to code and tests is not yet established. | Traceability register reviewed for missing/orphan items | Open |
+| BASE-R07 | External/local backup and development environment were not inspected in this audit context. | Owner-provided verification record if required | Unknown |
+
+### F. Foundation exit gate
+
+The foundation may be marked **documentarily complete** only when:
+1. The requirement register has an owner and verification method for every item.
+2. The component responsibility and dependency registers cover all ten houses and cross-cutting contracts.
+3. Each known source finding is linked to its relevant requirement and remains open until evidence closes it.
+4. Interface contracts define data ownership, uncertainty, errors, and compatibility.
+5. Assumptions, non-goals, and unverified claims are explicitly listed.
+6. A reviewer can trace each architectural requirement to its component and planned evidence in both directions.
+
+This gate only completes the **architecture/documentation foundation**. It does not mean the source is refactored, compiled, tested, release-ready, or suitable for any real-world financial use. Those claims require separate evidence and are outside this documentation-only update.
