@@ -4863,7 +4863,57 @@ bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int 
      }
 
    return ModifyPositionSL(ticket,candidateSL,false);
-  } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
+  void STB_ProfitProtectionOne(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      return;
+   if(STB_ManualOverrideIs(ticket))
+      return; // MANUAL_OVERRIDE
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long type=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double profit=PositionNetProfitPips(ticket);
+   double locked=GetLockedPips(ticket);
+   double triggerPips=STB_ProfitLockTriggerPips();
+   double lockPips=STB_ProfitLockLockPips();
+   double pip=PipSize(symbol);
+
+   // The persisted lock counter is only a hint. Older executions may have
+   // credited a sub-minimum SL after a competing candidate won arbitration.
+   // Reconcile that state with the actual live SL every time the trigger is met.
+   bool liveStopSatisfiesPolicy=false;
+   if(pip>0.0 && entry>0.0 && currentSL>0.0)
+     {
+      double policySL=NormalizePrice(symbol,
+         type==POSITION_TYPE_BUY ? entry+lockPips*pip : entry-lockPips*pip);
+      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+      double tolerance=MathMax(point*0.5,
+                               tickSize>0.0 ? tickSize*0.5:point*0.5);
+      if(type==POSITION_TYPE_BUY)
+         liveStopSatisfiesPolicy=(policySL>0.0 && currentSL+tolerance>=policySL);
+      else if(type==POSITION_TYPE_SELL)
+         liveStopSatisfiesPolicy=(policySL>0.0 && currentSL-tolerance<=policySL);
+     }
+
+   if(profit>=triggerPips && (locked<lockPips || !liveStopSatisfiesPolicy))
+     {
+      Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " profitPips=",DoubleToString(profit,1),
+            " triggerPips=",DoubleToString(triggerPips,1),
+            " lockPips=",DoubleToString(lockPips,1),
+            " lockedPips=",DoubleToString(locked,1),
+            " liveSL=",DoubleToString(currentSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " liveStopSatisfiesPolicy=",liveStopSatisfiesPolicy);
+      ApplyProfitLock(ticket,lockPips);
+     }
+  }
+
+/* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
 
