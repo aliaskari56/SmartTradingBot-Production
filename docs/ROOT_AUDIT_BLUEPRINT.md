@@ -819,3 +819,12 @@ Historical GitHub Actions runs were inspected. They target the `main` branch and
 - [MQL5 Compile Once run](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37319978704), commit prefix `9cbfb95402`: log reports `0 errors, 4 warnings`.
 
 **Evidence conclusion:** historical main-branch compilation cannot certify the audit branch's current source. A failed job is not a successful build merely because one compiler line reports zero errors. Current audit-branch build evidence remains **Unknown / not established**. No new workflow was dispatched and no executable source was changed.
+
+
+## Static pass 10 — Manifest, binary presence, and branch-diff scope (2026-10-09)
+
+A comparison of `main` to `audit/expose-cleaned-source-20261009` reports the audit branch as 95 commits ahead and 0 behind. The compare response lists the EA source, EX5 binary, backup manifest, audit docs, and many include files as added relative to `main`. The branch therefore is not a documentation-only diff relative to `main`; the full branch scope and provenance of added files should be reviewed before any merge decision. This does not imply that the primary EA source changed during the recent documentation-only audit passes.
+
+`BACKUP_MANIFEST.txt` claims a cleaned source and corresponding EX5, `0 errors, 0 warnings`, an include-file count, and a list of removed functions. The manifest also explicitly says runtime status is not proven. The manifest and EX5 file are present in the repository, but this review did not independently verify the local path, source/binary provenance, MetaEditor version/configuration, or raw compiler report. The Git blob SHA of the source must not be directly compared to the manifest's raw-file SHA-256; they are different hash constructions.
+
+**Evidence classification:** manifest compilation status = **claimed, not independently verified for this audit**; EX5 presence = **verified**, reproducible build provenance = **unknown**, runtime behavior = **not proven**. No executable source changed in this pass; documentation only.
