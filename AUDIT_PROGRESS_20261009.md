@@ -994,3 +994,10 @@ Added `docs/DETERMINISTIC_ORDER_WRITE_ACCEPTANCE_MATRIX_PASS27_20261009.md` with
 Added `docs/EXACT_SOURCE_BUILD_PROVENANCE_CHECKLIST_PASS28_20261009.md`. It defines the frozen-source identity, clean-checkout requirements, toolchain capture, full compiler log, exit status, raw source/EX5 SHA-256, artifact custody, reproducibility and reviewer sign-off needed to close BL-01/BL-02. It explicitly distinguishes Git blob SHA from raw SHA-256 and prevents historical logs or a pre-existing EX5 from being treated as proof of a current-source build.
 
 No MetaEditor environment was invoked and no compile/runtime/tester/demo run occurred in this pass. The build and binary-provenance gates remain OPEN; release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 29 — Dependency provenance and license review register
+
+Added `docs/DEPENDENCY_PROVENANCE_LICENSE_REGISTER_PASS29_20261009.md`. It records the known dependency-tree snapshot and establishes evidence requirements for standard MetaQuotes headers, custom STB modules, remaining headers, bitmap/HLSL assets, copied snippets, archives/binaries, and release notices. The register deliberately does not infer that a file is unlicensed or noncompliant merely because a notice was not observed in a limited inspection. BL-06 remains OPEN until provenance, applicable terms, permissions and notice obligations are independently reviewed.
+
+No executable source changed. No full dependency inventory, legal review, compile, runtime, Strategy Tester or demo test was performed. Release remains `BLOCKED / NOT VERIFIED`.
