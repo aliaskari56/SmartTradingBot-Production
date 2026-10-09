@@ -8481,10 +8481,6 @@ int OnInit()
 
 
 
-   STB_ScannerRun();
-   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-   UpdatePanel();
-
 // P9 restart/reinitialize recovery: rebuild pending-trail state for EVERY
 // managed pending type before the first management cycle. This prevents the
 // first cycle from registering/trailing recovered orders before a clean rebuild.
@@ -8498,8 +8494,17 @@ int OnInit()
 
 // Harden restart/reattach protection: do not wait for the first Tick/Timer.
 // Every currently open position is checked immediately through the one cycle.
-   STB_RunManagementCycle(); // Blueprint 30/33: enter management through the single cycle
+   STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
 
+   if(PositionsTotal()==0 && OrdersTotal()==0)
+     {
+      STB_ScannerRun();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+     }
+   else
+      Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+
+   UpdatePanel();
    return INIT_SUCCEEDED;
   }
 
@@ -8793,7 +8798,7 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
       return;
      }
 
-   if(PositionSelectByTicket(ticket) && IsManagedPosition(ticket))
+   if(PositionSelectByTicket(ticket) && STB_IsProtectionPosition(ticket))
      {
       EnsureInitialSL(ticket);
       return;
@@ -8844,15 +8849,16 @@ void OnTick()
 
    if(m15Bar)
      {
-
-
-
-
-      STB_ReconcileTradeRegistry();
-      STB_ScannerRun();
-      STB_ExecuteTopCandidate();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-      UpdatePanel();
+       STB_ReconcileTradeRegistry();
+       if(PositionsTotal()==0 && OrdersTotal()==0)
+         {
+          STB_ScannerRun();
+          STB_ExecuteTopCandidate();
+          g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+         }
+       else
+          Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       UpdatePanel();
      }
   }
 
@@ -8886,9 +8892,14 @@ STB_ReconcileTradeRegistry();
 
 
 
-      STB_ScannerRun();
-      STB_ExecuteTopCandidate();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+      if(PositionsTotal()==0 && OrdersTotal()==0)
+        {
+         STB_ScannerRun();
+         STB_ExecuteTopCandidate();
+         g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+        }
+      else
+         Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
      }
 
 
