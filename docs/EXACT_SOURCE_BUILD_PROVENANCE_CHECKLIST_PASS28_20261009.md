@@ -13,7 +13,7 @@ Status: **PREPARED FOR LOCAL METAEDITOR BUILD; NOT EXECUTED IN THIS ENVIRONMENT*
 - Observed source size: 304,511 bytes; 9,156 lines
 - Direct/transitive compile closure found by source trace: primary EA, standard `Trade/Trade.mqh` family, and two repository-owned-path STB includes. The STB modules have no further include directives in the inspected source. The resolver now enforces the configured +20-pip lock floor once net profit reaches the +50-pip trigger: weaker competing candidates are skipped while an SL already exists. If an unprotected position has no candidate that can satisfy the floor under current broker geometry, the strongest valid non-profit-lock stop may be applied as an emergency fallback; that fallback is not credited as a successful +20-pip lock.
 
-Expected tracked Git blobs used by the automated preflight:
+Expected tracked Git blobs used by the automated preflight/build (source, transitive include closure and static checker):
 
 | Repository-relative path | Expected Git blob |
 |---|---|
@@ -27,6 +27,7 @@ Expected tracked Git blobs used by the automated preflight:
 | `MQL5/Include/StdLibErr.mqh` | `5d96e6dcf235c69272555dc888532ae268c25908` |
 | `MQL5/Include/STB/STB_PendingDistanceResolver.mqh` | `2ed3aaefb3a83b7690409f87a3c7e428c35a895` |
 | `MQL5/Include/STB/STB_PendingTrail.mqh` | `bdb827e7871960f88f5bf9593f1e4efcc7797367` |
+| `tools/audit_static_checks.py` | `7f5092f1663f8a899449a16f3b6588df80c19bef` |
 
 ## Automated PowerShell preflight and compile
 
@@ -64,6 +65,7 @@ $ExpectedBlobs = [ordered]@{
     'MQL5/Include/StdLibErr.mqh' = '5d96e6dcf235c69272555dc888532ae268c25908'
     'MQL5/Include/STB/STB_PendingDistanceResolver.mqh' = '2ed3aaefb3a83b7690409f87a3c7e428c35a895'
     'MQL5/Include/STB/STB_PendingTrail.mqh' = 'bdb827e7871960f88f5bf9593f1e4efcc7797367'
+    'tools/audit_static_checks.py' = '7f5092f1663f8a899449a16f3b6588df80c19bef'
 }
 
 foreach ($RelativePath in $ExpectedBlobs.Keys) {
@@ -83,7 +85,36 @@ foreach ($RelativePath in $ExpectedBlobs.Keys) {
 
 $SourcePath = Join-Path $RepoRoot 'MQL5/Experts/SmartTradingBot_FINAL.mq5'
 $IncludeRoot = Join-Path $RepoRoot 'MQL5'
+$CheckerPath = Join-Path $RepoRoot 'tools/audit_static_checks.py'
 $SourceRawHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
+
+# Require the pinned static guardrail to pass before launching MetaEditor.
+$PythonExe = $null
+$PythonPrefixArgs = @()
+$PythonCmd = Get-Command 'python' -ErrorAction SilentlyContinue
+if ($PythonCmd) {
+    $PythonExe = $PythonCmd.Source
+} else {
+    $PythonCmd = Get-Command 'py' -ErrorAction SilentlyContinue
+    if ($PythonCmd) {
+        $PythonExe = $PythonCmd.Source
+        $PythonPrefixArgs = @('-3')
+    }
+}
+if (-not $PythonExe) {
+    throw 'Python 3 is required for the pinned static preflight. No compile was started.'
+}
+& $PythonExe @PythonPrefixArgs $CheckerPath $SourcePath
+if ($LASTEXITCODE -ne 0) {
+    throw "Static guardrails failed (exit $LASTEXITCODE). No compile was started."
+}
+
+# Capture raw SHA-256 for every pinned input file, in addition to Git blob IDs.
+$InputRawHashes = [ordered]@{}
+foreach ($RelativePath in $ExpectedBlobs.Keys) {
+    $AbsolutePath = Join-Path $RepoRoot ($RelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+    $InputRawHashes[$RelativePath] = (Get-FileHash -LiteralPath $AbsolutePath -Algorithm SHA256).Hash
+}
 
 if (-not $MetaEditorExe) {
     $OnPath = Get-Command 'metaeditor64.exe' -ErrorAction SilentlyContinue
@@ -141,6 +172,7 @@ if (-not $Summary.Success) {
 }
 $ErrorCount = [int]$Summary.Groups[1].Value
 $WarningCount = [int]$Summary.Groups[2].Value
+$LogRawHash = (Get-FileHash -LiteralPath $LogPath -Algorithm SHA256).Hash
 $Ex5Exists = Test-Path -LiteralPath $Ex5Path -PathType Leaf
 $Ex5Hash = if ($Ex5Exists) { (Get-FileHash -LiteralPath $Ex5Path -Algorithm SHA256).Hash } else { 'NOT PRODUCED' }
 
@@ -149,10 +181,14 @@ Write-Host "Branch:              $Branch"
 Write-Host "Repository HEAD:     $Head"
 Write-Host "Source Git blob:     $($ExpectedBlobs['MQL5/Experts/SmartTradingBot_FINAL.mq5'])"
 Write-Host "Source raw SHA-256:  $SourceRawHash"
+foreach ($RelativePath in $InputRawHashes.Keys) {
+    Write-Host "Input SHA-256 [$RelativePath]: $($InputRawHashes[$RelativePath])"
+}
 Write-Host "MetaEditor:          $MetaEditorExe"
 Write-Host "MetaEditor version:  $EditorVersion"
 Write-Host "Compiler exit code:  $($Process.ExitCode)"
 Write-Host "Compiler summary:    $($Summary.Value.Trim())"
+Write-Host "Compiler log SHA-256: $LogRawHash"
 Write-Host "EX5 SHA-256:         $Ex5Hash"
 Write-Host "Full compiler log:   $LogPath"
 Write-Host "Build staging path:  $BuildRoot"
@@ -188,6 +224,7 @@ The script uses MetaEditor's documented command-line `/compile`, `/include`, and
 - Git blob SHA and raw SHA-256 are different identifiers and must not be substituted for one another.
 - A tracked or pre-existing EX5 does not establish that it was built from this source.
 - Do not infer success from the PowerShell process exit code alone; verify the parsed log result and preserved EX5 hash.
+- The script runs the pinned 26-check static audit before compiling and reports raw SHA-256 values for each pinned source/include/checker input and the compiler log.
 - Warnings must be reviewed even if the compiler produces EX5.
 - Compilation does not establish trading correctness, broker compatibility or profitability.
 
