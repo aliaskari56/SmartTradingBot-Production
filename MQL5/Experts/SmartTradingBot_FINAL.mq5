@@ -4506,7 +4506,6 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
       return false;
 
    string gv=ScopedStateName("MODFAIL_"+IntegerToString((long)ticket));
-    Print("[STB][P5A][MODFAIL][CHECK] ticket=",ticket,          " gv=",gv,          " exists=",GlobalVariableCheck(gv),          " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,          " tickms=",GetTickCount64());
    if(GlobalVariableCheck(gv))
      {
       double lastFail=GlobalVariableGet(gv);
@@ -4517,8 +4516,6 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
    trade.SetTypeFillingBySymbol(symbol);
-
-   Print("[STB][P5A][MODFAIL][BEFORE_REQUEST] ticket=",ticket,      " gv=",gv,      " tickms=",GetTickCount64(),      " newSL=",DoubleToString(newSL,_Digits),      " currentSL=",DoubleToString(currentSL,_Digits),      " ret_before=",trade.ResultRetcode());
        if(STB_CycleWriteAlreadyDone(ticket))
       return false; // Blueprint 8/39: max ONE position modify per ticket per cycle
    if(!trade.PositionModify(ticket,newSL,tp))
@@ -4531,7 +4528,6 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
                        PositionGetDouble(POSITION_SL),
                        PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
-       Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       Print("STB MODIFY request failed ticket=",ticket,
             " ret=",trade.ResultRetcode()," ",
             trade.ResultRetcodeDescription());
@@ -4548,7 +4544,6 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
                        PositionGetDouble(POSITION_PRICE_OPEN),
                        PositionGetDouble(POSITION_SL),
                        PositionGetDouble(POSITION_TP));
-      Print("[STB][P5A][MODFAIL][BEFORE_DEL] ticket=",ticket,      " gv=",gv,      " exists=",GlobalVariableCheck(gv),      " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,      " tickms=",GetTickCount64(),      " ret=",trade.ResultRetcode());
        GlobalVariableDel(gv);
       return true;
      }
@@ -4561,11 +4556,8 @@ enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, S
                        PositionGetDouble(POSITION_SL),
                        PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
-       Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       return false;
      }
-
-   Print("[STB][P5A][MODFAIL][BEFORE_DEL] ticket=",ticket,      " gv=",gv,      " exists=",GlobalVariableCheck(gv),      " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,      " tickms=",GetTickCount64(),      " ret=",trade.ResultRetcode());
        GlobalVariableDel(gv);
 
    if(!PositionSelectByTicket(ticket))
