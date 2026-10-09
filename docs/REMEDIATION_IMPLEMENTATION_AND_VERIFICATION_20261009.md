@@ -3,7 +3,7 @@
 ## Status
 
 - **Static remediation:** implemented on the audit branch, including same-cycle SL proposal collection and arbitration.
-- **Latest static structural checks:** PASS (26 checks) on GitHub Actions run [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138).
+- **Latest static structural checks:** PASS (26 checks) on GitHub Actions run [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269).
 - **MetaEditor compilation:** NOT RUN; MetaEditor and Wine are not available in the current execution environment.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
@@ -13,10 +13,10 @@ This report records source changes and static evidence only. It does not claim b
 ## Source under review
 
 - File: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Current Git blob SHA (not a raw-file SHA-256): `fdce203d23a08eb4ca2966d4a09719c3e4a89397`
+- Current Git blob SHA (not a raw-file SHA-256): `6bca33bc8e0c961f317b0828e46faf7a6b9929b4`
 - Branch: `audit/expose-cleaned-source-20261009`
-- Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`
-- Latest static-checker commit: `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`
+- Latest source-changing commit: `30d683029158bc4a1cab64e8d3d190af04b07479`
+- Latest static-checker commit: `7f5092f1663f8a899449a16f3b6588df80c19bef`
 
 ## Implemented changes
 
@@ -67,13 +67,15 @@ The former one-proposal call pattern has been replaced on this branch:
 - If queue allocation fails, the automatic batch aborts instead of resolving an incomplete set. If the temporary per-ticket candidate array cannot hold the complete set, that ticket is skipped.
 - When net profit reaches the +50-pip trigger, the resolver enforces the normalized +20-pip target as a floor for automatic candidates while an SL is already installed. A weaker trail candidate cannot replace the existing SL merely because the queued profit-lock target fails validation at the shared snapshot. If no SL exists and broker geometry blocks the lock, the strongest valid non-profit-lock candidate may serve as an emergency protective stop; it is not credited as a successful +20-pip lock. Post-flush lock state is committed only when the verified actual SL satisfies the normalized target.
 - Automatic lock bookkeeping is deferred during collection. Already-satisfied lock targets are credited only after re-reading live position state. Arbitration confirmation rejects a missing actual SL before lock-pips bookkeeping.
+- Current resolver revision enforces the active normalized profit-lock target as a minimum SL floor once the configured trigger is reached, and uses the strongest valid non-lock stop only as a fail-safe when a position has no installed SL and the requested lock is not currently placeable. The flush persists locked-pips only after the actual terminal SL confirms the normalized target.
+- Final pending-delete expiry authorization requires the correct caller source, a managed order, and a verified symbol-management lease at the writer boundary.
 - Partial-exit lifecycle: position lock/failure state is now cleaned before filtering by deal magic, so manual/foreign-magic closing deals are considered too. `DEAL_ENTRY_OUT`/`OUT_BY` preserves the state while the position ticket still exists and clears it only after a full close; `DEAL_ENTRY_INOUT` clears it on direction reversal. Runtime partial-close and netting/hedging scenarios are still required.
 
 The static checks validate the encoded source structure, but do not execute the MQL resolver or prove permutation-independent runtime behavior. The active lock-floor contention case is tracked as SL-12 and remains NOT RUN.
 
 ## Static verification performed
 
-The latest GitHub Actions run, [37941943138](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941943138), completed with **success** on checker commit `37ba76457fbd87afa3b87d2cd12cf9aca1bca85a`. Its job log reports 26 passing checks, including:
+The latest GitHub Actions run, [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269), completed with **success** on checker commit `7f5092f1663f8a899449a16f3b6588df80c19bef`. Its job log reports 26 passing checks, including:
 
 - one direct `trade.OrderDelete()` writer and one direct `trade.PositionModify()` writer;
 - four order-creation paths using the shared directional-volume guard;
