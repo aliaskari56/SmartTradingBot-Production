@@ -5584,8 +5584,10 @@ void ManagePendingOrders()
       // Blueprint 35: only EA-created pendings may expire by local age.
       // Manual / mobile / foreign / user-overridden pendings are never
       // deleted by local age (server-side explicit expiration is honored).
-      bool autoCreated=(StringFind(OrderGetString(ORDER_COMMENT),"STB|B|")==0 ||
-                        StringFind(OrderGetString(ORDER_COMMENT),"STB|S|")==0);
+      string pendingComment=OrderGetString(ORDER_COMMENT);
+      bool autoCreated=(StringFind(pendingComment,"STB|B|")==0 ||
+                        StringFind(pendingComment,"STB|S|")==0 ||
+                        StringFind(pendingComment,"STB|HEDGE|")==0);
       bool expiredByLocalAge=
          autoCreated && !STB_ManualOverrideIs(ticket) &&
          maxBars>0 && setupTime>0 &&
