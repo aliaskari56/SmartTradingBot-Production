@@ -4331,8 +4331,54 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
       double e=OrderGetDouble(ORDER_PRICE_OPEN);
       double sl=OrderGetDouble(ORDER_SL);
       double tp=OrderGetDouble(ORDER_TP);
+
       if(!STB_GeomIsKnown(ticket,false,e,sl,tp,symbol))
+        {
          STB_ManualOverrideSet(ticket);
+
+         // A manual geometry edit becomes the new explicit trail baseline.
+         // Otherwise the old EB / SL distance could make the next user-issued
+         // PEND TRAIL snap this order back toward its pre-edit geometry.
+         long updatedType=OrderGetInteger(ORDER_TYPE);
+         if(STB_PendingTrailIsManagedType(updatedType))
+           {
+            int trailIdx=STB_PendingTrailFind(ticket);
+            if(trailIdx<0)
+              {
+               STB_PendingTrailRegister(ticket,"MANUAL_UPDATE");
+               trailIdx=STB_PendingTrailFind(ticket);
+              }
+
+            MqlTick updateTick;
+            double pip=PipSize(symbol);
+            if(trailIdx>=0 && pip>0.0 &&
+               SymbolInfoTick(symbol,updateTick))
+              {
+               int direction=STB_PendingTrailDirection(updatedType);
+               int offsetSign=STB_PendingEntryOffsetSign((ENUM_ORDER_TYPE)updatedType);
+               double anchor=(direction>0 ? updateTick.bid:updateTick.ask);
+
+               if(anchor>0.0 && offsetSign!=0)
+                 {
+                  g_stbPendingTrail[trailIdx].entryBufferPips=
+                     MathAbs(e-anchor)/pip;
+                  g_stbPendingTrail[trailIdx].trackedExtreme=
+                     e-offsetSign*g_stbPendingTrail[trailIdx].entryBufferPips*pip;
+                  g_stbPendingTrail[trailIdx].lastEntry=e;
+                  g_stbPendingTrail[trailIdx].lastSL=sl;
+
+                  if(sl>0.0)
+                     g_stbPendingTrail[trailIdx].slBufferPips=
+                        MathAbs(e-sl)/pip;
+
+                  g_stbPendingTrail[trailIdx].failureCount=0;
+                  g_stbPendingTrail[trailIdx].nextRetryTime=0;
+                  g_stbPendingTrail[trailIdx].lastModifyTime=TimeCurrent();
+                 }
+              }
+           }
+        }
+
       STB_GeomStore(ticket,false,e,sl,tp);
       return;
      }
