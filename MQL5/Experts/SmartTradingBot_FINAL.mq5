@@ -3891,8 +3891,19 @@ bool OneClickHedge()
       return false;
 
    double volume=NormalizeVolume(symbol,sourceVolume);
+   if(volume<=0.0 || volume+1e-9<sourceVolume)
+     {
+      // Do not silently label a max-volume-capped order as a full hedge.
+      // One click represents the entire source exposure; otherwise reject.
+      Print("STB HEDGE REJECTED: requested hedge exceeds one-order volume capacity",
+            " symbol=",symbol,
+            " sourceVolume=",DoubleToString(sourceVolume,4),
+            " allowedSingleOrderVolume=",DoubleToString(volume,4));
+      return false;
+     }
+
    MqlTick tick;
-   if(volume<=0.0 || !SymbolInfoTick(symbol,tick))
+   if(!SymbolInfoTick(symbol,tick))
       return false;
 
    double pip=PipSize(symbol);
