@@ -1041,3 +1041,10 @@ No executable source changed. No ZIP extraction, compile, runtime, Strategy Test
 ## Pass 35 — Source attribution and release metadata
 
 Added `docs/SOURCE_ATTRIBUTION_AND_RELEASE_METADATA_REVIEW_PASS35_20261009.md`. The EA header visibly contains generic `ProjectName`, `CompanyName`, and `companyname.net` placeholders; the correct rights holder cannot be inferred and must be confirmed by the project owner. The two directly included STB modules' inspected headers describe their function but do not state author, origin or license. This is a provenance/metadata gap, not proof that permission is absent or that a violation occurred. No source changes were made. ZIP/EX5 provenance, compile and runtime remain unverified; BL-06 remains open and release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Final root-cause pass — 2026-10-09
+
+Published `docs/FINAL_ROOT_CAUSE_AND_RELEASE_DECISION_20261009.md`. Final static assessment identifies the main root-cause groups: (1) central order-delete writer does not itself enforce ticket/reason authorization; (2) `SYMBOL_VOLUME_LIMIT` aggregate guard is only visibly applied in automatic `PlaceSetup`, not shared by manual pending/hedge creators; (3) position SL resolver receives one proposal at a time, so cross-source arbitration is not established; (4) position modify writes an SL with a previously read TP snapshot, leaving a possible external-update race; (5) cycle deduplication is per invocation while OnInit/OnTick/OnTimer all invoke the management cycle; (6) exact source-to-EX5 build provenance, ZIP contents, dependency licensing and STB module attribution remain unverified; (7) no exact-source compile, tester, runtime, demo or independent review evidence was produced.
+
+These are classified as confirmed static structure/coverage findings versus runtime outcomes that remain unproven. No executable source changed; `main` remains untouched. The final report contains ranked findings, closure matrix and minimum acceptance suite. Static audit pass is complete, but technical verification remains open and release remains `BLOCKED / NOT VERIFIED`.
