@@ -30,7 +30,7 @@ The source implementation includes these controls:
 
 ## 3. Static verification evidence
 
-GitHub Actions run [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269) completed with **success** on checker commit `7f5092f1663f8a899449a16f3b6588df80c19bef`. Its log reports 26 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
+GitHub Actions run [37950552410](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37950552410) completed with **success** on checker commit `7f5092f1663f8a899449a16f3b6588df80c19bef`. Its log reports 26 static checks passing, including collection/flush structure, candidate-set allocation failure handling, producer write boundaries, deterministic source tie-break, lock-state checks, and lexical balance.
 
 This is source-level structural evidence only. It does not execute the MQL resolver or prove permutation-independent runtime behavior.
 
