@@ -2,20 +2,21 @@
 
 ## Status
 
-- **Static remediation:** implemented on the audit branch.
-- **Static structural checks:** prior baseline passed; latest run intentionally FAILS on the unresolved SL-arbitration blocker.
-- **MetaEditor compilation:** NOT RUN.
+- **Static remediation:** implemented on the audit branch, including same-cycle SL proposal collection and arbitration.
+- **Latest static structural checks:** PASS (22 checks) on GitHub Actions run [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375).
+- **MetaEditor compilation:** NOT RUN; MetaEditor and Wine are not available in the current execution environment.
 - **Strategy Tester / demo / live runtime tests:** NOT RUN.
 - **Release approval:** **BLOCKED / NOT VERIFIED**.
 
-This report records source changes, not a claim of broker-tested correctness or profitability. The main branch was not modified.
+This report records source changes and static evidence only. It does not claim broker-tested correctness, profitability, or release readiness. The `main` branch has not been modified.
 
 ## Source under review
 
 - File: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
-- Post-remediation Git blob SHA: `d53f58dc514cb449c80997023275321c166e0d4c`
+- Current Git blob SHA (not a raw-file SHA-256): `e06de0463d7dbeb26b50d7c1490e2b69d5d63aaf`
 - Branch: `audit/expose-cleaned-source-20261009`
-- Latest source-changing commit: `1dc1234cbfe414f5dd0678a4322894f863ab53e8`
+- Latest source-changing commit: `9b91af646a0362bbf38b184cdc2d3effebd28239`
+- Latest static-checker commit: `6c7213801bf5b405e88b00e34f0d4e3f74134831`
 
 ## Implemented changes
 
@@ -48,53 +49,61 @@ The rollback check intentionally does not rely on magic number alone because UI-
 
 ### 3. Stale TP snapshot conflict mitigation
 
-Before `trade.PositionModify(ticket,newSL,tp)`, the writer now reselects the position and compares the live TP against the earlier snapshot. If the position side or TP changed, it aborts rather than knowingly submitting the stale TP value. It also rechecks the current SL monotonicity and SL validity immediately before submission.
+Before `trade.PositionModify(ticket,newSL,tp)`, the writer reselects the position and compares the live TP against the earlier snapshot. If the position side or TP changed, it aborts rather than knowingly submitting the stale TP value. It also rechecks the current SL monotonicity and SL validity immediately before submission.
 
 **Boundary:** MQL5's combined SL/TP modification is not a compare-and-swap operation. A race can still occur between this final read and the server request. The change reduces the stale-snapshot window; it does not prove that concurrent manual/EA TP changes are impossible.
 
+### 4. Same-cycle SL arbitration
+
+The former one-proposal call pattern has been replaced on this branch:
+
+- The automatic management cycle collects initial-protection, profit-protection, and trailing candidates before broker submission.
+- Each queued candidate records ticket and cycle, as well as source, reason, and SL.
+- The flush resolves the full candidate set per ticket. BUY chooses the highest valid improving SL; SELL chooses the lowest valid improving SL. Equal-price ties use stable source priority.
+- Candidate prices are normalized and revalidated with `IsValidSLForPosition()`; the selected request is revalidated again by the existing modify bridge.
+- Non-initial automatic proposals are rejected outside collection rather than silently falling back to direct synchronous writes.
+- Explicit user SAVE remains synchronous. Initial protective SL for a newly-created position also retains a deliberate synchronous lifecycle fallback before the next scheduled management cycle.
+- If queue allocation fails, the automatic batch aborts instead of resolving an incomplete set. If the temporary per-ticket candidate array cannot hold the complete set, that ticket is skipped.
+- Automatic lock bookkeeping is deferred during collection. Already-satisfied lock targets are credited only after re-reading live position state. Arbitration confirmation rejects a missing actual SL before lock-pips bookkeeping.
+
+The static checks validate the encoded source structure, but do not execute the MQL resolver or prove permutation-independent runtime behavior.
+
 ## Static verification performed
 
-Checks were run against the fetched post-remediation source:
+The latest GitHub Actions run, [37931964375](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37931964375), completed with **success** on checker commit `6c7213801bf5b405e88b00e34f0d4e3f74134831`. Its job log reports 22 passing checks, including:
 
-- A repeatable static-check script was added at `tools/audit_static_checks.py` and wired into `.github/workflows/mql5-static-audit.yml`.
-- GitHub Actions run `37925518037` completed with **success** on workflow commit `0924bba5beae1392b31df82af3ee8cdaa7812904`. The job log shows all nine structural guardrails passed and explicitly reports SL arbitration and all runtime/build/legal checks as still open. This run validated the script and source state at that workflow commit; later report-only commits do not alter the source or script.
+- one direct `trade.OrderDelete()` writer and one direct `trade.PositionModify()` writer;
+- four order-creation paths using the shared directional-volume guard;
+- delete authorization and expiration checks;
+- TP snapshot conflict mitigation;
+- same-cycle proposal collection, full candidate-set resolution, deterministic tie-break, and allocation-failure handling;
+- prevention of non-initial automatic SL writes outside arbitration cycles;
+- candidate-producer write boundaries and confirmation of a nonzero actual SL before profit-lock bookkeeping;
+- lexical balance of delimiters, comments, and literals.
 
-- Delimiter/comment/string lexical balance: **PASS** (no unmatched braces, brackets, parentheses, or unterminated comments/literals).
-- `trade.OrderDelete(...)` write sites: **1**.
-- `trade.PositionModify(...)` write sites: **1**.
-- Shared directional-volume guard definition: **1**.
-- Guard call sites: **4**, covering all four order-creation families listed above.
-- Rollback source-to-comment matching: **PASS** for automatic, manual, and hedge creator tags.
-- Delete-writer expiry revalidation present: **PASS**.
-- Fresh position TP snapshot check present: **PASS**.
-- Source size after final rollback-tag correction: approximately 290 KB / 8,796 lines; re-fetch the exact blob before release and freeze its raw SHA-256.
+These are static structural checks only. They do not prove compiler validity, MQL runtime behavior, broker compatibility, profitability, or release readiness.
 
-These are static structural checks only. They are not a substitute for MetaEditor, Strategy Tester, demo, or broker integration testing.
+## Verification blockers still open
 
-### Fail-closed regression gate added (2026-10-09)
-
-The static checker now treats the confirmed one-proposal SL resolver call pattern as a hard failure instead of only printing an informational `OPEN` line. Latest run `37927127485` failed for exactly this reason: all other listed structural checks and lexical balance passed, while `SL submit does not force single-proposal arbitration` failed. This is intentional: CI no longer gives a green result while the known SL arbitration root cause remains in the source. See [run 37927127485](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37927127485). The gate is a regression tripwire, not the fix itself.
-
-## Root causes still open
-
-1. **SL proposal arbitration:** `STB_SubmitPositionSL` still passes one proposal at a time to `STB_ResolvePositionSL`; no complete same-cycle collection/arbitration across initial protection, profit protection, and trailing was established. A fail-closed CI regression gate now fails on this pattern. The design and acceptance criteria are recorded in `docs/SAME_CYCLE_SL_ARBITRATION_REMEDIATION_DESIGN_20261009.md`, but the source fix is still open.
-2. **Cross-event/cross-instance behavior:** per-cycle write deduplication does not by itself prove no duplicate request across `OnTick`, `OnTimer`, restarts, or multiple EA instances.
-3. **Build provenance:** the exact post-remediation source has not been compiled into a newly hashed EX5 with a recorded MetaEditor/toolchain version and raw compile log.
-4. **Dependency/package provenance:** the backup ZIP has not been extracted and independently inventoried; ALGLIB presence in the repository alone does not establish whether the distributed package uses or ships it. License and attribution review remains open.
+1. **Functional SL arbitration tests:** candidate permutations, BUY/SELL monotonicity, pre-existing stops, and initial/profit/trailing contention have not been exercised in the MQL runtime.
+2. **Cross-event/cross-instance behavior:** per-cycle write deduplication does not by itself prove behavior across `OnTick`, `OnTimer`, transaction bursts, restarts, or multiple EA instances.
+3. **Build provenance:** the exact source has not been compiled into a newly hashed EX5 with a recorded MetaEditor/toolchain version and complete compiler log.
+4. **Dependency/package provenance:** the distributable ZIP has not been extracted and independently inventoried; ALGLIB presence in the repository alone does not establish whether the package uses or ships it. License and attribution review remains open.
 5. **Runtime behavior:** no Strategy Tester, demo, reconnect/restart, partial-fill, multi-EA, netting/hedging, or broker-specific validation has been run.
 6. **Independent review:** no independent qualified code review has signed off on the trading-safety changes.
+7. **Other product guardrails:** account-wide daily-loss/max-drawdown protection and the default risk-sizing behavior still require their own evidence and disposition.
 
 ## Required acceptance before release
 
-- Compile this exact source blob in the intended MetaEditor/compiler version; preserve raw log, exit code, warnings, and build settings.
-- Run the order creation matrix for all four paths, including directional exposure already at/near the broker limit, positions plus pending orders, foreign/manual orders, and concurrent exposure changes.
-- Run delete-policy tests for fresh rollback, stale ticket, wrong source, foreign ticket, manually overridden pending, server expiry, and local-age expiry.
-- Run SL/TP conflict tests with manual TP edits immediately before modification; verify that conflicts abort and that no TP is overwritten.
-- Exercise SL proposal ordering/arbitration and event ordering across tick/timer/trade-transaction events.
-- Run restart/reconnect, partial-fill, netting and hedging tests on a demo account.
-- Freeze source and EX5 hashes; review the complete distributable package and dependency licenses/attribution.
-- Obtain independent review before any production release.
+- Compile the exact source blob in the intended MetaEditor/compiler version; preserve the full log, exit code, warnings, and build settings.
+- Run candidate-order permutations and SL-01 through SL-10 from `docs/RELEASE_ACCEPTANCE_TEST_MATRIX_20261009.md`, including BUY/SELL, stops/freeze levels, TP changes, broker rejections, manual override, and lock-state reconciliation.
+- Run the order-creation matrix for all four paths, including volume limits, pending plus open exposure, foreign/manual orders, and concurrent exposure changes.
+- Run delete-policy tests for fresh rollback, stale ticket, wrong source, foreign ticket, manual override, server expiry, and local-age expiry.
+- Run restart/reconnect, partial-fill, netting/hedging, and multiple-instance scenarios on a demo account.
+- Freeze raw source SHA-256 and EX5 SHA-256; record toolchain, settings, compiler log, and source-to-binary provenance.
+- Inventory the complete distributable package and include closure; review dependency origins and licenses/attribution.
+- Obtain an independent review and document the final release decision.
 
 ## Final decision
 
-**The code has been upgraded in three bounded safety areas, the creator-specific rollback-tag policy was cross-checked against the actual order comment strings, and static structural checks passed. The overall product is not yet confirmed as a verified final release. Release remains blocked until the open items and acceptance suite above are completed.**
+The source has been updated in the bounded order-safety areas above, and the latest encoded static checks pass. **Overall release remains BLOCKED / NOT VERIFIED** until the exact-source build, runtime acceptance suite, artifact provenance, package/license review, and independent review are complete.
