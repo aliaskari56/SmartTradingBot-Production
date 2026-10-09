@@ -2,11 +2,11 @@
 
 Branch: `audit/expose-cleaned-source-20261009`  
 Primary source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`  
-Current source Git blob: `cc4c11b1b9693c3ff2583c21c9e798c1bd9b45d7` (Git blob ID; not raw-file SHA-256)  
-Latest source-changing commit: `a901d47128c82af4789edb4b825b73167373f3e2`  
-Observed source size: 300,912 bytes; 9,064 lines  
-Static checker Git blob: `2c90d3a6a438478c61592e93d3907d0734295cce`  
-Latest static run for this source/checker: [37938088631](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37938088631) — success, 24 checks passed.
+Current source Git blob: `fdce203d23a08eb4ca2966d4a09719c3e4a89397` (Git blob ID; not raw-file SHA-256)  
+Latest source-changing commit: `b4c08e84135c0ceb170e5e4b3e996957f3d8ce82`  
+Observed source size: 304,511 bytes; 9,156 lines  
+Static checker Git blob: `7f5092f1663f8a899449a16f3b6588df80c19bef`  
+Latest static run for this source/checker: [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) — success, 26 checks passed.
 
 ## 1. Executive decision
 
@@ -58,6 +58,14 @@ The close-deal cleanup runs before the deal-magic filter. Partial `OUT`/`OUT_BY`
 
 **Still required:** runtime partial-close, full-close, reversal, netting and hedging tests. Current evidence is source-structural only.
 
+### RC-13 — Active profit-lock floor under same-cycle contention
+
+A final review found that a queued profit-protection proposal could pass producer-time validation, then fail the shared resolver snapshot while a weaker trailing candidate remained selectable. The flush previously used the presence of any queued profit candidate as a reason to persist the actual SL as locked pips, even when that actual stop did not reach the mandatory +20-pip target.
+
+The resolver now checks current net profit against the +50-pip trigger and enforces the normalized +20-pip target as a floor for automatic candidates whenever the position already has an SL. If no candidate satisfies that floor, it does not replace the existing stop with a weaker one. Only when the position has no SL at all may the resolver use the strongest valid non-profit-lock proposal as an emergency fallback; that fallback is not credited as a confirmed +20-pip lock. Lock-state persistence after the flush now requires the verified actual SL to satisfy the normalized policy target.
+
+**Still required:** run SL-12 with BUY and SELL positions, competing trail/initial candidates, live stop/freeze constraints that reject the +20-pip target, and both existing-SL and no-SL cases. Static CI checks code structure only; it does not simulate broker behavior.
+
 ## 3. Remaining root causes and release blockers
 
 | ID | Area | Current status | What closes the gap |
@@ -75,7 +83,7 @@ Other configuration caveats remain: `InpUseRiskSizing` defaults to `false`; the 
 
 ## 4. Verification evidence
 
-The latest static run [37938088631](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37938088631) completed successfully with 24 passing source-structure checks, including:
+The latest static run [37941413234](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37941413234) completed successfully with 26 passing source-structure checks, including:
 
 - one central order-delete writer and one central position-modify writer;
 - all four order-creation paths using shared directional-volume preflight;
@@ -112,7 +120,7 @@ This is preparation only. No PowerShell or MetaEditor execution occurred in this
 
 ## Final conclusion
 
-The same-cycle SL arbitration, shared directional-volume guard, final expiry-delete ownership check and partial-close lock-state handling are integrated in the audit branch and covered by 24 passing static checks. That is a material source-level improvement, but not a compiler/runtime certification.
+The same-cycle SL arbitration, shared directional-volume guard, final expiry-delete ownership check and partial-close lock-state handling are integrated in the audit branch and covered by 26 passing static checks. That is a material source-level improvement, but not a compiler/runtime certification.
 
 **Final static status: PASS FOR THE CHECKS ENCODED.**  
 **Final technical status: OPEN.**  
