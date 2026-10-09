@@ -9,7 +9,7 @@ Primary source: MQL5/Experts/SmartTradingBot_FINAL.mq5
 
 **Release status: BLOCKED / NOT VERIFIED.**
 
-The highest-priority source-structure findings tracked in earlier root-cause reports have been remediated on the audit branch in the areas of delete authorization, shared directional-volume preflight, and same-cycle SL arbitration. The latest associated GitHub Actions run, [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490), passed 24 static checks on the current source/checker content.
+The highest-priority source-structure findings tracked in earlier root-cause reports have been remediated on the audit branch in the areas of delete authorization, shared directional-volume preflight, and same-cycle SL arbitration. The latest associated GitHub Actions run, [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269), passed 26 static checks on the current source/checker content.
 
 That is not a compiler result or runtime test. MetaEditor is not available in this execution environment. No fresh compile, Strategy Tester run, demo test, broker compatibility test, package extraction, licensing decision, or independent release sign-off was performed in this pass. The checked-in EX5 is not proven to come from the source revision below.
 
@@ -18,12 +18,12 @@ No repository paths were added by this integration. The source and existing audi
 ## 2. Frozen revision and evidence
 
 - Source file: MQL5/Experts/SmartTradingBot_FINAL.mq5
-- Current source Git blob: 17059923ccb18e1b717947e4581d9790df26a368 (Git blob identifier, not raw-file SHA-256)
-- Source-changing commit: d57b5c8c588a9cfa17e6a357d26ba2b87fd00155
+- Current source Git blob: 6bca33bc8e0c961f317b0828e46faf7a6b9929b4 (Git blob identifier, not raw-file SHA-256)
+- Source-changing commit: 30d683029158bc4a1cab64e8d3d190af04b07479
 - Static checker: tools/audit_static_checks.py
-- Static checker Git blob: 179a6f2d05e75ea0a458ff72d1a2cf87aec0494d
-- Latest checked static run: [37936060490](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37936060490) — 24 PASS checks
-- Source tree reports 9,055 lines and 300,417 bytes. A Git blob identifier must not be reported as a raw SHA-256.
+- Static checker Git blob: 7f5092f1663f8a899449a16f3b6588df80c19bef
+- Latest checked static run: [37949430269](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/37949430269) — 24 PASS checks
+- Source tree reports 9,208 decoded lines; Git tree records a 305,927-byte source blob. A Git blob identifier must not be reported as a raw SHA-256.
 - Existing tracked EX5: MQL5/Experts/SmartTradingBot_FINAL.ex5, blob 348bb13126ba73b9502f82466f2d1a2bea1e8f6f. Its source/build provenance is unknown; the compile runbook does not overwrite it.
 
 The source and checker checks establish only the properties encoded by the static checker. They do not execute functions in the EA, validate MQL compiler semantics, or establish account/server behavior.
@@ -41,6 +41,8 @@ Current implementation:
 - BUY positions select the highest valid improving SL; SELL positions select the lowest valid improving SL.
 - Equal-price ties use stable source ordering.
 - Candidate geometry is tested against one shared tick/stops/freeze snapshot; the selected candidate and final broker write are validated again against live terminal state.
+- When the universal profit-lock trigger has been reached, arbitration enforces the configured lock target as a floor so trailing cannot replace it with a weaker stop. If no SL is installed and broker geometry prevents placing that target, the strongest valid non-profit-lock candidate may be used as an emergency protective fallback.
+- Lock-pips state is only persisted after the final terminal SL is verified to meet the normalized lock target. Partial OUT/OUT_BY events retain lock state while the position remains; full close and INOUT reversal clear the old state.
 - Queue-allocation failure aborts the whole automatic batch; per-ticket temporary-array failure skips that ticket rather than silently resolving a truncated candidate set.
 - Initial protection, profit protection, and trailing share one collection/flush path. Explicit user SAVE and the initial-protection lifecycle fallback remain deliberate synchronous exceptions.
 
@@ -56,7 +58,7 @@ This is a local snapshot check, not an atomic reservation. Another chart, EA, te
 ### RC-03 — The final pending-delete writer lacked the complete authorization contract
 **Prior severity: HIGH | Source structure: REMEDIATED FOR CURRENT CALLERS | Runtime proof: OPEN**
 
-STB_ExecuteOrderDelete is the single direct OrderDelete writer. It validates pending-order type and validates rollback against creator source, ticket comment family, and freshness. Expiry requests are rechecked at the writer boundary against server expiration or the configured local age rule. It checks the server retcode and requires the ticket to disappear before logging confirmation.
+STB_ExecuteOrderDelete is the single direct OrderDelete writer. It validates pending-order type and validates rollback against creator source, ticket comment family, and freshness. Expiry deletion also requires source ManagePendingOrders, an IsManagedOrder(ticket) result, and a verified symbol-management lease at the writer boundary before recalculating server/local expiration. It checks the server retcode and requires the ticket to disappear before logging confirmation.
 
 Current callers use creator rollback for OneClickHedge, PlaceSetup, and PlaceManual, plus server-expiration cleanup from ManagePendingOrders. The enum values for explicit-user-delete and explicit-cleanup are declared but have no current call sites and do not authorize a request by themselves. Do not assume a UI delete feature exists from those enum labels alone. Any future delete path must be explicitly authorized and tested. Runtime tests for wrong source/tag, stale rollback, manual/foreign order, and server response ambiguity remain NOT RUN.
 
@@ -123,7 +125,7 @@ The EA source header still has generic ProjectName / CompanyName / companyname.n
 
 | Gate | Current status | Closure evidence |
 |---|---|---|
-| Static structural checks | PASS — 24 checks in run 37936060490 | Checks only the encoded source properties |
+| Static structural checks | PASS — 24 checks in run 37949430269 | Checks only the encoded source properties |
 | Exact-source MetaEditor compile | NOT RUN HERE | Full local log, toolchain identity, exit code, raw source and EX5 hashes |
 | SL arbitration runtime suite | NOT RUN | SL-01 through SL-11 results, including permutation and lifecycle tests |
 | Shared volume limit | STRUCTURALLY PRESENT; NOT RUN | All four creation paths under netting/hedging and race scenarios |
