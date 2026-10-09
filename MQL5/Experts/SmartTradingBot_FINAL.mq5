@@ -3149,6 +3149,20 @@ bool BuildSetup(const string symbol,
    if(pip<=0.0)
       return STB_BuildReject(symbol,direction,"PIP_SIZE_INVALID");
 
+   // Risk belongs beyond the opposite side of the actual Order Block when
+   // one is found. If OB is optional and absent, use the nearest confirmed
+   // pre-BOS swing on the risk side. Do not place SL just beyond the broken
+   // swing that defines the entry trigger; that artificially compresses risk.
+   double stopAnchor=(direction>0 ? originLow:originHigh);
+   if(!hasOB &&
+      !FindStructuralStopAnchor(symbol,direction,bosShift,stopAnchor))
+      return STB_BuildReject(symbol,direction,"STRUCTURAL_STOP_ANCHOR_MISSING");
+
+   if(stopAnchor<=0.0 ||
+      (direction>0 && stopAnchor>=originHigh) ||
+      (direction<0 && stopAnchor<=originLow))
+      return STB_BuildReject(symbol,direction,"STRUCTURAL_STOP_ANCHOR_INVALID");
+
    double entryBuffer=STB_EffectiveEntryBuffer();
    s.entryBufferPips=MathMax(0.0,entryBuffer); // P4 EB contract source
    double slBuffer=STB_EffectiveSLBuffer();
@@ -3160,12 +3174,12 @@ bool BuildSetup(const string symbol,
    if(direction>0)
      {
       s.entry=NormalizePrice(symbol,originHigh + entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,breakSwing.price - slBuffer*pip);
+      s.sl=NormalizePrice(symbol,stopAnchor - slBuffer*pip);
      }
    else
      {
       s.entry=NormalizePrice(symbol,originLow - entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,breakSwing.price + slBuffer*pip);
+      s.sl=NormalizePrice(symbol,stopAnchor + slBuffer*pip);
      }
 
    if(!PreparePendingSetup(s))
@@ -3273,6 +3287,56 @@ bool BuildSetup(const string symbol,
    STB_AP_ClearActive();
 
    return true;
+  }
+
+// Find the nearest already-confirmed opposite-side swing that predates the
+// structure-break candle. This is the fallback stop anchor when no valid OB
+// exists; the broken pivot itself is an entry trigger, not a protective stop.
+bool FindStructuralStopAnchor(const string symbol,
+                              const int direction,
+                              const int bosShift,
+                              double &anchorPrice)
+  {
+   anchorPrice=0.0;
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+      return false;
+
+   int bestShift=2147483647;
+
+   if(direction>0)
+     {
+      for(int i=0;i<ArraySize(lows);i++)
+        {
+         if(lows[i].shift<=bosShift || lows[i].price<=0.0)
+            continue;
+
+         if(lows[i].shift<bestShift)
+           {
+            bestShift=lows[i].shift;
+            anchorPrice=lows[i].price;
+           }
+        }
+     }
+   else
+     if(direction<0)
+       {
+        for(int i=0;i<ArraySize(highs);i++)
+          {
+           if(highs[i].shift<=bosShift || highs[i].price<=0.0)
+              continue;
+
+           if(highs[i].shift<bestShift)
+             {
+              bestShift=highs[i].shift;
+              anchorPrice=highs[i].price;
+             }
+          }
+       }
+
+   return (anchorPrice>0.0 && bestShift<2147483647);
   }
 
 //==================================================================
