@@ -1008,3 +1008,10 @@ No executable source changed. No full dependency inventory, legal review, compil
 Added `docs/DEPENDENCY_HEADER_FINDINGS_PASS30_20261009.md`. Targeted header inspection confirmed that multiple bundled ALGLIB headers explicitly state GPL version 2 or later and credit Sergey Bochkanov / ALGLIB plus MetaQuotes. This is a concrete dependency-review gate, not proof that the EA uses ALGLIB in its compiled dependency closure or that a specific release is compliant/noncompliant. The report also records MetaQuotes copyright headers in standard trade/control/shader files and leaves STB module origin/permission unresolved. Next work must inventory the complete ALGLIB family, trace actual include/reference closure, inspect distribution contents, and verify authoritative terms. BL-06 remains OPEN.
 
 No executable source changed. No full-tree license scan, legal review, compile, Strategy Tester, runtime or demo test was performed. Release remains `BLOCKED / NOT VERIFIED`.
+
+
+## Pass 31 — ALGLIB reference and direct include-closure trace
+
+Added `docs/ALGLIB_REFERENCE_AND_INCLUDE_CLOSURE_TRACE_PASS31_20261009.md`. Rechecked exact primary source blob `955d9961e3da1d855a162ac6f4acf7bf7fc852b8`: the EA has three direct includes (MetaQuotes Trade library and two STB modules), and a case-insensitive scan found no `ALGLIB`, `CFastFourierTransform`, or `CAlglib` text references in the primary source. The two directly included STB modules themselves have no include directives. This does not establish the complete transitive include closure or the contents of the historical EX5 / backup ZIP. The ZIP binary could not be retrieved through the available file-content endpoint in this pass. ALGLIB is present in the repository's bundled Include tree; its distribution status and license obligations remain under review. BL-06 remains OPEN.
+
+No executable source changed. No archive extraction, full recursive include scan, compile, runtime, Strategy Tester, demo test or legal review was performed. Release remains `BLOCKED / NOT VERIFIED`.
