@@ -2030,6 +2030,18 @@ bool PreparePendingSetup(Setup &s)
 
    if(s.direction>0)
      {
+      // A BUY STOP whose planned trigger is already at/below the live Ask
+      // is stale, not merely too close to the broker's stop distance. Reject
+      // it instead of chasing price upward and manufacturing a late entry.
+      if(s.entry<=tick.ask)
+        {
+         Print("STB setup rejected: BUY STOP trigger already crossed symbol=",
+               s.symbol,
+               " planned=",DoubleToString(s.entry,digits),
+               " ask=",DoubleToString(tick.ask,digits));
+         return false;
+        }
+
       double minEntry=tick.ask+minDist;
       if(s.entry<minEntry)
          s.entry=minEntry;
@@ -2098,6 +2110,18 @@ bool PreparePendingSetup(Setup &s)
      }
    else
      {
+      // A SELL STOP whose planned trigger is already at/above the live Bid
+      // has already been crossed. Reject rather than pushing it lower and
+      // entering after the original breakdown level has passed.
+      if(s.entry>=tick.bid)
+        {
+         Print("STB setup rejected: SELL STOP trigger already crossed symbol=",
+               s.symbol,
+               " planned=",DoubleToString(s.entry,digits),
+               " bid=",DoubleToString(tick.bid,digits));
+         return false;
+        }
+
       double maxEntry=tick.bid-minDist;
       if(s.entry>maxEntry)
          s.entry=maxEntry;
