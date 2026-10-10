@@ -6908,7 +6908,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      c.rejectReason="REJECT_SPREAD";
+      c.rejectReason="REJECT_QUALITY_SCORE_BELOW_MINIMUM";
       return false;
      }
 
@@ -6940,14 +6940,22 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_ExposureAllowsExecution(const Setup &s)
+bool STB_ExposureAllowsExecution(const Setup &s,string &reason)
   {
+   reason="";
+
    if(HasManagedExposure(s.symbol))
+     {
+      reason="MANAGED_EXPOSURE_EXISTS";
       return false;
+     }
 
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
+     {
+      reason="ACCOUNT_ORDER_LIMIT";
       return false;
+     }
 
    return true;
   }
@@ -6955,15 +6963,23 @@ bool STB_ExposureAllowsExecution(const Setup &s)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_FinalAutoGate(const Setup &s)
+bool STB_FinalAutoGate(const Setup &s,string &reason)
   {
+   reason="";
+
    if(!g_autoTrading)
+     {
+      reason="AUTO_TRADING_OFF";
       return false;
+     }
 
    if(!STB_TradeEnvironmentAllowed())
+     {
+      reason="TRADE_ENVIRONMENT_REJECT";
       return false;
+     }
 
-   if(!STB_ExposureAllowsExecution(s))
+   if(!STB_ExposureAllowsExecution(s,reason))
       return false;
 
    return true;
@@ -6992,10 +7008,29 @@ void STB_ExecuteTopCandidate()
 
       Setup validated;
       if(!STB_FinalCandidateRevalidation(c,validated))
+        {
+         Print("STB CANDIDATE REJECT",
+               " stage=FINAL_REVALIDATION",
+               " symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " reason=",(c.rejectReason=="" ? "UNSPECIFIED":c.rejectReason),
+               " rank=",IntegerToString(c.currentRank),
+               " score=",DoubleToString(c.opportunityScore,1));
          continue;
+        }
 
-      if(!STB_FinalAutoGate(validated))
+      string finalGateReason="";
+      if(!STB_FinalAutoGate(validated,finalGateReason))
+        {
+         Print("STB CANDIDATE REJECT",
+               " stage=FINAL_AUTO_GATE",
+               " symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " reason=",(finalGateReason=="" ? "UNSPECIFIED":finalGateReason),
+               " rank=",IntegerToString(c.currentRank),
+               " score=",DoubleToString(c.opportunityScore,1));
          continue;
+        }
 
       if(PlaceSetup(validated))
         {
@@ -7447,7 +7482,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      q.reason="REJECT_SPREAD";
+      q.reason="REJECT_QUALITY_SCORE";
       return false;
      }
 
@@ -10302,7 +10337,8 @@ int OnInit()
    Print("STB TRADE ENV terminal=",
          TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "ON":"OFF",
          " program=",MQLInfoInteger(MQL_TRADE_ALLOWED) ? "ON":"OFF",
-         " account=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+         " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+         " accountTrade=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ON":"OFF",
          " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
 
    Print("STB INIT symbol=",_Symbol,
