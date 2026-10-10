@@ -225,3 +225,24 @@ Before considering any strategy changes, compare the existing fixed baseline wit
 5. Do not select a variant based on net profit alone; reject changes that materially worsen drawdown or rely on very few trades.
 
 No such tests have been run as part of this source audit. No MQL5 source was modified or compiled.
+
+## Follow-up audit — shortlist confidence edge case
+
+Inspection of the repair-branch scanner code (STB_ScannerRun(), source SHA e81fd4632717928e4499cb948bd9269d68533fdd) clarifies an important configuration edge case:
+
+- The scanner sets topCount = min(InpScannerTopN, 10, validated-watchlist-size).
+- It requires the configured minimum score for a candidate to be considered CLEAR.
+- The top-versus-runner-up gap is checked only when g_scannerTop10Count > 1. If the validated shortlist contains exactly one candidate—or InpScannerTopN=1—the gap test is skipped, and a candidate meeting the score floor can be marked CLEAR without a competitor comparison.
+- This is not automatically a bug: a single eligible candidate may be acceptable by design. But it means the confidence label does not always mean “the best candidate is sufficiently better than the runner-up.” Tests should include zero, one, and multiple validated candidates, plus Top-N values of 1 and 2 or more.
+- The scanner recalculates the candidate's opportunity score after final revalidation, then sorts the validated watchlist again. The confidence check is applied to that post-validation shortlist, which is the appropriate stage to test.
+
+### Deterministic validation cases to add before changing strategy code
+
+1. Zero validated candidates: expect NO_CLEAR_WINNER and no placement attempt.
+2. One validated candidate below the score floor: expect WEAK and no placement attempt.
+3. One validated candidate above the score floor: current logic can return CLEAR; explicitly decide whether this behavior is intended.
+4. Two candidates above the floor with a gap below InpScannerMinTopGap: expect WEAK.
+5. Two candidates with a gap at or above the threshold: expect CLEAR, provided the top score meets the floor.
+6. Candidate invalidated during final revalidation: it must not remain in the shortlist or affect the final confidence gap.
+
+These are source-derived test cases, not executed test results. No EA source was changed or compiled, and no backtest was run.
