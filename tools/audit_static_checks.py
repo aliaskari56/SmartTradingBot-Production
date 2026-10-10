@@ -237,9 +237,9 @@ def main() -> int:
          all(token in source for token in (
              "ulong cycleBefore=g_scannerCycle;",
              "STB_ScannerRun();",
-             "if(g_scannerCycle!=cycleBefore)")))
-         and source.find("ulong cycleBefore=g_scannerCycle;", source.find("void OnTimer()")) <
-             source.find("STB_ScannerRun();", source.find("void OnTimer()"))),
+             "if(g_scannerCycle!=cycleBefore)")) and
+         source.find("ulong cycleBefore=g_scannerCycle;", source.find("void OnTimer()")) <
+         source.find("STB_ScannerRun();", source.find("void OnTimer()"))),
     ]
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
