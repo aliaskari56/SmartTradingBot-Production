@@ -6,6 +6,11 @@ This change adds observability before a controlled Strategy Tester run. It does 
 
 ## Source change
 
+- `InpAutoTrading` now defaults to `true`.
+- In Strategy Tester, `InpTesterForceAutoTrading=true` now explicitly forces the EA's internal AUTO gate on (`InpAutoTrading || InpTesterForceAutoTrading`). This fixes the previous AND condition, which incorrectly left AUTO off when a `.set` file had `InpAutoTrading=false`.
+- This does **not** override MetaTrader terminal/program/account trade permissions, broker/tester order rules, or any strategy/risk validation. Those permissions must be enabled in the test environment, and their effective values are logged at startup.
+- `InpTesterChartSymbolOnly` remains `true` by default; the tester is intentionally restricted to the chart symbol unless the test explicitly changes that universe. This is not a signal filter, but it does limit symbol coverage.
+
 Source file: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
 
 Expected source behavior remains unchanged:
