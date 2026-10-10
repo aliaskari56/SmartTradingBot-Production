@@ -186,3 +186,20 @@ New findings:
 - `InpAutoTrading=false`, `InpUseRiskSizing=false`, `InpAllowUniversal=true`, `InpScannerMinScore=55`, and `InpScannerMinTopGap=3` are source defaults; the runtime `.set` inputs may differ. The `STB INIT` log should be checked for effective auto/universal settings.
 
 No MQL5 source was changed, compiled, or backtested in this follow-up. The only repository write was this documentation update.
+
+
+## Follow-up audit — initialization and order execution gates
+
+Inspected the v1.126 repair-branch source at `MQL5/Experts/SmartTradingBot.mq5` (source SHA `e81fd4632717928e4499cb948bd9269d68533fdd`).
+
+- `OnInit()` prints an `STB INIT` line containing the effective `auto`, `autoInput`, `universal`, strict pattern-filter and oscillator/adaptive settings. These runtime values matter more than source defaults because inputs and persisted AUTO state can affect behavior.
+- The startup `STB TRADE ENV` line prints terminal, program, account-expert, and tester flags, but does **not** print `ACCOUNT_TRADE_ALLOWED`. The actual `STB_TradeEnvironmentAllowed()` gate checks that additional account-trading flag too. Therefore a startup line showing `account=ON` alone does not prove every trade permission gate is open. The runtime rejection log `STB TRADE ENV REJECT` does include `accountTrade=`.
+- Scanner execution silently skips candidates when final revalidation or the final auto/exposure gate fails. Placement-level failures are more explicit through `STB PLACE REJECT`, while OrderCheck failures log `STB ORDERCHECK REJECT`; successful pending-order creation logs `STB AUTO PENDING CREATED`.
+- The scanner's initial symbol loop uses `continue` for ineligible data, market-quality failures, unstable regimes, and failed `BuildSetup()` calls. Those individual failures are not logged there. As a result, a scanner summary with zero candidates may not identify the exact reason.
+- In fixed-lot mode, requested volume is `InpBaseLots * (InpTrendLotMultiplier or InpUniversalLotMultiplier)`; the actual stop-distance risk can vary. This is another reason to verify effective inputs and evaluate only in Strategy Tester/demo before any deployment.
+
+### Diagnostic conclusion
+
+For a runtime log that shows `terminal=ON program=ON account=ON tester=NO`, the available line does not establish that `auto=ON`, that `ACCOUNT_TRADE_ALLOWED` is true, or that any scanner candidate passed. The next useful evidence is the matching `STB INIT` line and one complete `STB SCANNER SUMMARY`, followed by any `STB PLACE REJECT`, `STB ORDERCHECK REJECT`, `STB TRADE ENV REJECT`, or `STB AUTO PENDING CREATED` lines. This identifies which gate was reached without changing execution logic.
+
+This is a source-audit/documentation update only. No MQL5 source was modified, compiled, backtested, or executed.
