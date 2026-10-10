@@ -145,27 +145,44 @@ A readable MQL5 file was found in `aliaskari56/AstraCore-Cloud-Repair` at commit
 
 | Strategy part | Existing implementation | Gap against proposed design |
 |---|---|---|
-| 1. Scanner | `STB_BuildScannerUniverse()` builds explicit-symbol or Market Watch universe; `ScanWatchlist()` evaluates BUY and SELL setup per symbol. | It does not rank all eligible symbols and choose a global top candidate. Existing setup score is built mainly from H4 alignment, BOS recency, RR, FVG/OB and oscillator confirmation; it does not implement the proposed 25/25/20/15/15 component model. |
-| 2. Regime | `GetH4Trend()` provides H4 trend context; spread and direction tradability have separate checks. | No unified, explicit uptrend/downtrend/range/extreme-volatility/unknown regime router was identified in the inspected setup/scanner path. |
-| 3. Entry | `BuildSetup()` checks oscillator conditions (when hard filter is enabled), cooldown, H4 alignment/universal mode, CHoCH/BOS, FVG/OB, swing structure, entry/SL/TP geometry and minimum RR. | The proposed trend-pullback-confirmation design is not represented as a single explicit regime-routed strategy; behavior is spread across existing conditions. |
-| 4. Risk/execution | The source includes tradability checks, spread checks, pending setup normalization, exposure checks, fixed-lot default with optional risk sizing, and order validation paths. | Risk sizing is disabled by default in the inspected inputs. The effective defaults and every broker/execution edge case need test coverage before changes are accepted. |
-| 5. Measurement/learning | Adaptive profile logic and logs exist; setup score, direction and RR are logged in relevant paths. | The inspected log schema does not establish that all proposed attribution fields (regime, H4-alignment state for every candidate, score components, estimated cost, and consistent rejection reason) are recorded together for every opportunity. Adaptive behavior should be evaluated separately from a fixed baseline. |
+| 1. Scanner | In the `repair/smarttradingbot-boundary-hardening-20261007` snapshot, `STB_ScannerRun()` evaluates BUY/SELL candidates across an allow-listed symbol universe, sorts candidates globally, revalidates the watchlist, and keeps a configurable Top-N. | This branch already has global ranking, so the older claim that the scanner does not rank across symbols is not true for this snapshot. The score uses 65% strategy, 20% market quality, 10% regime fit, and 5% stability—not the proposed 25/25/20/15/15 model. The allow-list implementation and effective candidate counts still need validation in MT5. |
+| 2. Regime | `STB_EvaluateRegime()` classifies trending, ranging, transition, high volatility, low volatility, or unstable using H4 trend, M15 efficiency, and ATR ratio. | This is a heuristic classifier, not a validated edge. Ranging/high/low-volatility regimes receive nonzero fit scores rather than always being hard-rejected; their behavior should be tested explicitly. |
+| 3. Entry | `BuildSetup()` checks tradability, spread, optional hard oscillator filters, cooldown, H4 alignment/universal mode, CHoCH/BOS, FVG/OB, swing structure, geometry, and RR. | `InpAllowUniversal=true` means H4 misalignment is not automatically rejected. The scanner's regime fit is a score component rather than a strict direction/regime gate. Whether that behavior is desirable is an empirical question. |
+| 4. Risk/execution | The source includes pending-order geometry checks, `OrderCheck`, volume/exposure constraints, trade-environment checks, fixed-lot default with optional risk sizing, and server-retcode validation. | `InpUseRiskSizing=false` by default. Fixed lots plus `InpTrendLotMultiplier=2.0` can make aligned setups use a larger lot than universal setups; actual risk varies with stop distance unless risk sizing is enabled. All behavior must be tested in Strategy Tester/demo before deployment. |
+| 5. Measurement/learning | Adaptive profile logic, setup/order logs, rejection reasons, regime/quality score fields, and scanner summary counters exist. | The scanner silently skips several eligibility/quality/regime failures, and the market-quality function maps some below-threshold scores to `REJECT_SPREAD` even when volatility/activity/freshness contributed. Candidate-level auditability is therefore incomplete; adaptive behavior should be tested separately from a fixed baseline. |
 
 ### Confirmed scanner behavior worth noting
 
-- In the inspected snapshot, `InpTesterChartSymbolOnly=true` isolates the Strategy Tester universe to `_Symbol`; this is deliberate test reproducibility behavior, not by itself a bug.
-- An empty `InpScannerSymbols` falls back to Market Watch in normal scanning.
-- `ScanWatchlist()` loops through the universe and can place setups for multiple symbols during one scan (subject to its exposure checks). It is not currently a global rank-then-select pipeline.
-- `BuildSetup()` computes H4 alignment and rejects misaligned setups only when `InpAllowUniversal` is false. Thus a proposed BUY-only H4 gate would be an additional experimental rule, not a correction proven by this audit.
+- In the inspected repair branch, `InpTesterChartSymbolOnly=true` restricts Strategy Tester scanning to `_Symbol`; the normal scanner uses the symbols that pass `STB_ScannerIsAllowListed()` from the terminal symbol list.
+- The scanner cycle is keyed to the latest closed M15 bar (`iTime(_Symbol, PERIOD_M15, 1)`), so a timer firing every 10 seconds does not mean a full universe rescan every 10 seconds.
+- `STB_ScannerRun()` ranks candidates globally, then revalidates the shortlist and executes at most one successfully placed candidate per scan cycle.
+- `BuildSetup()` computes H4 alignment and rejects misaligned setups only when `InpAllowUniversal` is false. Thus a proposed BUY-only H4 gate would be an additional experiment, not a correction proven by this audit.
+- Scanner confidence is `CLEAR` only when the top score meets `InpScannerMinScore` and, when there is a runner-up, its lead meets `InpScannerMinTopGap`; otherwise execution is skipped.
 - `InpMinimumRR` defaults to 1.0 and `InpTrailStartPips` defaults to 150.0 in this snapshot. These are existing settings, not evidence that the proposed 1.5 RR hypothesis is better.
 - `InpUseRiskSizing` defaults to false. Do not infer risk-based sizing is active unless the runtime configuration explicitly enables it.
 
 ### Recommended implementation sequence
 
 1. Confirm that the v1.126 repair-branch source is identical to the compiled `SmartTradingBot_FINAL` artifact (for example, compare source hash/version and compile the exact source in MetaEditor). Do not port changes until this is confirmed.
-2. Add candidate-level diagnostic attribution using the existing logging path before changing entry selection.
-3. Establish the baseline and test a BUY-only H4-alignment gate as one isolated, reversible experiment; preserve both aligned and unaligned candidate outcomes.
-4. Add a unified regime classifier and weighted symbol ranking only after the instrumentation supports validating them.
-5. Keep all proposed features behind explicit inputs and default them off until compile checks, deterministic backtests, and out-of-sample evaluation pass.
+2. Repair candidate-level diagnostics: distinguish low-quality score causes (spread, volatility, activity, stale quote) and emit compact rejection counts/reasons without excessive log spam.
+3. Validate scanner allow-list behavior, closed-M15-bar cadence, top-gap confidence, and final candidate revalidation with deterministic tests.
+4. Establish a fixed baseline and test any BUY-only H4-alignment gate as one isolated, reversible experiment; preserve aligned and unaligned candidate outcomes.
+5. Keep any future score/regime changes behind explicit inputs until compile checks, deterministic backtests, and out-of-sample evaluation pass.
 
 This audit is source inspection only. No MQL5 code was changed or compiled, and no backtest or trade was run.
+
+
+## Follow-up audit — repair branch `repair/smarttradingbot-boundary-hardening-20261007`
+
+The repair branch was inspected after finding that the runtime log signature matches its `OnInit` log. Its source SHA is `e81fd4632717928e4499cb948bd9269d68533fdd` and it declares EA version 1.126. This is the strongest current source candidate, but the compiled `SmartTradingBot_FINAL` identity is still not verified.
+
+New findings:
+- Contrary to the earlier snapshot's behavior, this repair branch has a global candidate ranker: 65% strategy score, 20% market-quality score, 10% regime-fit score, and 5% stability score.
+- The regime classifier is implemented and uses H4 trend, M15 directional efficiency, and relative ATR to label trending/ranging/transition/high-volatility/low-volatility/unstable states.
+- A full scanner cycle only runs when a new closed M15 bar appears. `InpScanSeconds=10` is the timer cadence, not a guarantee of a full scan every 10 seconds.
+- It ranks and revalidates the shortlist, and only attempts execution when scanner confidence is `CLEAR`; this requires the top score to meet `InpScannerMinScore` and its gap over the runner-up to meet `InpScannerMinTopGap`.
+- The scanner attempts to execute at most one candidate successfully per scan cycle.
+- `STB_CalcMarketQuality()` can report `REJECT_SPREAD` for a below-threshold aggregate quality score even when volatility, activity, or freshness contributed to the low score. Several scanner-stage rejections are skipped without a per-symbol log, so diagnosis from summary counts alone can be difficult.
+- `InpAutoTrading=false`, `InpUseRiskSizing=false`, `InpAllowUniversal=true`, `InpScannerMinScore=55`, and `InpScannerMinTopGap=3` are source defaults; the runtime `.set` inputs may differ. The `STB INIT` log should be checked for effective auto/universal settings.
+
+No MQL5 source was changed, compiled, or backtested in this follow-up. The only repository write was this documentation update.
