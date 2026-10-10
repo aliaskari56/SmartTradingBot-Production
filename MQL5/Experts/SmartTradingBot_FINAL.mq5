@@ -8533,13 +8533,11 @@ int OnInit()
 // Every currently open position is checked immediately through the one cycle.
    STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
 
-   if(PositionsTotal()==0 && OrdersTotal()==0)
-     {
-      STB_ScannerRun();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-     }
-   else
-      Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+   // Scan independently of unrelated account-wide positions/orders.
+   // Per-symbol managed exposure and the account order limit are enforced
+   // later at candidate execution; global totals must not suppress all signals.
+   STB_ScannerRun();
+   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
 
    UpdatePanel();
    return INIT_SUCCEEDED;
@@ -8887,14 +8885,11 @@ void OnTick()
    if(m15Bar)
      {
        STB_ReconcileTradeRegistry();
-       if(PositionsTotal()==0 && OrdersTotal()==0)
-         {
-          STB_ScannerRun();
-          STB_ExecuteTopCandidate();
-          g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-         }
-       else
-          Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       // Do not let an unrelated position/order on another symbol block the
+       // scanner. Candidate-level exposure and account limits remain enforced.
+       STB_ScannerRun();
+       STB_ExecuteTopCandidate();
+       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
        UpdatePanel();
      }
   }
@@ -8929,14 +8924,11 @@ STB_ReconcileTradeRegistry();
 
 
 
-      if(PositionsTotal()==0 && OrdersTotal()==0)
-        {
-         STB_ScannerRun();
-         STB_ExecuteTopCandidate();
-         g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-        }
-      else
-         Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+      // Account-wide totals are not a scanner gate: an unrelated position
+      // or order must not suppress valid candidates on other symbols.
+      STB_ScannerRun();
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
 
 
