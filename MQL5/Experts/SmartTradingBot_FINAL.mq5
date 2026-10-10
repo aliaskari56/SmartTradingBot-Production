@@ -31,7 +31,7 @@ input int     InpScannerMaxQuoteAgeSec    = 300;
 input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
-input bool    InpTesterForceAutoTrading  = true;  // tester only; prevents stale/missing .set state from disabling order placement
+input bool    InpTesterForceAutoTrading  = true;  // tester only; forces the EA AUTO gate ON regardless of stale .set state
 input bool    InpTesterChartSymbolOnly   = true;  // tester only; isolates the test universe to _Symbol
 
 input group "=== RSI + CCI COMPOSITE ==="
