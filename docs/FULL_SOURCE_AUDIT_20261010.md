@@ -63,3 +63,25 @@ Do not merge or mark ready until:
 4. baseline and candidate are tested with identical symbol, timeframe, dates, modelling, spread, commission, and inputs;
 5. order/deal history reconciles with the EA's logs;
 6. demo-terminal restart, permissions-off, no-quotes, and broker rejection cases are tested.
+
+
+## Deeper review pass — 2026-10-10
+
+### Source paths traced in this pass
+
+- **Signal construction:** `BuildSetup` uses closed-bar structural detection, rejects stale BOS when the age input is enabled, derives entry from both the origin-zone edge and the broken swing, then routes the result through `PreparePendingSetup` for live-market/broker geometry and RR validation. An already-crossed stop trigger is rejected instead of chased.
+- **Oscillator data:** RSI/CCI are read from closed bars (`CopyBuffer(..., start_pos=1, count=2)`); the code maps the oldest copied value to shift 2 and the newest closed value to shift 1. If oscillator confirmation is enabled but data is unavailable, it only blocks setup creation when `InpOscillatorHardFilter=true`; the default is false.
+- **Pattern inputs:** with the current defaults, `InpRequireFVG=true` and `InpRequireOB=true` do **not** make either pattern mandatory because `InpStrictPatternFilters=false`. In that configuration, found patterns contribute to score, while missing OB uses a structural fallback. This is current documented behavior, not an execution-permission bypass.
+- **Candidate execution:** only a `CLEAR` top-candidate confidence state proceeds. If there are no candidates or the top-vs-second gap is too small, the EA intentionally does not place an order. Each candidate is revalidated against fresh data, direction permissions, rebuilt setup time, and pending geometry before the final AUTO/permission/exposure checks.
+- **Order creation:** the automatic path validates exposure, cooldown, volume, supported expiration, `OrderCheck`, server retcode, and initial pending SL verification. If the accepted order cannot be verified with an initial SL, it requests rollback rather than counting the setup as successfully placed.
+- **Risk sizing:** risk mode uses `OrderCalcProfit` for one lot from planned entry to SL, scales by equity risk, respects the configured volume cap, and rejects rather than rounding upward to the broker minimum when that would exceed the configured limit. This does not include a guaranteed allowance for commission, slippage, gaps, or stop execution differences; those require runtime/broker validation.
+- **Adaptive outcome lifecycle:** the transaction handler filters adaptive learning to this EA's magic and excludes hedge comments. It accumulates realized P/L across partial closes and handles `DEAL_ENTRY_INOUT` separately. Netting accounts with mixed/manual additions, broker-specific deal histories, and restart/recovery scenarios still need targeted fixtures before the outcome accounting can be certified.
+- **Protection/execution permissions:** the central position-modification writer rechecks live position geometry, symbol lease, terminal/program/account permissions, TP snapshot, retcode, and resulting SL. These are static-path observations only; they do not establish broker acceptance under freeze/stops-level constraints.
+
+### Confirmed CI result
+
+GitHub Actions run **38065393299** for source commit `84d1a46a28d214a2e0e3f006706ee19f57f33c8d` completed successfully; the `static-guardrails` job and “Run static guardrails” step both report success. This validates the repository's static guardrail script for that source revision, not compilation or runtime behavior.
+
+### Remaining audit work
+
+This pass did not establish a new confirmed source-level blocker requiring another trading-logic edit. The intentional conservative gates above can reduce order count, but loosening them without a controlled baseline/candidate backtest would not be a safe fix. Remaining priorities are full manual review of structure/swing/FVG/OB calculations, pending-trail restart and lease ownership, manual-order ownership rules, all input boundary cases, and a repeatable MT5 compile + Strategy Tester + demo-terminal regression suite. The source remains **not release-verified**.
