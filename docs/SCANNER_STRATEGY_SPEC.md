@@ -246,3 +246,26 @@ Inspection of the repair-branch scanner code (STB_ScannerRun(), source SHA e81fd
 6. Candidate invalidated during final revalidation: it must not remain in the shortlist or affect the final confidence gap.
 
 These are source-derived test cases, not executed test results. No EA source was changed or compiled, and no backtest was run.
+
+## Follow-up audit — source snapshot identity remains unresolved
+
+Additional repository checks searched both SmartTradingBot-Production and AstraCore-Cloud-Repair for the exact name SmartTradingBot_FINAL and for EX5 references; no matching source/artifact path was found in the indexed code search. This is a limited search result, not proof that no such artifact exists outside the indexed repository content.
+
+Three readable MQL5 snapshots in AstraCore-Cloud-Repair were compared by file blob SHA and opening metadata:
+
+| Branch | File blob SHA | Declared version |
+|---|---|---|
+| repair/smarttradingbot-boundary-hardening-20261007 | e81fd4632717928e4499cb948bd9269d68533fdd | 1.126 |
+| smarttradingbot-architecture-complete-v1.126-20261006 | e08e189c3bea5c00d2508c90166fb4d31de54e1d | 1.126 |
+| recovery-smarttradingbot-v126-20261006 | 17b12a2a78321be39d538ee919287869c894ef6b | 1.126 |
+
+The snapshots share the same declared version and description, but their file blob SHAs differ; inspection of the opening input sections also shows differences between branches. Therefore, version 1.126 and the matching runtime-log signature are not sufficient to establish that the compiled SmartTradingBot_FINAL came from the repair branch, or that these three source snapshots are interchangeable.
+
+### Required evidence to close the identity gap
+
+1. Obtain the exact source file used to compile the installed EX5, including its full path and source revision if available.
+2. Compile that exact source in MetaEditor and retain the compiler output and source hash.
+3. Compare the effective EA inputs from the runtime STB INIT log with the intended test configuration.
+4. Keep source identity marked UNVERIFIED until that evidence is available; do not port proposed strategy changes onto a merely similar snapshot.
+
+This is a repository/source-identity audit only. No MQL5 source was changed, compiled, backtested, or executed.
