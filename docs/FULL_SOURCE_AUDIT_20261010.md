@@ -109,3 +109,8 @@ Both `OnTick` and `OnTimer` only called the scanner when `NewM15Bar()` on the **
 ### Validation and caveats
 
 The source and static-check script were updated on the audit branch. The new static guardrail has not yet been confirmed by a fresh CI run in this note. No local Python checker execution, MetaEditor compilation, Strategy Tester run, or demo-terminal test was available at the time of this edit. In particular, verify timer behavior in Strategy Tester and confirm that repeated scans at the configured interval do not create excessive CPU/log load on a large symbol universe. The change addresses scanner scheduling only; it does not loosen strategy, AUTO, risk, broker-permission, or candidate-confidence gates.
+
+
+### Follow-up CI result for the cadence fix
+
+The first CI attempt for this change failed because the newly added Python guard had a mismatched parenthesis (workflow run `38073710433`). The guard syntax was corrected in commit `885c32b06e7d7bfa77735330018d66eb316a5875`. The subsequent workflow run **38073755753** completed successfully, including the `static-guardrails` job. The initial failure is recorded here rather than hidden. This still does not establish MQL5 compilation or timer behavior in MT5.
