@@ -211,10 +211,10 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic)"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
-        ("resolver enforces active profit-lock floor and deterministic no-SL fallback",
+        ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
-             "decisionNetProfitPips=PositionNetProfitPips(ticket);",
-             "decisionNetProfitPips>=STB_ProfitLockTriggerPips()",
+             "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
+             "decisionPriceMovePips>=STB_ProfitLockTriggerPips()",
              "meetsProfitLockFloor",
              "currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION",
              "if(!found && unprotectedFallbackFound)",
