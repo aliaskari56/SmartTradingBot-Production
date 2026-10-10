@@ -4754,8 +4754,8 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    double currentSL=PositionGetDouble(POSITION_SL);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
 
-   // If net profit has crossed the universal lock trigger, a competing
-   // automatic proposal may not replace the required lock with a weaker SL.
+   // If executable price movement has crossed the universal lock trigger,
+   // a competing automatic proposal may not replace the required lock with a weaker SL.
    // When the existing position has no SL at all, retain the strongest valid
    // non-profit-lock candidate as a last-resort protection fallback if broker
    // geometry makes the profit-lock target impossible this cycle.
