@@ -15,7 +15,7 @@ CTrade trade;
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = false;
+input bool    InpAutoTrading            = true;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -8432,7 +8432,11 @@ int OnInit()
       // Tester runs must never depend on stale terminal GlobalVariables or
       // on a missing/malformed .set toggle. The explicit tester override is
       // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading &&
+      // Tester-only force flag is an explicit override. When enabled,
+      // it must not be neutralized by InpAutoTrading=false in a stale .set.
+      // This changes only the EA's internal AUTO gate; terminal/account
+      // permissions and all strategy/risk/order validation gates still apply.
+      g_autoTrading=(InpAutoTrading ||
                      InpTesterForceAutoTrading);
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
       STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
