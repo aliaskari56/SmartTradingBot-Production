@@ -134,12 +134,12 @@ A proposed change is **not accepted** merely because it improves one metric. Bef
 
 Previously reported results show the six-month baseline had 473 trades, net loss of about 278.29, and PF 0.8017; BUY accounted for about 237.61 of net losses and SELL about 40.68 of net losses. These are user-provided report figures and have not been independently recalculated in this document. They justify investigating directional asymmetry, not concluding that H4 alignment is the cause or that this specification will be profitable.
 
-The connected repository currently exposes a canonical backup ZIP in its latest commit; the MQL5 source was not available as a directly readable repository file during this task. Therefore this change is documentation-only. No MQL5 source was modified, no build/test/backtest was run, and no live or demo order was sent.
+The production repository still does not expose a readable `SmartTradingBot_FINAL.mq5` path; the readable candidate is named `SmartTradingBot.mq5` in the separate repair repository. Therefore this change remains documentation-only. No MQL5 source was modified, no build/test/backtest was run, and no order was sent.
 
 
 ## Source audit — available MQL5 snapshot
 
-A readable MQL5 file was found in the connected `aliaskari56/AstraCore-Cloud-Repair` repository at commit `1f33cecc255da58a29da8674af28dd458cec580b` (`MQL5/Experts/SmartTradingBot.mq5`, EA version 1.126). This is a source snapshot in a different repository, so its identity with the ZIP in SmartTradingBot-Production still needs confirmation before porting changes.
+A readable MQL5 file was found in `aliaskari56/AstraCore-Cloud-Repair` at commit `1f33cecc255da58a29da8674af28dd458cec580b` (`MQL5/Experts/SmartTradingBot.mq5`, EA version 1.126). Follow-up inspection of the `smarttradingbot-architecture-complete-v1.126-20261006`, `recovery-smarttradingbot-v126-20261006`, and `repair/smarttradingbot-boundary-hardening-20261007` branches confirmed that their `OnInit` code emits the exact `STB TRADE ENV terminal=... program=... account=... tester=...` log signature supplied by the user. This strongly links the runtime log to the v1.126 source family, although it does not prove that the compiled file named `SmartTradingBot_FINAL` is byte-for-byte identical to any repository snapshot. Treat the v1.126 repair branch as the best current source candidate; verify the compiled/source identity before porting strategy changes.
 
 ### Existing behavior observed in that snapshot
 
@@ -162,7 +162,7 @@ A readable MQL5 file was found in the connected `aliaskari56/AstraCore-Cloud-Rep
 
 ### Recommended implementation sequence
 
-1. Confirm that this source snapshot is the exact source contained in the production backup ZIP. Do not port changes between repositories until this is confirmed.
+1. Confirm that the v1.126 repair-branch source is identical to the compiled `SmartTradingBot_FINAL` artifact (for example, compare source hash/version and compile the exact source in MetaEditor). Do not port changes until this is confirmed.
 2. Add candidate-level diagnostic attribution using the existing logging path before changing entry selection.
 3. Establish the baseline and test a BUY-only H4-alignment gate as one isolated, reversible experiment; preserve both aligned and unaligned candidate outcomes.
 4. Add a unified regime classifier and weighted symbol ranking only after the instrumentation supports validating them.
