@@ -114,3 +114,30 @@ The source and static-check script were updated on the audit branch. The new sta
 ### Follow-up CI result for the cadence fix
 
 The first CI attempt for this change failed because the newly added Python guard had a mismatched parenthesis (workflow run `38073710433`). The guard syntax was corrected in commit `885c32b06e7d7bfa77735330018d66eb316a5875`. The subsequent workflow run **38073755753** completed successfully, including the `static-guardrails` job. The initial failure is recorded here rather than hidden. This still does not establish MQL5 compilation or timer behavior in MT5.
+
+
+## Static dependency pass — allocation, timer, and input-validation findings
+
+This pass adds source-level findings only. No MQL5 runtime behavior is inferred from these observations.
+
+### Confirmed findings
+
+1. **Indicator-cache allocation result is unchecked** — in `EnsureIndicatorHandles()`, the code creates RSI/CCI handles and then calls `ArrayResize(g_indicatorCache,n+1)` without checking the return value before writing `g_indicatorCache[n]`. If allocation fails, the subsequent indexed writes are unsafe; the newly created handles may also remain unreleased.
+2. **Diagnostic-state allocation result is unchecked** — both `STB_LogBuildReject()` and `STB_LogSetupReady()` resize `g_diagnosticStates` and immediately index the new element without verifying that resize succeeded.
+3. **Exposure-registry allocation result is unchecked** — `STB_ExposureEnsure()` resizes `g_stbExposure` and immediately initializes the new element without checking the result. This registry participates in position/order management, so this failure path warrants a defensive guard and a caller-safe failure result.
+4. **Swing-array allocation results are unchecked** — the swing collection path resizes `highs` and `lows` and immediately writes their new elements. A failed resize can produce an invalid-index write.
+5. **Scanner array allocations are not checked consistently** — scanner universe, previous/current candidate, watchlist, top-list, and selection arrays contain multiple `ArrayResize` calls whose results are not consistently validated. The central SL proposal queue does check allocation failure, which is a useful pattern to apply consistently.
+6. **Timer registration result is unchecked** — `OnInit()` calls `EventSetTimer(MathMax(1,InpScanSeconds))` but does not check its Boolean result or log failure. Tick-driven calls may still run, but if timer setup fails and the chart symbol stops receiving ticks, the configured interval-based multi-symbol scan cannot be relied on. This is an unreported degraded mode, not proof that timer registration currently fails.
+7. **Trailing inputs are incompletely validated** — `ValidateInputs()` checks `InpTrailStartPips`, but does not visibly validate `InpLiveTrailDistancePips` or `InpTrailStepPips` for nonnegative values. Invalid negative settings can therefore pass initialization and need explicit boundary-case review.
+
+### Suggested defensive remediation order
+
+- Check every dynamic-array growth result; release any handles created before a failed cache insertion, and propagate failure instead of indexing a missing element.
+- For logging-only state, skip the diagnostic update safely if capacity cannot be grown; never let logging failure become an invalid-index path.
+- For scanner and exposure state, abort the affected cycle or operation safely and emit one bounded error message; do not continue with partial state.
+- Check `EventSetTimer`, report initialization degradation clearly, and make the event-driven assumptions visible in diagnostics.
+- Add input-boundary tests for every trailing distance/step setting and document the accepted range.
+
+### Validation status
+
+These findings are from source inspection of branch `test/backtest-integrity-diagnostics-audit` at source blob `5ba36d34c627bcbe7c420aebb80ca69f94fb7373`. They have **not** been verified by MetaEditor compilation, fault-injected allocation tests, or MT5 runtime testing. No source execution/trading behavior was tested in this pass.
