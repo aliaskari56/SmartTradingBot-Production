@@ -287,3 +287,13 @@ This corrects the earlier repository-search limitation: the named FINAL source i
 - Build/test status: no MetaEditor compiler, Strategy Tester, or terminal runtime was invoked in this audit.
 
 Next source-level step: compare the PR #4 SmartTradingBot_FINAL.mq5 against the v1.126 repair snapshot by behavior and dependencies, then report concrete differences before proposing any edit. Do not assume identical version labels mean identical source.
+
+## Canonical PR #4 source — focused scanner gate confirmation
+
+Focused inspection of `MQL5/Experts/SmartTradingBot_FINAL.mq5` on `refs/pull/4/head` (blob SHA `9707d2a4db9ec7ebb2c8267deeaa5d7dac1c5036`) confirms that the shortlist-confidence edge case also exists in this canonical review source. The confidence logic sets `clear` from the top candidate's score floor, and applies the top-versus-runner-up gap only under `g_scannerTop10Count>1`. Therefore a single retained candidate can be labeled `CLEAR` without any competitor-gap evidence; `InpScannerTopN=1` can create the same condition even when other candidates existed earlier but were excluded from the final top list.
+
+This is a classification/diagnostics edge case, not by itself proof that a trade is unsafe or unprofitable. Before changing behavior, test and decide the intended policy for: (1) zero candidates, (2) exactly one eligible candidate, (3) two candidates with gap below threshold, (4) two candidates with gap meeting threshold, and (5) `InpScannerTopN=1` while multiple watchlist candidates exist. The report should distinguish `SCORE_PASS` from `COMPETITION_PASS` rather than treating a score-only pass as a fully competitive winner, if that is the intended design.
+
+Additional identity/safety note from the canonical file's visible inputs: `InpAutoTrading=false` by default and `InpTesterForceAutoTrading=true` is described as tester-only, but tester force is not a substitute for enabling the master input. Effective `g_autoTrading` logic must be checked in the runtime `STB INIT` log; no source default should be assumed to match the user's `.set` file.
+
+Scope of this follow-up: source inspection only. No EA code was changed, and no compile or Strategy Tester run was performed.
