@@ -228,6 +228,18 @@ def main() -> int:
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
+        ("multi-symbol scanner has an interval-based fallback independent of chart M15 bars",
+         all(token in source for token in (
+             "bool intervalElapsed=(g_scannerLastRun<=0",
+             "if(!newChartBar && !intervalElapsed)",
+             "TimeCurrent()-g_scannerLastRun>=scanInterval"))),
+        ("OnTimer executes only after a newly completed scanner cycle",
+         all(token in source for token in (
+             "ulong cycleBefore=g_scannerCycle;",
+             "STB_ScannerRun();",
+             "if(g_scannerCycle!=cycleBefore)")))
+         and source.find("ulong cycleBefore=g_scannerCycle;", source.find("void OnTimer()")) <
+             source.find("STB_ScannerRun();", source.find("void OnTimer()"))),
     ]
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
