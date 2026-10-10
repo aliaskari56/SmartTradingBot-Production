@@ -10,6 +10,7 @@ This change adds observability before a controlled Strategy Tester run. It does 
 - In Strategy Tester, `InpTesterForceAutoTrading=true` now explicitly forces the EA's internal AUTO gate on (`InpAutoTrading || InpTesterForceAutoTrading`). This fixes the previous AND condition, which incorrectly left AUTO off when a `.set` file had `InpAutoTrading=false`.
 - This does **not** override MetaTrader terminal/program/account trade permissions, broker/tester order rules, or any strategy/risk validation. Those permissions must be enabled in the test environment, and their effective values are logged at startup.
 - `InpTesterChartSymbolOnly` remains `true` by default; the tester is intentionally restricted to the chart symbol unless the test explicitly changes that universe. This is not a signal filter, but it does limit symbol coverage.
+- Removed an unintended account-wide scanner gate: any open position or pending order anywhere on the account previously prevented the scanner from running. The scanner now runs on its normal M15 signal-bar schedule even when other symbols have exposure; same-symbol managed exposure and the account order limit are still enforced at candidate execution.
 
 Source file: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
 
@@ -54,4 +55,4 @@ The new logs are diagnostic only. They can increase log volume and slightly affe
 
 ## Status
 
-This is a test plan, not a test result. The source edit is committed to a separate review branch. No MetaEditor compile, terminal run, or Strategy Tester run was available in this environment. Do not treat the branch as a compiled or backtest-approved release.
+This is a test plan, not a test result. The source edit is committed to a separate review branch. The account-wide scanner-gate fix passed the repository's GitHub Actions static-guardrail workflow (run 38064897055). No MetaEditor compile, terminal run, or Strategy Tester run was available in this environment. Do not treat the branch as a compiled or backtest-approved release.
