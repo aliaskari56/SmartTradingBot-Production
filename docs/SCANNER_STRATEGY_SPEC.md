@@ -135,3 +135,37 @@ A proposed change is **not accepted** merely because it improves one metric. Bef
 Previously reported results show the six-month baseline had 473 trades, net loss of about 278.29, and PF 0.8017; BUY accounted for about 237.61 of net losses and SELL about 40.68 of net losses. These are user-provided report figures and have not been independently recalculated in this document. They justify investigating directional asymmetry, not concluding that H4 alignment is the cause or that this specification will be profitable.
 
 The connected repository currently exposes a canonical backup ZIP in its latest commit; the MQL5 source was not available as a directly readable repository file during this task. Therefore this change is documentation-only. No MQL5 source was modified, no build/test/backtest was run, and no live or demo order was sent.
+
+
+## Source audit — available MQL5 snapshot
+
+A readable MQL5 file was found in the connected `aliaskari56/AstraCore-Cloud-Repair` repository at commit `1f33cecc255da58a29da8674af28dd458cec580b` (`MQL5/Experts/SmartTradingBot.mq5`, EA version 1.126). This is a source snapshot in a different repository, so its identity with the ZIP in SmartTradingBot-Production still needs confirmation before porting changes.
+
+### Existing behavior observed in that snapshot
+
+| Strategy part | Existing implementation | Gap against proposed design |
+|---|---|---|
+| 1. Scanner | `STB_BuildScannerUniverse()` builds explicit-symbol or Market Watch universe; `ScanWatchlist()` evaluates BUY and SELL setup per symbol. | It does not rank all eligible symbols and choose a global top candidate. Existing setup score is built mainly from H4 alignment, BOS recency, RR, FVG/OB and oscillator confirmation; it does not implement the proposed 25/25/20/15/15 component model. |
+| 2. Regime | `GetH4Trend()` provides H4 trend context; spread and direction tradability have separate checks. | No unified, explicit uptrend/downtrend/range/extreme-volatility/unknown regime router was identified in the inspected setup/scanner path. |
+| 3. Entry | `BuildSetup()` checks oscillator conditions (when hard filter is enabled), cooldown, H4 alignment/universal mode, CHoCH/BOS, FVG/OB, swing structure, entry/SL/TP geometry and minimum RR. | The proposed trend-pullback-confirmation design is not represented as a single explicit regime-routed strategy; behavior is spread across existing conditions. |
+| 4. Risk/execution | The source includes tradability checks, spread checks, pending setup normalization, exposure checks, fixed-lot default with optional risk sizing, and order validation paths. | Risk sizing is disabled by default in the inspected inputs. The effective defaults and every broker/execution edge case need test coverage before changes are accepted. |
+| 5. Measurement/learning | Adaptive profile logic and logs exist; setup score, direction and RR are logged in relevant paths. | The inspected log schema does not establish that all proposed attribution fields (regime, H4-alignment state for every candidate, score components, estimated cost, and consistent rejection reason) are recorded together for every opportunity. Adaptive behavior should be evaluated separately from a fixed baseline. |
+
+### Confirmed scanner behavior worth noting
+
+- In the inspected snapshot, `InpTesterChartSymbolOnly=true` isolates the Strategy Tester universe to `_Symbol`; this is deliberate test reproducibility behavior, not by itself a bug.
+- An empty `InpScannerSymbols` falls back to Market Watch in normal scanning.
+- `ScanWatchlist()` loops through the universe and can place setups for multiple symbols during one scan (subject to its exposure checks). It is not currently a global rank-then-select pipeline.
+- `BuildSetup()` computes H4 alignment and rejects misaligned setups only when `InpAllowUniversal` is false. Thus a proposed BUY-only H4 gate would be an additional experimental rule, not a correction proven by this audit.
+- `InpMinimumRR` defaults to 1.0 and `InpTrailStartPips` defaults to 150.0 in this snapshot. These are existing settings, not evidence that the proposed 1.5 RR hypothesis is better.
+- `InpUseRiskSizing` defaults to false. Do not infer risk-based sizing is active unless the runtime configuration explicitly enables it.
+
+### Recommended implementation sequence
+
+1. Confirm that this source snapshot is the exact source contained in the production backup ZIP. Do not port changes between repositories until this is confirmed.
+2. Add candidate-level diagnostic attribution using the existing logging path before changing entry selection.
+3. Establish the baseline and test a BUY-only H4-alignment gate as one isolated, reversible experiment; preserve both aligned and unaligned candidate outcomes.
+4. Add a unified regime classifier and weighted symbol ranking only after the instrumentation supports validating them.
+5. Keep all proposed features behind explicit inputs and default them off until compile checks, deterministic backtests, and out-of-sample evaluation pass.
+
+This audit is source inspection only. No MQL5 code was changed or compiled, and no backtest or trade was run.
