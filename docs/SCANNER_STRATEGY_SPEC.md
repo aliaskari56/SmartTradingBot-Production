@@ -297,3 +297,29 @@ This is a classification/diagnostics edge case, not by itself proof that a trade
 Additional identity/safety note from the canonical file's visible inputs: `InpAutoTrading=false` by default and `InpTesterForceAutoTrading=true` is described as tester-only, but tester force is not a substitute for enabling the master input. Effective `g_autoTrading` logic must be checked in the runtime `STB INIT` log; no source default should be assumed to match the user's `.set` file.
 
 Scope of this follow-up: source inspection only. No EA code was changed, and no compile or Strategy Tester run was performed.
+
+## Follow-up audit — end-to-end candidate-to-order path
+
+Reviewed `SmartTradingBot_FINAL.mq5` at PR #4 ref (`refs/pull/4/head`, source blob SHA `9707d2a4db9ec7ebb2c8267deeaa5d7dac1c5036`) across candidate revalidation, final gates, and `PlaceSetup`.
+
+### Confirmed control flow
+
+1. `STB_ExecuteTopCandidate()` exits immediately unless the final shortlist is non-empty and `g_scannerConfidence == "CLEAR"`. If auto trading is off, it logs `STB SCANNER SHADOW: Order=BLOCKED_BY_AUTO_OFF` and exits.
+2. It iterates the final shortlist in rank order. Each candidate is rechecked for scanner data eligibility, market quality, direction permissions, quality threshold, successful `BuildSetup`, unchanged `setupTime`, and pending-order geometry.
+3. It then checks auto-trading state, terminal/program/account permissions, and managed exposure/order limits. A failure at these final gates currently returns `false` without a dedicated reason log from `STB_FinalAutoGate()`.
+4. It calls `PlaceSetup()` and returns after the first successful placement. If a candidate fails, it continues to the next shortlist entry.
+5. `PlaceSetup()` has explicit rejection logs for many execution checks and runs `OrderCheck()` before sending a BUY_STOP/SELL_STOP request. After server acceptance it verifies that the pending order's initial SL is present; if not confirmed, it attempts to delete the order and logs a rejection.
+
+### Actionable diagnostic gaps
+
+- `STB_FinalAutoGate()` combines `AUTO_OFF`, trade-environment rejection, and exposure/order-limit rejection into a bare boolean. Since the caller simply continues to the next candidate, logs may not explain why a high-ranked candidate was skipped at this stage.
+- In `STB_FinalCandidateRevalidation()`, when `q.score < InpScannerMinQuality`, the reason is set to `REJECT_SPREAD`, even though the quality score also incorporates relative spread, volatility, activity, and quote freshness. This can misattribute a quality failure to spread alone.
+- The refreshed setup is required to keep the same `setupTime`, but the scanner candidate's rank and stored opportunity score are not visibly recomputed from the refreshed setup in this function. This does not prove an execution defect, but it warrants a targeted test where a setup's score or geometry changes while its setup time remains the same.
+
+### Recommended next engineering step
+
+Add reason-specific diagnostics first, without changing trade-selection behavior: distinguish `AUTO_TRADING_OFF`, `TRADE_ENVIRONMENT_REJECT`, `MANAGED_EXPOSURE_EXISTS`, `ACCOUNT_ORDER_LIMIT`, `QUALITY_SCORE_BELOW_MINIMUM`, and `REFRESHED_SETUP_SCORE_CHANGED`. Then run a Strategy Tester matrix that verifies the expected log for each forced gate. Do not loosen any gate merely to increase order count.
+
+### Validation status
+
+Static source audit only. No MQL5 compilation, terminal execution, or Strategy Tester run was performed. Findings are tied to the PR #4 review source and do not prove that the installed EX5 was built from this exact blob.
