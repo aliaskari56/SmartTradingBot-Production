@@ -85,3 +85,27 @@ GitHub Actions run **38065393299** for source commit `84d1a46a28d214a2e0e3f00670
 ### Remaining audit work
 
 This pass did not establish a new confirmed source-level blocker requiring another trading-logic edit. The intentional conservative gates above can reduce order count, but loosening them without a controlled baseline/candidate backtest would not be a safe fix. Remaining priorities are full manual review of structure/swing/FVG/OB calculations, pending-trail restart and lease ownership, manual-order ownership rules, all input boundary cases, and a repeatable MT5 compile + Strategy Tester + demo-terminal regression suite. The source remains **not release-verified**.
+
+
+## Root-cause finding and scoped fix — scanner cadence
+
+### Confirmed blocker
+
+The scanner previously returned immediately whenever the chart symbol's last closed M15 bar was unchanged:
+
+`if(cycleBar<=0 || cycleBar==g_scannerLastCycleBar) return;`
+
+Both `OnTick` and `OnTimer` only called the scanner when `NewM15Bar()` on the **chart symbol** changed. Therefore `InpScanSeconds=10` controlled timer events but did not actually schedule a scan every ten seconds. In a multi-symbol watchlist, a quiet/closed chart symbol could prevent fresh candidates on other active symbols from being evaluated; the candidate list could remain stale until the chart symbol printed a new M15 bar. This is a genuine scanner scheduling defect, not a strategy-quality opinion.
+
+### Change made
+
+- The scanner now runs when either the chart's closed M15 bar changes **or** the configured `InpScanSeconds` interval elapses.
+- The interval fallback permits a scan even if the chart symbol's last closed-bar timestamp is unavailable, provided the scanner's symbol universe itself can be read.
+- `OnTimer` now calls the scanner on each timer event; the scanner applies its own cadence gate.
+- `OnTick` also asks the scanner to run, but candidate execution happens only when `g_scannerCycle` proves a new scan completed. This avoids re-executing an old top-candidate list on a throttled call.
+- Added static guardrails for the timer-based cadence and execution-after-new-cycle contract.
+- Adaptive profile probes already deduplicate by each symbol's closed M15 bar, so repeating scans within that bar should not inflate that specific attempt counter.
+
+### Validation and caveats
+
+The source and static-check script were updated on the audit branch. The new static guardrail has not yet been confirmed by a fresh CI run in this note. No local Python checker execution, MetaEditor compilation, Strategy Tester run, or demo-terminal test was available at the time of this edit. In particular, verify timer behavior in Strategy Tester and confirm that repeated scans at the configured interval do not create excessive CPU/log load on a large symbol universe. The change addresses scanner scheduling only; it does not loosen strategy, AUTO, risk, broker-permission, or candidate-confidence gates.
