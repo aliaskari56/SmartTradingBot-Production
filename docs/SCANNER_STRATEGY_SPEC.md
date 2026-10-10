@@ -323,3 +323,40 @@ Add reason-specific diagnostics first, without changing trade-selection behavior
 ### Validation status
 
 Static source audit only. No MQL5 compilation, terminal execution, or Strategy Tester run was performed. Findings are tied to the PR #4 review source and do not prove that the installed EX5 was built from this exact blob.
+
+
+## Follow-up — anti-fake-backtest integrity checklist (no strategy changes)
+
+The goal of this checklist is to detect invalid or non-reproducible results, not to improve headline profitability. It deliberately does not disable scanner gates, risk controls, or execution validation.
+
+### A. Test identity and reproducibility
+- Record the exact source path, Git commit/blob SHA, MetaEditor build, terminal build, EA input file/hash, symbol, timeframe, date range, deposit, leverage, account currency, and tester report.
+- Compile the exact reviewed source and retain compiler output. A matching EA version string is not proof of source identity.
+- Save a pristine baseline report and inputs before each experiment. Change one variable per experiment; do not overwrite the baseline.
+- Confirm whether the test uses the chart symbol only or a multi-symbol scanner. Do not compare these as equivalent tests.
+
+### B. Data and execution realism
+- Prefer the most granular reliable historical tick data available for the strategy; document the tester's selected tick-generation/model mode rather than assuming it.
+- Verify historical coverage and gaps for every symbol/timeframe the EA actually reads (including M15 and H4), and confirm that indicators have enough warm-up history before results are counted.
+- Include broker-relevant spread behavior, commissions, swaps, and a defensible slippage assumption. If the tester cannot model an item, disclose it as a limitation rather than implying it is included.
+- Check symbol specifications used by the test: tick size/value, contract size, volume step/minimum/maximum, stops/freeze levels, and trading sessions.
+- Inspect entry/exit timestamps and order/SL/TP logs for impossible fills, prices outside available market data, missing initial stops, or unexplained order-state changes.
+
+### C. Look-ahead and state leakage
+- Confirm signals use only information available at decision time. Where a closed bar is required, verify shift/index conventions and avoid reading a not-yet-closed bar as confirmation.
+- Audit multi-timeframe values at bar boundaries: H4 values used on an M15 decision must correspond to the H4 bar that was actually available then.
+- Ensure candidate ranking, adaptive profile selection, thresholds, and normalization do not use future trades or outcomes from the evaluation window.
+- Reset all persistent learning state, global variables, files, and caches between independent runs, or explicitly document and test the intended warm-start behavior.
+- Verify that optimization and parameter selection use only the training window; keep the final out-of-sample window untouched until the candidate is frozen.
+
+### D. Result reconciliation
+- Reconcile tester summary totals against the deal/order history: closed trade count, gross profit/loss, commission, swap, net profit, and maximum drawdown.
+- Report BUY and SELL separately, and break results down by symbol and regime where sample sizes permit.
+- Treat small samples and large metric swings as uncertainty, not proof of an edge. Compare net expectancy and drawdown as well as profit factor and net profit.
+- Repeat the exact same run and compare outputs. Material unexplained differences are a blocker until the cause is understood.
+
+### E. Pass/fail policy
+A test is **INVALID / DO NOT USE** if source/input identity is unknown, data coverage is inadequate, costs are omitted without disclosure, future information can leak into decisions, results cannot be reconciled, or the run cannot be reproduced. A negative but valid result is still useful evidence; it must not be “fixed” by disabling a gate or changing settings after seeing the result.
+
+### Current status
+This checklist has been added to the documentation branch only. It has not been executed against an MT5 terminal or report. No MQL5 logic was changed, no control was disabled, and no compile/backtest was run in this step.
