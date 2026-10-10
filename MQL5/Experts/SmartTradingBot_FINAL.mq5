@@ -7647,9 +7647,16 @@ void STB_SortCandidates(STBCandidate &arr[])
 //+------------------------------------------------------------------+
 void STB_ScannerRun()
   {
+   // Scan on the configured timer cadence even when the chart symbol has not
+   // produced a new M15 bar. Multi-symbol universes must not stall just because
+   // the chart symbol is quiet or closed while other watched symbols are active.
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
+   bool newChartBar=(cycleBar>0 && cycleBar!=g_scannerLastCycleBar);
+   int scanInterval=MathMax(1,InpScanSeconds);
+   bool intervalElapsed=(g_scannerLastRun<=0 ||
+                         TimeCurrent()-g_scannerLastRun>=scanInterval);
 
-   if(cycleBar<=0 || cycleBar==g_scannerLastCycleBar)
+   if(!newChartBar && !intervalElapsed)
       return;
 
    ulong started=(ulong)GetTickCount();
@@ -7990,7 +7997,8 @@ void STB_ScannerRun()
       if(!wasSelected[i] && !HasManagedExposure(symbols[i]))
          SymbolSelect(symbols[i],false);
 
-   g_scannerLastCycleBar=cycleBar;
+   if(cycleBar>0)
+      g_scannerLastCycleBar=cycleBar;
    g_scannerLastRun=TimeCurrent();
    g_scannerCycle++;
    g_scannerStatus="PASS";
@@ -8944,14 +8952,17 @@ void OnTick()
 
 
    if(m15Bar)
+      STB_ReconcileTradeRegistry();
+
+   // STB_ScannerRun owns its timer/new-bar throttle. Execute only when a scan
+   // cycle actually completed, never by replaying an old top-candidate list.
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-       STB_ReconcileTradeRegistry();
-       // Do not let an unrelated position/order on another symbol block the
-       // scanner. Candidate-level exposure and account limits remain enforced.
-       STB_ScannerRun();
-       STB_ExecuteTopCandidate();
-       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-       UpdatePanel();
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+      UpdatePanel();
      }
   }
 
@@ -8977,17 +8988,13 @@ STB_ReconcileTradeRegistry();
 
 
 
-   bool newSignalBar=NewM15Bar();
-
-   if(newSignalBar)
+   // Timer-driven scans are required for multi-symbol operation: the
+   // chart symbol can be quiet/closed while another symbol is updating.
+   // Execute only a newly completed scanner cycle.
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-
-
-
-
-      // Account-wide totals are not a scanner gate: an unrelated position
-      // or order must not suppress valid candidates on other symbols.
-      STB_ScannerRun();
       STB_ExecuteTopCandidate();
       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
