@@ -15,7 +15,7 @@ CTrade trade;
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = false;
+input bool    InpAutoTrading            = true;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -31,7 +31,7 @@ input int     InpScannerMaxQuoteAgeSec    = 300;
 input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
-input bool    InpTesterForceAutoTrading  = true;  // tester only; prevents stale/missing .set state from disabling order placement
+input bool    InpTesterForceAutoTrading  = true;  // tester only; forces the EA AUTO gate ON regardless of stale .set state
 input bool    InpTesterChartSymbolOnly   = true;  // tester only; isolates the test universe to _Symbol
 
 input group "=== RSI + CCI COMPOSITE ==="
@@ -4754,8 +4754,8 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    double currentSL=PositionGetDouble(POSITION_SL);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
 
-   // If net profit has crossed the universal lock trigger, a competing
-   // automatic proposal may not replace the required lock with a weaker SL.
+   // If executable price movement has crossed the universal lock trigger,
+   // a competing automatic proposal may not replace the required lock with a weaker SL.
    // When the existing position has no SL at all, retain the strongest valid
    // non-profit-lock candidate as a last-resort protection fallback if broker
    // geometry makes the profit-lock target impossible this cycle.
@@ -6798,7 +6798,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      c.rejectReason="REJECT_SPREAD";
+      c.rejectReason="REJECT_QUALITY_SCORE_BELOW_MINIMUM";
       return false;
      }
 
@@ -6830,14 +6830,22 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_ExposureAllowsExecution(const Setup &s)
+bool STB_ExposureAllowsExecution(const Setup &s,string &reason)
   {
+   reason="";
+
    if(HasManagedExposure(s.symbol))
+     {
+      reason="MANAGED_EXPOSURE_EXISTS";
       return false;
+     }
 
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
+     {
+      reason="ACCOUNT_ORDER_LIMIT";
       return false;
+     }
 
    return true;
   }
@@ -6845,15 +6853,23 @@ bool STB_ExposureAllowsExecution(const Setup &s)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_FinalAutoGate(const Setup &s)
+bool STB_FinalAutoGate(const Setup &s,string &reason)
   {
+   reason="";
+
    if(!g_autoTrading)
+     {
+      reason="AUTO_TRADING_OFF";
       return false;
+     }
 
    if(!STB_TradeEnvironmentAllowed())
+     {
+      reason="TRADE_ENVIRONMENT_REJECT";
       return false;
+     }
 
-   if(!STB_ExposureAllowsExecution(s))
+   if(!STB_ExposureAllowsExecution(s,reason))
       return false;
 
    return true;
@@ -6864,8 +6880,33 @@ bool STB_FinalAutoGate(const Setup &s)
 //+------------------------------------------------------------------+
 void STB_ExecuteTopCandidate()
   {
-   if(g_scannerTop10Count<=0 || g_scannerConfidence!="CLEAR")
+   if(g_scannerTop10Count<=0)
+     {
+      Print("STB EXECUTION SKIP reason=NO_TOP_CANDIDATE",
+            " confidence=",g_scannerConfidence,
+            " universe=",IntegerToString(g_scannerUniverseCount),
+            " eligible=",IntegerToString(g_scannerEligibleCount),
+            " quality=",IntegerToString(g_scannerQualityCount),
+            " regime=",IntegerToString(g_scannerRegimeCount),
+            " candidates=",IntegerToString(g_scannerCandidateCount));
       return;
+     }
+
+   if(g_scannerConfidence!="CLEAR")
+     {
+      double topScore=g_scannerTop10[0].opportunityScore;
+      double secondScore=(g_scannerTop10Count>1 ?
+                          g_scannerTop10[1].opportunityScore:0.0);
+      Print("STB EXECUTION SKIP reason=CONFIDENCE_NOT_CLEAR",
+            " confidence=",g_scannerConfidence,
+            " top=",g_scannerTop10[0].symbol,
+            " direction=",(g_scannerTop10[0].direction>0 ? "BUY":"SELL"),
+            " topScore=",DoubleToString(topScore,1),
+            " secondScore=",DoubleToString(secondScore,1),
+            " requiredGap=",DoubleToString(InpScannerMinTopGap,1),
+            " topCount=",IntegerToString(g_scannerTop10Count));
+      return;
+     }
 
    if(!g_autoTrading)
      {
@@ -6886,14 +6927,45 @@ void STB_ExecuteTopCandidate()
       // order placement. Retain it afterward only while a managed exposure
       // needs live quotes for stop management/trailing.
       if(!wasSelected && !SymbolSelect(symbol,true))
+        {
+         Print("STB CANDIDATE REJECT",
+               " stage=SYMBOL_SELECT",
+               " symbol=",symbol,
+               " reason=SYMBOL_SELECT_FAILED",
+               " error=",IntegerToString(GetLastError()));
          continue;
+        }
 
       Setup validated;
       bool revalidated=STB_FinalCandidateRevalidation(c,validated);
       bool placed=false;
 
-      if(revalidated && STB_FinalAutoGate(validated))
-         placed=PlaceSetup(validated);
+      if(!revalidated)
+        {
+         Print("STB CANDIDATE REJECT",
+               " stage=FINAL_REVALIDATION",
+               " symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " reason=",(c.rejectReason=="" ? "UNSPECIFIED":c.rejectReason),
+               " rank=",IntegerToString(c.currentRank),
+               " score=",DoubleToString(c.opportunityScore,1));
+        }
+      else
+        {
+         string finalGateReason="";
+         if(!STB_FinalAutoGate(validated,finalGateReason))
+           {
+            Print("STB CANDIDATE REJECT",
+                  " stage=FINAL_AUTO_GATE",
+                  " symbol=",c.symbol,
+                  " direction=",(c.direction>0 ? "BUY":"SELL"),
+                  " reason=",(finalGateReason=="" ? "UNSPECIFIED":finalGateReason),
+                  " rank=",IntegerToString(c.currentRank),
+                  " score=",DoubleToString(c.opportunityScore,1));
+           }
+         else
+            placed=PlaceSetup(validated);
+        }
 
       if(!wasSelected && !HasManagedExposure(symbol))
          SymbolSelect(symbol,false);
@@ -7354,7 +7426,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      q.reason="REJECT_SPREAD";
+      q.reason="REJECT_QUALITY_SCORE";
       return false;
      }
 
@@ -7575,9 +7647,16 @@ void STB_SortCandidates(STBCandidate &arr[])
 //+------------------------------------------------------------------+
 void STB_ScannerRun()
   {
+   // Scan on the configured timer cadence even when the chart symbol has not
+   // produced a new M15 bar. Multi-symbol universes must not stall just because
+   // the chart symbol is quiet or closed while other watched symbols are active.
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
+   bool newChartBar=(cycleBar>0 && cycleBar!=g_scannerLastCycleBar);
+   int scanInterval=MathMax(1,InpScanSeconds);
+   bool intervalElapsed=(g_scannerLastRun<=0 ||
+                         TimeCurrent()-g_scannerLastRun>=scanInterval);
 
-   if(cycleBar<=0 || cycleBar==g_scannerLastCycleBar)
+   if(!newChartBar && !intervalElapsed)
       return;
 
    ulong started=(ulong)GetTickCount();
@@ -7685,22 +7764,44 @@ void STB_ScannerRun()
 
       string reason="";
       if(!STB_ScannerDataEligible(symbol,reason))
+        {
+         Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
+               " reason=",(reason=="" ? "UNSPECIFIED":reason));
          continue;
+        }
 
       g_scannerEligibleCount++;
 
       STBMarketQuality quality;
       if(!STB_CalcMarketQuality(symbol,quality))
+        {
+         Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
+               " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
+               " score=",DoubleToString(quality.score,1),
+               " spreadPips=",DoubleToString(quality.spreadPips,2),
+               " activityRatio=",DoubleToString(quality.activityRatio,2),
+               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
          continue;
+        }
 
       g_scannerQualityCount++;
 
       STBRegimeState regime;
       if(!STB_EvaluateRegime(symbol,regime))
+        {
+         Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
          continue;
+        }
 
       if(regime.regime==STB_REGIME_UNSTABLE)
+        {
+         Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
+               " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
+               " efficiency=",DoubleToString(regime.efficiency,2));
          continue;
+        }
 
       g_scannerRegimeCount++;
 
@@ -7787,16 +7888,30 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-      if(STB_CalcMarketQuality(c.symbol,q))
-         c.marketQualityScore=q.score;
+      if(!STB_CalcMarketQuality(c.symbol,q))
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_QUALITY symbol=",c.symbol,
+               " reason=",(q.reason=="" ? "UNSPECIFIED":q.reason));
+         continue;
+        }
+      c.marketQualityScore=q.score;
 
       STBRegimeState rr;
-      if(STB_EvaluateRegime(c.symbol,rr))
+      if(!STB_EvaluateRegime(c.symbol,rr))
         {
-         c.regime=rr.regime;
-         c.regimeStrength=rr.strength;
-         c.regimeScore=STB_RegimeFitScore(c,rr);
+         Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+               " reason=",(rr.reason=="" ? "UNSPECIFIED":rr.reason));
+         continue;
         }
+      if(rr.regime==STB_REGIME_UNSTABLE)
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+               " reason=",(rr.reason=="" ? "UNSTABLE_REGIME":rr.reason));
+         continue;
+        }
+      c.regime=rr.regime;
+      c.regimeStrength=rr.strength;
+      c.regimeScore=STB_RegimeFitScore(c,rr);
 
       c.setupAgeBars=(int)MathMax(0,
                                   (long)((TimeCurrent()-c.setup.setupTime)/900));
@@ -7882,7 +7997,8 @@ void STB_ScannerRun()
       if(!wasSelected[i] && !HasManagedExposure(symbols[i]))
          SymbolSelect(symbols[i],false);
 
-   g_scannerLastCycleBar=cycleBar;
+   if(cycleBar>0)
+      g_scannerLastCycleBar=cycleBar;
    g_scannerLastRun=TimeCurrent();
    g_scannerCycle++;
    g_scannerStatus="PASS";
@@ -8385,7 +8501,11 @@ int OnInit()
       // Tester runs must never depend on stale terminal GlobalVariables or
       // on a missing/malformed .set toggle. The explicit tester override is
       // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading &&
+      // Tester-only force flag is an explicit override. When enabled,
+      // it must not be neutralized by InpAutoTrading=false in a stale .set.
+      // This changes only the EA's internal AUTO gate; terminal/account
+      // permissions and all strategy/risk/order validation gates still apply.
+      g_autoTrading=(InpAutoTrading ||
                      InpTesterForceAutoTrading);
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
       STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
@@ -8417,7 +8537,8 @@ int OnInit()
    Print("STB TRADE ENV terminal=",
          TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "ON":"OFF",
          " program=",MQLInfoInteger(MQL_TRADE_ALLOWED) ? "ON":"OFF",
-         " account=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+         " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+         " accountTrade=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ON":"OFF",
          " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
 
    Print("STB INIT symbol=",_Symbol,
@@ -8481,13 +8602,11 @@ int OnInit()
 // Every currently open position is checked immediately through the one cycle.
    STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
 
-   if(PositionsTotal()==0 && OrdersTotal()==0)
-     {
-      STB_ScannerRun();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-     }
-   else
-      Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+   // Scan independently of unrelated account-wide positions/orders.
+   // Per-symbol managed exposure and the account order limit are enforced
+   // later at candidate execution; global totals must not suppress all signals.
+   STB_ScannerRun();
+   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
 
    UpdatePanel();
    return INIT_SUCCEEDED;
@@ -8833,17 +8952,17 @@ void OnTick()
 
 
    if(m15Bar)
+      STB_ReconcileTradeRegistry();
+
+   // STB_ScannerRun owns its timer/new-bar throttle. Execute only when a scan
+   // cycle actually completed, never by replaying an old top-candidate list.
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-       STB_ReconcileTradeRegistry();
-       if(PositionsTotal()==0 && OrdersTotal()==0)
-         {
-          STB_ScannerRun();
-          STB_ExecuteTopCandidate();
-          g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-         }
-       else
-          Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
-       UpdatePanel();
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+      UpdatePanel();
      }
   }
 
@@ -8869,22 +8988,15 @@ STB_ReconcileTradeRegistry();
 
 
 
-   bool newSignalBar=NewM15Bar();
-
-   if(newSignalBar)
+   // Timer-driven scans are required for multi-symbol operation: the
+   // chart symbol can be quiet/closed while another symbol is updating.
+   // Execute only a newly completed scanner cycle.
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-
-
-
-
-      if(PositionsTotal()==0 && OrdersTotal()==0)
-        {
-         STB_ScannerRun();
-         STB_ExecuteTopCandidate();
-         g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-        }
-      else
-         Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
 
 

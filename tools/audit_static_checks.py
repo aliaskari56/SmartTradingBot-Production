@@ -211,10 +211,10 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic)"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
-        ("resolver enforces active profit-lock floor and deterministic no-SL fallback",
+        ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
-             "decisionNetProfitPips=PositionNetProfitPips(ticket);",
-             "decisionNetProfitPips>=STB_ProfitLockTriggerPips()",
+             "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
+             "decisionPriceMovePips>=STB_ProfitLockTriggerPips()",
              "meetsProfitLockFloor",
              "currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION",
              "if(!found && unprotectedFallbackFound)",
@@ -228,6 +228,18 @@ def main() -> int:
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
+        ("multi-symbol scanner has an interval-based fallback independent of chart M15 bars",
+         all(token in source for token in (
+             "bool intervalElapsed=(g_scannerLastRun<=0",
+             "if(!newChartBar && !intervalElapsed)",
+             "TimeCurrent()-g_scannerLastRun>=scanInterval"))),
+        ("OnTimer executes only after a newly completed scanner cycle",
+         all(token in source for token in (
+             "ulong cycleBefore=g_scannerCycle;",
+             "STB_ScannerRun();",
+             "if(g_scannerCycle!=cycleBefore)")) and
+         source.find("ulong cycleBefore=g_scannerCycle;", source.find("void OnTimer()")) <
+         source.find("STB_ScannerRun();", source.find("void OnTimer()"))),
     ]
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
