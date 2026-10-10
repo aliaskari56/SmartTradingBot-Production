@@ -6880,8 +6880,33 @@ bool STB_FinalAutoGate(const Setup &s,string &reason)
 //+------------------------------------------------------------------+
 void STB_ExecuteTopCandidate()
   {
-   if(g_scannerTop10Count<=0 || g_scannerConfidence!="CLEAR")
+   if(g_scannerTop10Count<=0)
+     {
+      Print("STB EXECUTION SKIP reason=NO_TOP_CANDIDATE",
+            " confidence=",g_scannerConfidence,
+            " universe=",IntegerToString(g_scannerUniverseCount),
+            " eligible=",IntegerToString(g_scannerEligibleCount),
+            " quality=",IntegerToString(g_scannerQualityCount),
+            " regime=",IntegerToString(g_scannerRegimeCount),
+            " candidates=",IntegerToString(g_scannerCandidateCount));
       return;
+     }
+
+   if(g_scannerConfidence!="CLEAR")
+     {
+      double topScore=g_scannerTop10[0].opportunityScore;
+      double secondScore=(g_scannerTop10Count>1 ?
+                          g_scannerTop10[1].opportunityScore:0.0);
+      Print("STB EXECUTION SKIP reason=CONFIDENCE_NOT_CLEAR",
+            " confidence=",g_scannerConfidence,
+            " top=",g_scannerTop10[0].symbol,
+            " direction=",(g_scannerTop10[0].direction>0 ? "BUY":"SELL"),
+            " topScore=",DoubleToString(topScore,1),
+            " secondScore=",DoubleToString(secondScore,1),
+            " requiredGap=",DoubleToString(InpScannerMinTopGap,1),
+            " topCount=",IntegerToString(g_scannerTop10Count));
+      return;
+     }
 
    if(!g_autoTrading)
      {
@@ -7732,22 +7757,44 @@ void STB_ScannerRun()
 
       string reason="";
       if(!STB_ScannerDataEligible(symbol,reason))
+        {
+         Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
+               " reason=",(reason=="" ? "UNSPECIFIED":reason));
          continue;
+        }
 
       g_scannerEligibleCount++;
 
       STBMarketQuality quality;
       if(!STB_CalcMarketQuality(symbol,quality))
+        {
+         Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
+               " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
+               " score=",DoubleToString(quality.score,1),
+               " spreadPips=",DoubleToString(quality.spreadPips,2),
+               " activityRatio=",DoubleToString(quality.activityRatio,2),
+               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
          continue;
+        }
 
       g_scannerQualityCount++;
 
       STBRegimeState regime;
       if(!STB_EvaluateRegime(symbol,regime))
+        {
+         Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
          continue;
+        }
 
       if(regime.regime==STB_REGIME_UNSTABLE)
+        {
+         Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
+               " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
+               " efficiency=",DoubleToString(regime.efficiency,2));
          continue;
+        }
 
       g_scannerRegimeCount++;
 
@@ -7834,16 +7881,30 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-      if(STB_CalcMarketQuality(c.symbol,q))
-         c.marketQualityScore=q.score;
+      if(!STB_CalcMarketQuality(c.symbol,q))
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_QUALITY symbol=",c.symbol,
+               " reason=",(q.reason=="" ? "UNSPECIFIED":q.reason));
+         continue;
+        }
+      c.marketQualityScore=q.score;
 
       STBRegimeState rr;
-      if(STB_EvaluateRegime(c.symbol,rr))
+      if(!STB_EvaluateRegime(c.symbol,rr))
         {
-         c.regime=rr.regime;
-         c.regimeStrength=rr.strength;
-         c.regimeScore=STB_RegimeFitScore(c,rr);
+         Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+               " reason=",(rr.reason=="" ? "UNSPECIFIED":rr.reason));
+         continue;
         }
+      if(rr.regime==STB_REGIME_UNSTABLE)
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+               " reason=",(rr.reason=="" ? "UNSTABLE_REGIME":rr.reason));
+         continue;
+        }
+      c.regime=rr.regime;
+      c.regimeStrength=rr.strength;
+      c.regimeScore=STB_RegimeFitScore(c,rr);
 
       c.setupAgeBars=(int)MathMax(0,
                                   (long)((TimeCurrent()-c.setup.setupTime)/900));
