@@ -269,3 +269,21 @@ The snapshots share the same declared version and description, but their file bl
 4. Keep source identity marked UNVERIFIED until that evidence is available; do not port proposed strategy changes onto a merely similar snapshot.
 
 This is a repository/source-identity audit only. No MQL5 source was changed, compiled, backtested, or executed.
+
+## Follow-up audit — canonical PR source located
+
+A later search of the production repository's draft PR #4 located the exact source-of-truth path named in that PR body: MQL5/Experts/SmartTradingBot_FINAL.mq5, accessible from ref refs/pull/4/head. Its current file blob SHA on that PR ref is 9707d2a4db9ec7ebb2c8267deeaa5d7dac1c5036, and it declares version 1.126. The same PR also contains MQL5/Experts/SmartTradingBot.mq5 and the two STB include modules:
+
+- MQL5/Include/STB/STB_PendingTrail.mqh (blob SHA 6ca0679bd6b7cf14335973cc5aa1ce39daaa1218)
+- MQL5/Include/STB/STB_PendingDistanceResolver.mqh (blob SHA 9286000a099c7e78525d6655e819519c85c6537b)
+
+This corrects the earlier repository-search limitation: the named FINAL source is present in PR #4, even though the default-branch code search did not return it. The PR is a draft review branch, so this identifies a canonical review source candidate, not necessarily the file currently compiled or installed in MetaTrader.
+
+### Updated source identity status
+
+- Canonical review source path: FOUND in PR #4.
+- Current PR-ref source blob: RECORDED (9707d2a4db9ec7ebb2c8267deeaa5d7dac1c5036).
+- Identity with the user's installed/compiled EX5: STILL UNVERIFIED; repository access cannot establish the local terminal's binary provenance.
+- Build/test status: no MetaEditor compiler, Strategy Tester, or terminal runtime was invoked in this audit.
+
+Next source-level step: compare the PR #4 SmartTradingBot_FINAL.mq5 against the v1.126 repair snapshot by behavior and dependencies, then report concrete differences before proposing any edit. Do not assume identical version labels mean identical source.
