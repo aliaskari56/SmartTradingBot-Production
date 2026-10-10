@@ -203,3 +203,25 @@ Inspected the v1.126 repair-branch source at `MQL5/Experts/SmartTradingBot.mq5` 
 For a runtime log that shows `terminal=ON program=ON account=ON tester=NO`, the available line does not establish that `auto=ON`, that `ACCOUNT_TRADE_ALLOWED` is true, or that any scanner candidate passed. The next useful evidence is the matching `STB INIT` line and one complete `STB SCANNER SUMMARY`, followed by any `STB PLACE REJECT`, `STB ORDERCHECK REJECT`, `STB TRADE ENV REJECT`, or `STB AUTO PENDING CREATED` lines. This identifies which gate was reached without changing execution logic.
 
 This is a source-audit/documentation update only. No MQL5 source was modified, compiled, backtested, or executed.
+
+
+## Follow-up audit — adaptive parameter selection and scan cadence
+
+Additional source inspection of the same repair-branch snapshot:
+
+- The adaptive selector has five parameter profiles (IDs 0–4). If adaptive learning or parameter learning is disabled, profile 0 is selected.
+- The selector first uses per-symbol, per-direction profile-attempt counts for warm-up/exploration. During warm-up, it selects a least-sampled profile. Once warm-up is complete, its score combines smoothed win rate (45%), normalized average-R signal (25%), outcome uncertainty exploration (15%), and attempt-scarcity exploration (15%). These weights describe the implementation, not evidence that the learner improves performance.
+- A profile probe is counted at most once per closed M15 signal bar per symbol/direction/profile. Attempts are not equivalent to executed trades or closed outcomes; rejected setups can still contribute to exploration counts.
+- The full scanner is called by the timer, but returns immediately if the chart symbol's most recently closed M15 bar has not changed. On initialization, it calls the scanner once, then stores the last closed M15 bar. This reinforces that `InpScanSeconds` is a timer interval, not a guaranteed full scan interval.
+- In the scanner's symbol loop, ineligible data, failed market-quality evaluation, unstable regimes, and failed `BuildSetup()` calls are skipped with `continue`. Summary counters narrow down the stage, but do not provide a complete per-symbol rejection audit trail.
+
+### Recommended controlled validation matrix
+
+Before considering any strategy changes, compare the existing fixed baseline with one change at a time in Strategy Tester:
+1. Freeze adaptive parameters to profile 0 and record results.
+2. Enable adaptive parameter selection with the same inputs and same test interval.
+3. Report trade count, net result, profit factor, maximum drawdown, average R, long/short split, and symbol/regime split.
+4. Repeat on an out-of-sample interval and with realistic spread/commission/slippage assumptions.
+5. Do not select a variant based on net profit alone; reject changes that materially worsen drawdown or rely on very few trades.
+
+No such tests have been run as part of this source audit. No MQL5 source was modified or compiled.
