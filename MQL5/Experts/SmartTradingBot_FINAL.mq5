@@ -1877,12 +1877,14 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
-   if(!isUserAction && STB_ManualOverrideIs(ticket)) return false; // MANUAL_OVERRIDE: auto modify blocked
    if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
 
    //--- P4 central writer: verify symbol, re-read geometry, validate
    //--- broker constraints, monotonic entry direction and risk floor.
    long stbOt=OrderGetInteger(ORDER_TYPE);
+   bool stbCandleStop=(stbOt==ORDER_TYPE_BUY_STOP || stbOt==ORDER_TYPE_SELL_STOP);
+   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
+      return false; // M5 candle-follow owns BUY STOP / SELL STOP pre-trigger geometry
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
@@ -5708,6 +5710,36 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
 
    if(direction<0)
       return false;
+
+   // BUY STOP / SELL STOP initial protection is anchored to the latest CLOSED
+   // M5 candle, as requested. If that structural SL cannot satisfy broker
+   // constraints, reject the pending order rather than silently substituting
+   // a different timeframe/structure.
+   if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)
+     {
+      double pip=PipSize(symbol);
+      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double minDistance=TradeMinDistance(symbol);
+      if(pip<=0.0 || point<=0.0 || minDistance<=0.0)
+         return false;
+
+      bool buyStop=(orderType==ORDER_TYPE_BUY_STOP);
+      double anchor=(buyStop ? iLow(symbol,PERIOD_M5,1)
+                             : iHigh(symbol,PERIOD_M5,1));
+      if(anchor<=0.0)
+         return false;
+
+      double buffer=MathMax(MathMax(0.0,InpInitialSLBufferPips)*pip,
+                            minDistance+point);
+      double candleSL=NormalizePrice(symbol,
+                                     buyStop ? anchor-buffer:anchor+buffer);
+      if(candleSL<=0.0 ||
+         !IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL))
+         return false;
+
+      sl=candleSL;
+      return true;
+     }
 
    // Same protection source as market positions.
    double candidate=0.0;
