@@ -20,10 +20,9 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY  side: anchor = live Bid low, entry follows the extreme  |
-//|   - SELL side: anchor = live Ask high, entry follows the extreme |
-//|   - stop vs limit only changes the entry offset SIGN; the SL     |
-//|     engine and the trailing policy are shared                    |
+//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
+//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - other pending types retain live Bid/Ask extreme trailing     |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
 //|   - multi-ticket isolation                                       |
@@ -204,9 +203,9 @@ int STB_PendingClassifyResult(const bool ok)
 }
 
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. The state anchor is
-// derived from the current pending-order geometry; subsequent live Bid/Ask
-// extremes can only move the pending order in the requested one-way path.
+// Called ONLY after the terminal confirmed the ticket. BUY STOP / SELL STOP
+// state anchors use the latest closed M5 candle; other pending types retain
+// their existing geometry/live-quote anchor and one-way trailing path.
 // Universal intake: EA-created, manual/mobile, other-EA and restart-recovered
 // tickets all register through this single entry point.
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
