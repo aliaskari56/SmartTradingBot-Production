@@ -421,8 +421,10 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    double pip=PipSize(symbol);
    datetime now=TimeCurrent();
 
-   if(!manual && STB_ManualOverrideIs(ticket))
-      return false; // MANUAL_OVERRIDE: automatic pending trail paused
+   bool candleStop=(g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_BUY_STOP ||
+                    g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_SELL_STOP);
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      return false; // M5 candle-follow remains active for BUY STOP / SELL STOP
 
    // Time throttle: at most one modification per cooldown window.
    if(g_stbPendingTrail[idx].nextRetryTime>0 &&
