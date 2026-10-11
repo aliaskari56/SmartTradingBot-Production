@@ -49,7 +49,7 @@ input bool    InpOscillatorHardFilter       = false;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
-input bool    InpUseRiskSizing         = false; // false preserves fixed-lot mode
+input bool    InpUseRiskSizing         = true;  // default ON: size entries from stop-loss risk, not fixed lots
 input double  InpRiskPercent           = 0.50;  // account equity risk per setup
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 
