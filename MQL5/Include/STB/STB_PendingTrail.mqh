@@ -575,13 +575,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
 
-      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
       double barOpen=iOpen(symbol,PERIOD_M5,1);
       double barClose=iClose(symbol,PERIOD_M5,1);
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
       if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
          return true;
+
+      // Consume the closed bar only after its OHLC data passed validation.
+      // If history is temporarily unavailable, the same bar can be retried.
+      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
 
       if(orderType==(long)ORDER_TYPE_BUY_STOP)
         {
