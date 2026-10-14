@@ -86,6 +86,36 @@ def source_region(source: str, start: str, end: str) -> str:
     return source[begin:finish]
 
 
+def include_dependency_errors(source_path: pathlib.Path) -> list[str]:
+    """Recursively verify every quoted/angle-bracket include is present."""
+    include_root = pathlib.Path("MQL5/Include").resolve()
+    pending = [source_path.resolve()]
+    seen: set[pathlib.Path] = set()
+    errors: list[str] = []
+    pattern = re.compile(r'^\s*#include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
+
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            content = current.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"{current}: unable to read include: {exc}")
+            continue
+        for match in pattern.finditer(content):
+            delimiter, raw_path = match.groups()
+            relative = pathlib.Path(raw_path.replace("\\", "/"))
+            candidate = (current.parent / relative) if delimiter == '"' else (include_root / relative)
+            candidate = candidate.resolve()
+            if not candidate.is_file():
+                errors.append(f"{current}: missing include {raw_path}")
+            elif candidate not in seen:
+                pending.append(candidate)
+    return errors
+
+
 def candidate_producers_safe(source: str) -> bool:
     """Ensure automatic candidate producers cannot write around the resolver."""
     regions = (
@@ -235,6 +265,8 @@ def main() -> int:
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
+    include_errors = include_dependency_errors(path)
+    checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
     checks.append(("balanced delimiters/comments/literals", not errors))
     failed = False
@@ -243,6 +275,8 @@ def main() -> int:
         failed |= not ok
     for error in errors:
         print(f"  {error}")
+    for error in include_errors:
+        print(f"  INCLUDE: {error}")
 
     # A source-level regression tripwire complements the check above; neither
     # this nor a passing run proves runtime correctness or compiler validity.
