@@ -123,6 +123,13 @@ def main() -> int:
              'STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection")',
              'STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection")',
              'STB_DirectionVolumeWithinLimit(symbol,hedgeDirection,volume,"OneClickHedge")'))),
+        ("automatic pending-order writer rechecks symbol lease immediately before send",
+         "STB_SymbolManagementOwnedVerified(s.symbol)" in
+         source_region(source, "bool PlaceSetup(Setup &s)",
+                       "//==================================================================\\n// MANUAL PENDING COMMANDS")),
+        ("one-click hedge writer rechecks symbol lease before send",
+         "STB_SymbolManagementOwnedVerified(symbol)" in
+         source_region(source, "bool OneClickHedge()", "bool PlaceSetup(Setup &s)")),
         ("delete writer rejects unauthorized requests",
          "reason=UNAUTHORIZED_OR_UNVERIFIED" in source),
         ("rollback authorization matches creator comment families",
