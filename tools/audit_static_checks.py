@@ -126,7 +126,7 @@ def main() -> int:
         ("automatic pending-order writer rechecks symbol lease immediately before send",
          "STB_SymbolManagementOwnedVerified(s.symbol)" in
          source_region(source, "bool PlaceSetup(Setup &s)",
-                       "//==================================================================\\n// MANUAL PENDING COMMANDS")),
+                       "//==================================================================\n// MANUAL PENDING COMMANDS")),
         ("one-click hedge writer rechecks symbol lease before send",
          "STB_SymbolManagementOwnedVerified(symbol)" in
          source_region(source, "bool OneClickHedge()", "bool PlaceSetup(Setup &s)")),
