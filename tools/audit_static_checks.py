@@ -211,14 +211,20 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic)"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
-        ("resolver enforces active profit-lock floor and deterministic no-SL fallback",
+        ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
-             "decisionNetProfitPips=PositionNetProfitPips(ticket);",
-             "decisionNetProfitPips>=STB_ProfitLockTriggerPips()",
-             "meetsProfitLockFloor",
+             "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
+             "decisionPriceMovePips>=STB_ProfitLockTriggerPips()",
+             "bool enforceProfitLockFloor=",
+             "profitLockTarget=NormalizePrice(symbol,",
+             "bool meetsProfitLockFloor=!enforceProfitLockFloor ||",
              "currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION",
              "if(!found && unprotectedFallbackFound)",
-             "props[i].source<unprotectedFallbackSource"))),
+             "props[i].source<unprotectedFallbackSource")) and
+         source.find("bool meetsProfitLockFloor=!enforceProfitLockFloor ||") <
+             source.find("if(!meetsProfitLockFloor)") and
+         source.find("if(!found && unprotectedFallbackFound)") <
+             source.find("if(!found || !IsValidSLForPosition(symbol,side,finalSL))")),
         ("profit-lock state is committed only when the actual SL satisfies the lock target",
          (lambda body: bool(body) and
           "double lockTargetSL=" in body and
