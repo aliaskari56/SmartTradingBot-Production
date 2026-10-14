@@ -4035,6 +4035,16 @@ bool OneClickHedge()
    string comment="STB|HEDGE|"+
                   (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+
                   "|EB"+DoubleToString(hedgeEntryOffset,8);
+
+   // One-click hedge is a broker writer too; acquire the same symbol lease
+   // immediately before sending so another chart cannot race this request.
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB HEDGE REJECTED: symbol-management lease not owned symbol=",symbol,
+            " chart=",ChartID());
+      return false;
+     }
+
    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -6646,6 +6656,11 @@ bool PlaceSetup(Setup &s)
    string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+
                   IntegerToString(s.adaptiveProfile)+"|EB"+
                   DoubleToString(effectiveEntryBuffer,8);
+
+   // Claim/revalidate the per-symbol lease at the final automatic-order
+   // writer boundary. The earlier candidate gate is not an atomic lock.
+   if(!STB_SymbolManagementOwnedVerified(s.symbol))
+      return STB_LogPlaceReject(s,"SYMBOL_MANAGEMENT_LEASE_NOT_OWNED");
 
    bool ok=false;
 
