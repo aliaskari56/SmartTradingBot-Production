@@ -8472,7 +8472,9 @@ bool ValidateInputs()
    if(InpManualSaveStepPips<0.0)
       return false;
    if(InpTrendlineTolerancePips<0.0 ||
-      InpTrailStartPips<0.0)
+      InpTrailStartPips<0.0 ||
+      InpLiveTrailDistancePips<0.0 ||
+      InpTrailStepPips<0.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
@@ -8607,7 +8609,12 @@ int OnInit()
 
    UpdateButtons();
 
-   EventSetTimer(MathMax(1,InpScanSeconds));
+   ResetLastError();
+   if(!EventSetTimer(MathMax(1,InpScanSeconds)))
+     {
+      Print("STB INIT FAILED: EventSetTimer failed err=",GetLastError());
+      return INIT_FAILED;
+     }
 
    g_lastChartBar=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
    g_lastM15Bar=iTime(_Symbol,PERIOD_M15,0);
