@@ -47,4 +47,4 @@ Previously reported baseline figures (473 trades, net loss around 278.29, profit
 
 ## Current repository status
 
-A readable source candidate is proposed for review in PR #9, which remains unmerged and draft. The exact candidate has not been verified by MetaEditor compilation or controlled Strategy Tester. The compiled `.ex5` provenance also remains unverified. No profitability or live-readiness claim is made.
+The readable MQL5 source snapshot and dependency-audited review package were merged through PR #9 on 2026-10-14 (merge commit `6d1b96ca79e32a0ad9edae626000230c273d20e4`). This merge does not establish that the exact source has been compiled successfully in MetaEditor or validated in a controlled Strategy Tester run. The compiled `.ex5` provenance also remains unverified. No profitability or live-readiness claim is made.
