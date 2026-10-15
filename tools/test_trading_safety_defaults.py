@@ -45,9 +45,16 @@ def main() -> int:
     auto_placement = region(
         source, "bool PlaceSetup(", "bool PlaceManualPendingDirection("
     )
+    modify_retcode = region(
+        source, "bool TradeRetcodeModifySucceeded()",
+        "bool TradeRetcodePlacementSucceeded()"
+    )
     placement_retcode = region(
         source, "bool TradeRetcodePlacementSucceeded()",
         "// Minimum distance required by the broker"
+    )
+    controlled_delete = region(
+        source, "bool STB_ExecuteOrderDelete(", "bool STB_RequestOrderDelete("
     )
     hedge_placement = region(
         source, "bool OneClickHedge()", "//==================================================================\n// STOP VALIDATION"
@@ -111,6 +118,25 @@ def main() -> int:
          bool(pending_modify)
          and "if(!OrderCheck(req,check))" in pending_modify
          and "check.retcode!=0" in pending_modify),
+        ("pending-order modification checks server retcode and verified final geometry",
+         bool(pending_modify)
+         and "if(!TradeRetcodeModifySucceeded())" in pending_modify
+         and "if(!OrderSelect(ticket))" in pending_modify
+         and "MathAbs(ve-newEntry)>tolerance" in pending_modify
+         and "STB_GeomStore(ticket,false,ve,vs,vt)" in pending_modify),
+        ("modify success helper restricts accepted server retcodes",
+         bool(modify_retcode)
+         and all(token in modify_retcode for token in (
+             "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
+             "TRADE_RETCODE_NO_CHANGES", "TRADE_RETCODE_ORDER_CHANGED"))),
+        ("central pending delete requires authorization, server success and ticket disappearance",
+         bool(controlled_delete)
+         and "if(!authorized)" in controlled_delete
+         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete
+         and "TRADE_RETCODE_DONE" in controlled_delete
+         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete
+         and "if(OrderSelect(ticket))" in controlled_delete
+         and "STB DELETE CONFIRMED" in controlled_delete),
         ("automatic pending placement checks server result and initial SL",
          bool(auto_placement)
          and "trade.BuyStop(" in auto_placement
