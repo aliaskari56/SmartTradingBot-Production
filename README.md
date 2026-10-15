@@ -5,7 +5,7 @@
 ## Repository layout
 
 - `MQL5/Experts/SmartTradingBot_FINAL.mq5` — primary readable Expert Advisor source candidate.
-- `MQL5/Experts/SmartTradingBot_FINAL.ex5` — compiled binary snapshot; provenance relative to the source is not yet verified.
+- `MQL5/Experts/SmartTradingBot_FINAL.ex5` — intentionally not stored on this branch while binary provenance is unverified. Build the EX5 locally from the exact checked-out source and reviewed dependency set using MetaEditor.
 - `MQL5/Include/STB/` — project-specific include files.
 - `MQL5/Include/Trade/` and the two root support headers — minimal vendored include dependency closure found by recursive `#include` analysis.
 - `tools/audit_static_checks.py` — source-level guardrails; not a compiler or runtime test.
@@ -19,14 +19,14 @@
 1. Treat `main` as the canonical reviewed branch after an explicit, validated merge.
 2. Keep experimental changes on topic branches and submit them through pull requests.
 3. Do not merge EA or include-file changes until the diff has been reviewed and the exact resulting source has passed the required validation gates.
-4. Do not treat an `.ex5` binary as verified unless its relationship to the reviewed `.mq5` source is documented and reproducible.
+4. Do not distribute an `.ex5` as verified unless its relationship to the reviewed `.mq5` source, exact include dependency set, MetaEditor build, compile log, and artifact SHA-256 is documented and reproducible.
 5. Preserve the ZIP backup and verified all-refs bundle until the final source snapshot is independently recoverable.
 
 ## Validation gates
 
 - [ ] Review the complete source diff and classify every changed file.
 - [ ] Verify source/binary provenance and version identity.
-- [ ] Compile the exact candidate source in MetaEditor; record compiler version, errors, and warnings.
+- [ ] Compile the exact candidate source in MetaEditor; record compiler version, errors, warnings, source hash, include hashes, and EX5 hash.
 - [ ] Run controlled baseline-versus-candidate equivalence checks for diagnostic-only changes.
 - [ ] Run Strategy Tester checks with recorded inputs and settings; inspect order/deal history as well as summary metrics.
 - [ ] Keep demo/runtime checks separate from static analysis and backtest claims.
@@ -42,5 +42,6 @@ This is a source-graph cleanup, not proof of successful compilation. If MetaEdit
 
 - This README does not certify the source, binary, strategy, or trading performance.
 - Static analysis cannot establish runtime correctness or profitability.
-- The current source has not been confirmed by a MetaEditor compile and controlled Strategy Tester run.
-- No live-trading readiness should be inferred from the presence of a compiled `.ex5` file.
+- A passing GitHub static audit does not prove that MetaEditor compiled the same source or that a terminal chart loaded the resulting EX5.
+- Any locally compiled EX5 must be accompanied by an artifact provenance record before it should be considered a release binary.
+- No live-trading readiness should be inferred from the presence of source files or a locally compiled `.ex5` file.
