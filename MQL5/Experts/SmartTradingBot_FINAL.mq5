@@ -1885,6 +1885,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    long stbOt=OrderGetInteger(ORDER_TYPE);
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
+   double stbCurTP=OrderGetDouble(ORDER_TP);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
@@ -1965,6 +1966,34 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
             " comment=",check.comment);
       return false;
      }
+
+   // OrderCheck can take time. Re-read the ticket and verify that both the
+   // symbol-writer lease and the geometry snapshot are still ours to modify.
+   if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
+      return false;
+   if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+      OrderGetInteger(ORDER_TYPE)!=stbOt)
+      return false;
+   if(!isUserAction && STB_ManualOverrideIs(ticket))
+      return false;
+
+   double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double latestSL=OrderGetDouble(ORDER_SL);
+   double latestTP=OrderGetDouble(ORDER_TP);
+   double latestPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double latestTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double latestTolerance=MathMax(latestPoint*0.5,
+                                  latestTickSize>0.0 ? latestTickSize*0.5:latestPoint*0.5);
+   if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
+      MathAbs(latestSL-stbCurSL)>latestTolerance ||
+      MathAbs(latestTP-stbCurTP)>latestTolerance)
+      return false;
+
+   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
+      !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
+      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+      return false;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -5084,6 +5113,12 @@ void STB_ProfitProtectionOne(const ulong ticket)
    if(!IsValidSLForPosition(symbol,latestType,newSL))
       return false;
    tp=latestTP;
+
+   // Re-verify writer authority at the last possible point before the broker
+   // request; an earlier lease check can become stale during validation.
+   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      !PositionSelectByTicket(ticket))
+      return false;
 
    if(!trade.PositionModify(ticket,newSL,tp))
      {
