@@ -249,8 +249,9 @@ def main() -> int:
     code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
     region_sample = (
         "/* bool Target() { int wrong=1; } */\n"
-        'string note="bool Target() { int fake=1; } // END";\n'
+        'string note="bool Target() { int fake=1; }";\n'
         "bool Target() { int expected=1; }\n"
+        'string terminator="// END";\n'
         "/* // END */\n"
         "// END\n"
         "bool Next() { int tail=1; }\n"
@@ -260,6 +261,7 @@ def main() -> int:
         "expected=1;" in selected_region
         and "wrong=1;" not in selected_region
         and "fake=1;" not in selected_region
+        and "terminator" in selected_region
         and "tail=1;" not in selected_region
     )
     region_fails_closed_when_boundary_missing = (
