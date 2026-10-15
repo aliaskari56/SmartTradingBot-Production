@@ -267,6 +267,10 @@ def main() -> int:
     ]
     checks.append(("risk sizing requires a positive risk budget when enabled",
                    "if(InpUseRiskSizing && InpRiskPercent<=0.0)" in source))
+    checks.append(("risk sizing positive-budget guard is present",
+                   "if(InpUseRiskSizing && InpRiskPercent<=0.0)" in source))
+    checks.append(("fixed-lot mode remains the explicit default",
+                   "input bool    InpUseRiskSizing         = false;" in source))
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
