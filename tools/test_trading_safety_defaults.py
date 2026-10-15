@@ -83,6 +83,7 @@ def main() -> int:
         return 2
 
     source = SOURCE.read_text(encoding="utf-8")
+    source_code = strip_comments(source)
     permission_gate = region(
         source, "bool STB_TradeEnvironmentAllowed()", "bool IsSpreadAcceptable("
     )
@@ -152,6 +153,16 @@ def main() -> int:
     stripper_preserves_lines = (
         stripped_sample.count("\n") == comment_sample.count("\n")
     )
+    commented_input_sample = (
+        "/* configuration example\\n"
+        "input bool InpAutoTrading = true;\\n"
+        "*/\\n"
+        "input bool InpAutoTrading = false;\\n"
+    )
+    commented_input_is_ignored = (
+        input_default("InpAutoTrading", strip_comments(commented_input_sample))
+        == "false"
+    )
 
     checks = (
         ("comment stripper preserves comment-like text inside strings",
@@ -160,10 +171,12 @@ def main() -> int:
          stripper_removes_comments),
         ("comment stripper preserves newline count",
          stripper_preserves_lines),
+        ("commented-out input declarations cannot satisfy default checks",
+         commented_input_is_ignored),
         ("live auto-trading is opt-in by default",
-         input_default("InpAutoTrading", source) == "false"),
+         input_default("InpAutoTrading", source_code) == "false"),
         ("risk-based sizing is opt-in by default",
-         input_default("InpUseRiskSizing", source) == "false"),
+         input_default("InpUseRiskSizing", source_code) == "false"),
         ("live initialization forces AUTO off when input is false",
          "if(!InpAutoTrading){g_autoTrading=false;GlobalVariableSet(g_autoStateName,0.0);}"
          in live_auto_branch_compact),
@@ -209,7 +222,7 @@ def main() -> int:
          and "if(OrderSelect(ticket))" in controlled_delete
          and "STB DELETE CONFIRMED" in controlled_delete),
         ("all broker pending-order deletion goes through the central writer",
-         source.count("trade.OrderDelete(") == 1
+         source_code.count("trade.OrderDelete(") == 1
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
          "TRADE_ACTION_REMOVE" not in strip_comments(source)),
