@@ -7046,7 +7046,7 @@ void STB_ExecuteTopCandidate()
 
       STB_EntryLockRelease(symbol,entryLockToken);
 
-      if(!wasSelected && !HasManagedExposure(symbol))
+      if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
          SymbolSelect(symbol,false);
 
       if(placed)
