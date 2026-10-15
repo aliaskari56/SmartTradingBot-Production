@@ -8872,14 +8872,11 @@ STB_ReconcileTradeRegistry();
 
 
 
-      if(PositionsTotal()==0 && OrdersTotal()==0)
-        {
-         STB_ScannerRun();
-         STB_ExecuteTopCandidate();
-         g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-        }
-      else
-         Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       // Scan each scheduled M15 cycle even if other symbols have exposure.
+       // Placement and final execution gates enforce symbol exposure and limits.
+       STB_ScannerRun();
+       STB_ExecuteTopCandidate();
+       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
 
 
