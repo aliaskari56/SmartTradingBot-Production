@@ -3767,12 +3767,12 @@ bool STB_IsOwnedPendingOrder(const ulong ticket)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Entry-policy gate: only this EA's own exposure blocks a new setup.
 bool HasManagedExposure(const string symbol)
   {
    if(!InpOneSetupPerSymbol || symbol=="")
       return false;
 
-   // Only positions owned by this EA's Magic Number block another setup.
    for(int i=PositionsTotal()-1;i>=0;i--)
      {
       ulong ticket=PositionGetTicket(i);
@@ -3784,7 +3784,6 @@ bool HasManagedExposure(const string symbol)
          return true;
      }
 
-   // Only this EA's pending entry orders block another setup on the same symbol.
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
       ulong ticket=OrderGetTicket(i);
@@ -3793,6 +3792,38 @@ bool HasManagedExposure(const string symbol)
       if(OrderGetString(ORDER_SYMBOL)!=symbol)
          continue;
       if(STB_IsOwnedPendingOrder(ticket))
+         return true;
+     }
+
+   return false;
+  }
+
+// Lifecycle gate: preserve quote subscription while any exposure on this
+// symbol remains inside the EA's management scope, independent of entry policy.
+bool STB_HasSymbolExposureForManagement(const string symbol)
+  {
+   if(symbol=="")
+      return false;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
+      if(IsManagedPosition(ticket))
+         return true;
+     }
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol)
+         continue;
+      if(IsManagedOrder(ticket))
          return true;
      }
 
@@ -6981,7 +7012,7 @@ void STB_ExecuteTopCandidate()
       double entryLockToken=0.0;
       if(!STB_EntryLockAcquire(symbol,entryLockToken))
         {
-         if(!wasSelected && !HasManagedExposure(symbol))
+         if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
             SymbolSelect(symbol,false);
          continue;
         }
@@ -7295,15 +7326,17 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
   {
    reason="";
 
-   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
-
-   if(!selected)
-      SymbolSelect(symbol,true);
-
    bool custom=false;
-   if(!SymbolExist(symbol,custom))
+   if(symbol=="" || !SymbolExist(symbol,custom))
      {
       reason="REJECT_SYMBOL_NOT_FOUND";
+      return false;
+     }
+
+   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
+   if(!selected && !SymbolSelect(symbol,true))
+     {
+      reason="REJECT_SYMBOL_SELECT_FAILED";
       return false;
      }
 
@@ -7903,16 +7936,18 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-      if(STB_CalcMarketQuality(c.symbol,q))
-         c.marketQualityScore=q.score;
+      if(!STB_CalcMarketQuality(c.symbol,q))
+         continue;
+      c.marketQualityScore=q.score;
 
       STBRegimeState rr;
-      if(STB_EvaluateRegime(c.symbol,rr))
-        {
-         c.regime=rr.regime;
-         c.regimeStrength=rr.strength;
-         c.regimeScore=STB_RegimeFitScore(c,rr);
-        }
+      if(!STB_EvaluateRegime(c.symbol,rr) ||
+         rr.regime==STB_REGIME_UNSTABLE)
+         continue;
+
+      c.regime=rr.regime;
+      c.regimeStrength=rr.strength;
+      c.regimeScore=STB_RegimeFitScore(c,rr);
 
       c.setupAgeBars=(int)MathMax(0,
                                   (long)((TimeCurrent()-c.setup.setupTime)/900));
@@ -7995,7 +8030,7 @@ void STB_ScannerRun()
      }
 
    for(int i=0;i<ArraySize(symbols) && i<ArraySize(wasSelected);i++)
-      if(!wasSelected[i] && !HasManagedExposure(symbols[i]))
+      if(!wasSelected[i] && !STB_HasSymbolExposureForManagement(symbols[i]))
          SymbolSelect(symbols[i],false);
 
    g_scannerLastCycleBar=cycleBar;
