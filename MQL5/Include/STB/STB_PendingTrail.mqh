@@ -20,10 +20,9 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY  side: anchor = live Bid low, entry follows the extreme  |
-//|   - SELL side: anchor = live Ask high, entry follows the extreme |
-//|   - stop vs limit only changes the entry offset SIGN; the SL     |
-//|     engine and the trailing policy are shared                    |
+//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
+//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - other pending types retain live Bid/Ask extreme trailing     |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
 //|   - multi-ticket isolation                                       |
@@ -88,6 +87,7 @@ struct STBPendingTrailState
    double   lastSL;
    datetime lastModifyTime;
    datetime lastNoNewExtremeLogBar;
+   datetime lastProcessedM5Bar; // latest closed M5 candle considered for STOP-order trailing
    datetime lastFailLogBar;
    int      lastProcessedCycle;
    double   entryBufferPips;
@@ -203,9 +203,9 @@ int STB_PendingClassifyResult(const bool ok)
 }
 
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. The state anchor is
-// derived from the current pending-order geometry; subsequent live Bid/Ask
-// extremes can only move the pending order in the requested one-way path.
+// Called ONLY after the terminal confirmed the ticket. BUY STOP / SELL STOP
+// state anchors use the latest closed M5 candle; other pending types retain
+// their existing geometry/live-quote anchor and one-way trailing path.
 // Universal intake: EA-created, manual/mobile, other-EA and restart-recovered
 // tickets all register through this single entry point.
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
@@ -303,6 +303,21 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    //   entry = extreme + offSign*offset  =>  extreme = entry - offSign*offset.
    double inferredExtreme=currentEntry-offSign*entryBufferPips*pip;
 
+   // STOP orders use the latest CLOSED M5 candle as their initial structural
+   // anchor. Subsequent trailing is evaluated once per newly closed M5 bar.
+   if(orderType==(long)ORDER_TYPE_BUY_STOP)
+     {
+      double m5Low=iLow(symbol,PERIOD_M5,1);
+      if(m5Low>0.0)
+         inferredExtreme=m5Low;
+     }
+   else if(orderType==(long)ORDER_TYPE_SELL_STOP)
+     {
+      double m5High=iHigh(symbol,PERIOD_M5,1);
+      if(m5High>0.0)
+         inferredExtreme=m5High;
+     }
+
    if(inferredExtreme<=0.0)
       return false;
 
@@ -318,6 +333,7 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.lastSL=currentSL;
    st.lastModifyTime=0;
    st.lastNoNewExtremeLogBar=0;
+   st.lastProcessedM5Bar=iTime(symbol,PERIOD_M5,1);
    st.lastFailLogBar=0;
    st.lastProcessedCycle=-1;
    st.entryBufferPips=entryBufferPips;
@@ -404,8 +420,10 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    double pip=PipSize(symbol);
    datetime now=TimeCurrent();
 
-   if(!manual && STB_ManualOverrideIs(ticket))
-      return false; // MANUAL_OVERRIDE: automatic pending trail paused
+   bool candleStop=(g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_BUY_STOP ||
+                    g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_SELL_STOP);
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      return false; // M5 candle-follow remains active for BUY STOP / SELL STOP
 
    // Time throttle: at most one modification per cooldown window.
    if(g_stbPendingTrail[idx].nextRetryTime>0 &&
@@ -482,9 +500,6 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return false;
 
-   if(!manual && STB_ManualOverrideIs(ticket))
-      return true; // MANUAL_OVERRIDE: automatic pending trail paused
-
    if(!OrderSelect(g_stbPendingTrail[idx].ticket))
    {
       // Terminal no longer exposes this order: filled (triggered),
@@ -507,6 +522,14 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    }
 
    long orderType=OrderGetInteger(ORDER_TYPE);
+
+   // BUY STOP / SELL STOP orders explicitly opt into the M5 candle-follow
+   // lifecycle, including orders created by the chart buttons. Preserve the
+   // existing manual-override pause for LIMIT and STOP-LIMIT orders.
+   bool candleStop=(orderType==(long)ORDER_TYPE_BUY_STOP ||
+                    orderType==(long)ORDER_TYPE_SELL_STOP);
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      return true;
 
    if(!STB_PendingTrailIsManagedType(orderType))
    {
@@ -540,18 +563,49 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(direction==0 || point<=0.0)
       return true;
 
-   // 1) Read the LIVE favorable-side market extreme.
-   // BUY  side (BUY STOP / BUY LIMIT): falling Bid creates a new lower extreme.
-   // SELL side (SELL STOP / SELL LIMIT): rising Ask creates a new higher extreme.
-   // This is intentionally live, not candle-close based, so the pending
-   // entry and its SL follow a new favorable pre-trigger extreme immediately.
-   MqlTick liveTick;
-   if(!SymbolInfoTick(symbol,liveTick))
-      return true;
+   // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
+   // BUY STOP moves only after a bearish M5 candle and anchors to its low.
+   // SELL STOP moves only after a bullish M5 candle and anchors to its high.
+   // Other pending types retain their previous live-extreme behavior.
+   double extreme=0.0;
+   if(candleStop)
+     {
+      datetime closedBar=iTime(symbol,PERIOD_M5,1);
+      if(closedBar<=0 ||
+         closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
+         return true;
 
-   double extreme=(direction>0)
-                  ? liveTick.bid
-                  : liveTick.ask;
+      double barOpen=iOpen(symbol,PERIOD_M5,1);
+      double barClose=iClose(symbol,PERIOD_M5,1);
+      double barLow=iLow(symbol,PERIOD_M5,1);
+      double barHigh=iHigh(symbol,PERIOD_M5,1);
+      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+         return true;
+
+      // Consume the closed bar only after its OHLC data passed validation.
+      // If history is temporarily unavailable, the same bar can be retried.
+      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+
+      if(orderType==(long)ORDER_TYPE_BUY_STOP)
+        {
+         if(barClose>=barOpen)
+            return true; // only a completed bearish candle may move BUY STOP down
+         extreme=barLow;
+        }
+      else
+        {
+         if(barClose<=barOpen)
+            return true; // only a completed bullish candle may move SELL STOP up
+         extreme=barHigh;
+        }
+     }
+   else
+     {
+      MqlTick liveTick;
+      if(!SymbolInfoTick(symbol,liveTick))
+         return true;
+      extreme=(direction>0 ? liveTick.bid:liveTick.ask);
+     }
 
    if(extreme<=0.0)
       return true;
