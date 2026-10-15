@@ -187,7 +187,6 @@ def main() -> int:
          "return INIT_FAILED;" in on_init),
         ("startup logs distinguish expert and account trade permissions",
          "accountExpert=" in source and "accountTrade=" in source),
-         '"accountExpert="' in source and '"accountTrade="' in source),
         ("one direct OrderDelete writer",
          len(re.findall(r"\btrade\s*\.\s*OrderDelete\s*\(", source)) == 1),
         ("one direct PositionModify writer",
