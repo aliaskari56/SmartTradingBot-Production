@@ -142,7 +142,7 @@ def main() -> int:
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
          "TRADE_ACTION_REMOVE" not in re.sub(
-             r"/\\*.*?\\*/|//[^\\n]*", "", source, flags=re.DOTALL
+             r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL
          )),
         ("rollback deletion requires known creator, matching comment and a fresh order",
          bool(controlled_delete)
