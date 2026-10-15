@@ -53,6 +53,10 @@ The new logs are diagnostic only. They can increase log volume and slightly affe
 - Report totals reconcile to order/deal history and include trading costs.
 - Source-to-EX5 provenance is recorded.
 
-## Status
+## Historical status and integration checkpoint — 2026-10-15
 
-This is a test plan, not a test result. The reviewed M5/scanner changes have been ported onto an integration branch based on current main, preserving live opt-in defaults and mainline writer/entry-lock safeguards. GitHub Actions MetaEditor compile passed for source commit `f740341d118ca9b2417501ec61ececd07246442c` with 0 errors and 0 warnings (MetaEditor 5.0.0.6264; workflow run 38785982207). The fresh EX5, compile log, and SHA-256 provenance manifest are retained as the workflow artifact. No MT5 Strategy Tester or broker runtime comparison is claimed. Do not treat the branch as release-approved until compiler, deterministic baseline/candidate comparison, M5/manual-override tests, and source-to-EX5 provenance are recorded.
+The original audit status above reflects the October 10 checkpoint; it is not a statement about later CI runs.
+
+The corresponding source bytes (`MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob `a5cab7fa950571626c8261e14d40890189aa34e5`) passed the repository's Windows MetaEditor workflow on October 15: **0 errors, 0 warnings**, MetaEditor `5.0.0.6266`, run [38801737418](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/38801737418). The workflow uploaded a fresh EX5, compiler log, and provenance manifest as artifact `metaeditor-build-ebb9f0bbc9cd70ccbae40efd1b07d10ff4a92941`. The live AUTO and risk-sizing defaults remain `false`.
+
+This document remains a test plan, not evidence of a completed MT5 Strategy Tester or broker-equivalence run. Do not treat the EA as runtime-validated until deterministic baseline/candidate comparison and M5/manual-override tests are recorded.
