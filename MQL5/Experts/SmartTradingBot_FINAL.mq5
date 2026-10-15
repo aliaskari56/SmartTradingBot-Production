@@ -8333,10 +8333,6 @@ bool ValidateInputs()
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0)
       return false;
-   // Fail at initialization instead of silently rejecting every setup when
-   // risk sizing is enabled with a zero risk budget.
-   if(InpUseRiskSizing && InpRiskPercent<=0.0)
-      return false;
    if(InpScannerMinQuality<0.0 ||
       InpScannerMinQuality>100.0 ||
       InpScannerMinScore<0.0 ||
