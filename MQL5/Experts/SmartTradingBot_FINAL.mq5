@@ -7035,32 +7035,41 @@ void STB_EntryLockRelease(const string symbol,const double token)
       GlobalVariableSetOnCondition(key,0.0,token);
   }
 
-bool STB_ExposureAllowsExecution(const Setup &s)
+bool STB_ExposureAllowsExecution(const Setup &s,string &reason)
   {
+   reason="";
    if(HasManagedExposure(s.symbol))
+     {
+      reason="MANAGED_EXPOSURE_EXISTS";
       return false;
-
+     }
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
+     {
+      reason="ACCOUNT_ORDER_LIMIT";
       return false;
-
+     }
    return true;
   }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_FinalAutoGate(const Setup &s)
+bool STB_FinalAutoGate(const Setup &s,string &reason)
   {
+   reason="";
    if(!g_autoTrading)
+     {
+      reason="AUTO_TRADING_OFF";
       return false;
-
+     }
    if(!STB_TradeEnvironmentAllowed())
+     {
+      reason="TRADE_ENVIRONMENT_REJECT";
       return false;
-
-   if(!STB_ExposureAllowsExecution(s))
+     }
+   if(!STB_ExposureAllowsExecution(s,reason))
       return false;
-
    return true;
   }
 
@@ -7069,8 +7078,32 @@ bool STB_FinalAutoGate(const Setup &s)
 //+------------------------------------------------------------------+
 void STB_ExecuteTopCandidate()
   {
-   if(g_scannerTop10Count<=0 || g_scannerConfidence!="CLEAR")
-      return;
+   if(g_scannerTop10Count<=0)
+      {
+       Print("STB EXECUTION SKIP reason=NO_TOP_CANDIDATE",
+             " confidence=",g_scannerConfidence,
+             " universe=",IntegerToString(g_scannerUniverseCount),
+             " eligible=",IntegerToString(g_scannerEligibleCount),
+             " quality=",IntegerToString(g_scannerQualityCount),
+             " regime=",IntegerToString(g_scannerRegimeCount),
+             " candidates=",IntegerToString(g_scannerCandidateCount));
+       return;
+      }
+    if(g_scannerConfidence!="CLEAR")
+      {
+       double topScore=g_scannerTop10[0].opportunityScore;
+       double secondScore=(g_scannerTop10Count>1 ?
+                           g_scannerTop10[1].opportunityScore:0.0);
+       Print("STB EXECUTION SKIP reason=CONFIDENCE_NOT_CLEAR",
+             " confidence=",g_scannerConfidence,
+             " top=",g_scannerTop10[0].symbol,
+             " direction=",(g_scannerTop10[0].direction>0 ? "BUY":"SELL"),
+             " topScore=",DoubleToString(topScore,1),
+             " secondScore=",DoubleToString(secondScore,1),
+             " requiredGap=",DoubleToString(InpScannerMinTopGap,1),
+             " topCount=",IntegerToString(g_scannerTop10Count));
+       return;
+      }
 
    if(!g_autoTrading)
      {
@@ -7091,7 +7124,14 @@ void STB_ExecuteTopCandidate()
       // order placement. Retain it afterward only while a managed exposure
       // needs live quotes for stop management/trailing.
       if(!wasSelected && !SymbolSelect(symbol,true))
-         continue;
+         {
+          Print("STB CANDIDATE REJECT",
+                " stage=SYMBOL_SELECT",
+                " symbol=",symbol,
+                " reason=SYMBOL_SELECT_FAILED",
+                " error=",IntegerToString(GetLastError()));
+          continue;
+         }
 
       // The lock spans exposure recheck through broker submission so two
       // chart instances cannot both pass the same-symbol gate concurrently.
@@ -7104,13 +7144,35 @@ void STB_ExecuteTopCandidate()
         }
 
       Setup validated;
-      bool revalidated=STB_FinalCandidateRevalidation(c,validated);
-      bool placed=false;
-
-      if(revalidated && STB_FinalAutoGate(validated))
-         placed=PlaceSetup(validated,entryLockToken);
-
-      STB_EntryLockRelease(symbol,entryLockToken);
+       bool revalidated=STB_FinalCandidateRevalidation(c,validated);
+       bool placed=false;
+       if(!revalidated)
+         {
+          Print("STB CANDIDATE REJECT",
+                " stage=FINAL_REVALIDATION",
+                " symbol=",c.symbol,
+                " direction=",(c.direction>0 ? "BUY":"SELL"),
+                " reason=",(c.rejectReason=="" ? "UNSPECIFIED":c.rejectReason),
+                " rank=",IntegerToString(c.currentRank),
+                " score=",DoubleToString(c.opportunityScore,1));
+         }
+       else
+         {
+          string finalGateReason="";
+          if(!STB_FinalAutoGate(validated,finalGateReason))
+            {
+             Print("STB CANDIDATE REJECT",
+                   " stage=FINAL_AUTO_GATE",
+                   " symbol=",c.symbol,
+                   " direction=",(c.direction>0 ? "BUY":"SELL"),
+                   " reason=",(finalGateReason=="" ? "UNSPECIFIED":finalGateReason),
+                   " rank=",IntegerToString(c.currentRank),
+                   " score=",DoubleToString(c.opportunityScore,1));
+            }
+          else
+             placed=PlaceSetup(validated,entryLockToken);
+         }
+       STB_EntryLockRelease(symbol,entryLockToken);
 
       if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
          SymbolSelect(symbol,false);
@@ -7923,22 +7985,39 @@ void STB_ScannerRun()
 
       string reason="";
       if(!STB_ScannerDataEligible(symbol,reason))
+        {
+         Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
+               " reason=",(reason=="" ? "UNSPECIFIED":reason));
          continue;
-
+        }
       g_scannerEligibleCount++;
-
       STBMarketQuality quality;
       if(!STB_CalcMarketQuality(symbol,quality))
+        {
+         Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
+               " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
+               " score=",DoubleToString(quality.score,1),
+               " spreadPips=",DoubleToString(quality.spreadPips,2),
+               " activityRatio=",DoubleToString(quality.activityRatio,2),
+               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
          continue;
-
+        }
       g_scannerQualityCount++;
-
       STBRegimeState regime;
       if(!STB_EvaluateRegime(symbol,regime))
+        {
+         Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
          continue;
-
+        }
       if(regime.regime==STB_REGIME_UNSTABLE)
+        {
+         Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
+               " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
+               " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
+               " efficiency=",DoubleToString(regime.efficiency,2));
          continue;
+        }
 
       g_scannerRegimeCount++;
 
@@ -8025,14 +8104,26 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-      if(!STB_CalcMarketQuality(c.symbol,q))
-         continue;
-      c.marketQualityScore=q.score;
-
-      STBRegimeState rr;
-      if(!STB_EvaluateRegime(c.symbol,rr) ||
-         rr.regime==STB_REGIME_UNSTABLE)
-         continue;
+       if(!STB_CalcMarketQuality(c.symbol,q))
+         {
+          Print("STB SCANNER REJECT stage=WATCHLIST_QUALITY symbol=",c.symbol,
+                " reason=",(q.reason=="" ? "UNSPECIFIED":q.reason));
+          continue;
+         }
+       c.marketQualityScore=q.score;
+       STBRegimeState rr;
+       if(!STB_EvaluateRegime(c.symbol,rr))
+         {
+          Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+                " reason=",(rr.reason=="" ? "UNSPECIFIED":rr.reason));
+          continue;
+         }
+       if(rr.regime==STB_REGIME_UNSTABLE)
+         {
+          Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
+                " reason=",(rr.reason=="" ? "UNSTABLE_REGIME":rr.reason));
+          continue;
+         }
 
       c.regime=rr.regime;
       c.regimeStrength=rr.strength;
@@ -9112,29 +9203,17 @@ void STB_RunManagementCycle()
 
 void OnTick()
   {
-   STB_RunManagementCycle(); // Blueprint 33: single management cycle
-
-
-
-
+   STB_RunManagementCycle();
    bool m15Bar=NewM15Bar();
-
-
-
-
-
-
-
    if(m15Bar)
+      STB_ReconcileTradeRegistry();
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-       STB_ReconcileTradeRegistry();
-       // Scan each scheduled M15 cycle even if other symbols have exposure.
-       // PlaceSetup / final execution gates enforce same-symbol exposure and
-       // account order limits before any request is sent.
-       STB_ScannerRun();
-       STB_ExecuteTopCandidate();
-       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-       UpdatePanel();
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+      UpdatePanel();
      }
   }
 
@@ -9147,40 +9226,15 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-
-   STB_RunManagementCycle(); // Blueprint 32/33: single cycle (no second engine)
-
-
-
-STB_ReconcileTradeRegistry();
-
-
-
-
-
-
-
-   bool newSignalBar=NewM15Bar();
-
-   if(newSignalBar)
+   STB_RunManagementCycle();
+   STB_ReconcileTradeRegistry();
+   ulong cycleBefore=g_scannerCycle;
+   STB_ScannerRun();
+   if(g_scannerCycle!=cycleBefore)
      {
-
-
-
-
-       // Scan each scheduled M15 cycle even if other symbols have exposure.
-       // Placement and final execution gates enforce symbol exposure and limits.
-       STB_ScannerRun();
-       STB_ExecuteTopCandidate();
-       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+      STB_ExecuteTopCandidate();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
-
-
-
-
-
-
-
    UpdatePanel();
    UpdateButtons();
   }
