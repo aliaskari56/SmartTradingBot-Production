@@ -39,6 +39,16 @@ def main() -> int:
     pending_check = region(
         source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
     )
+    pending_modify = region(
+        source, "bool STB_ModifyPendingOrderGeometry(", "bool PreparePendingSetup("
+    )
+    auto_placement = region(
+        source, "void STB_ExecuteTopCandidate()", "bool PlaceManualPendingDirection("
+    )
+    placement_retcode = region(
+        source, "bool TradeRetcodePlacementSucceeded()",
+        "// Minimum distance required by the broker"
+    )
     # Scope these checks to OnInit(); there are unrelated tester-mode checks
     # elsewhere in the EA, so a file-global substring search would be too broad.
     on_init = region(
@@ -85,13 +95,28 @@ def main() -> int:
          bool(auto_gate) and all(token in auto_gate for token in (
              "!g_autoTrading", "!STB_TradeEnvironmentAllowed()",
              "!STB_ExposureAllowsExecution(s)"))),
-        ("pending-order preflight checks OrderCheck return and retcode",
-         bool(pending_check) and "OrderCheck(request,check)" in pending_check
+        ("pending-order preflight checks OrderCheck boolean and retcode",
+         bool(pending_check) and "if(!OrderCheck(request,check))" in pending_check
          and "check.retcode!=0" in pending_check),
-        ("pending-order modification preflight checks OrderCheck and retcode",
-         "OrderCheck(req,check)" in source and "check.retcode!=0" in source),
+        ("pending-order modification preflight is scoped to geometry writer",
+         bool(pending_modify)
+         and "if(!OrderCheck(req,check))" in pending_modify
+         and "check.retcode!=0" in pending_modify),
+        ("automatic pending placement checks server result and initial SL",
+         bool(auto_placement)
+         and "trade.BuyStop(" in auto_placement
+         and "trade.SellStop(" in auto_placement
+         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement
+         and "trade.ResultRetcode()" in auto_placement
+         and "VerifyPendingInitialSL(" in auto_placement),
+        ("placement success helper enumerates accepted server retcodes",
+         bool(placement_retcode)
+         and all(token in placement_retcode for token in (
+             "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
+             "TRADE_RETCODE_PLACED"))),
         ("directional symbol permissions are checked before auto placement",
-         "if(!IsDirectionTradable(s.symbol,s.direction))" in source),
+         bool(auto_placement)
+         and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement),
     )
 
     failed = False
