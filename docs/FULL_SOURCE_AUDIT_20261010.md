@@ -50,7 +50,7 @@ This is an in-progress source audit, not a release approval. Static reading and 
 - No Strategy Tester or demo-broker run has been performed.
 - Multi-symbol Strategy Tester coverage is restricted by default through `InpTesterChartSymbolOnly=true`; this is intentional test isolation, but must be explicitly changed for multi-symbol tests.
 - Empty `InpScannerSymbols` means selected Market Watch symbols, not every broker symbol.
-- The live AUTO state can persist as OFF after a deliberate chart-button toggle even when `InpAutoTrading=true`; the startup log reports both values. This is a persisted runtime override, not an unexplained terminal permission failure.
+- `InpAutoTrading` defaults to `false`; live automatic trading remains opt-in. The live AUTO state can also persist as OFF after a deliberate chart-button toggle; the startup log reports both values. This is a persisted runtime override, not an unexplained terminal permission failure.
 - The complete structural signal algorithm, adaptive-learning state lifecycle, management behavior under partial fills/reversals, and all broker-specific order modes still require deeper section-by-section review and runtime fixtures.
 - No source change in this audit should be treated as proof of profitability or permission to deploy on a live account.
 
