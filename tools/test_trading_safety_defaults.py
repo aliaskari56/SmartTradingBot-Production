@@ -127,17 +127,13 @@ def main() -> int:
     live_auto_branch = region(
         on_init, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
-    tester_auto_branch_code = re.sub(
-        r"/\*.*?\*/|//[^\n]*", "", tester_auto_branch, flags=re.DOTALL
-    )
-    live_auto_branch_code = re.sub(
-        r"/\*.*?\*/|//[^\n]*", "", live_auto_branch, flags=re.DOTALL
-    )
-    tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
-    live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
-    on_init_compact = re.sub(
-        r"/\*.*?\*/|//[^\n]*|\s+", "", on_init, flags=re.DOTALL
-    )
+    # Use the string-aware comment stripper consistently; a regex alone can
+    # mistake comment markers inside quoted source strings for real comments.
+    tester_auto_branch_code = strip_comments(tester_auto_branch)
+    live_auto_branch_code = strip_comments(live_auto_branch)
+    tester_auto_branch_compact = re.sub(r"\\s+", "", tester_auto_branch_code)
+    live_auto_branch_compact = re.sub(r"\\s+", "", live_auto_branch_code)
+    on_init_compact = re.sub(r"\\s+", "", strip_comments(on_init))
 
     checks = (
         ("live auto-trading is opt-in by default",
@@ -192,9 +188,7 @@ def main() -> int:
          source.count("trade.OrderDelete(") == 1
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
-         "TRADE_ACTION_REMOVE" not in re.sub(
-             r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL
-         )),
+         "TRADE_ACTION_REMOVE" not in strip_comments(source),
         ("rollback deletion requires known creator, matching comment and a fresh order",
          bool(controlled_delete)
          and "bool knownCreator=" in controlled_delete
