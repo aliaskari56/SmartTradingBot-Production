@@ -6562,7 +6562,7 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool PlaceSetup(Setup &s)
+bool PlaceSetup(Setup &s,const double entryLockToken)
   {
    if(!s.valid)
       return false;
@@ -6922,13 +6922,15 @@ bool STB_EntryLockAcquire(const string symbol,double &token)
    if(!GlobalVariableCheck(key))
       return false;
 
-   datetime now=TimeCurrent();
+   // Use local wall-clock time so a quiet server market does not freeze the
+   // lease expiry while other chart instances remain active.
+   datetime now=TimeLocal();
    double current=GlobalVariableGet(key);
-   if(current!=0.0 && MathFloor(current)>=(double)now)
+   if(current!=0.0 && MathFloor(current)>(double)now)
       return false;
 
-   // Integer part is the lease expiry; fractional part distinguishes owners.
-   token=(double)(now+30)+
+   // Integer part is a 120-second lease expiry; fractional part tags the chart.
+   token=(double)(now+120)+
          (double)((long)ChartID()%1000000)/1000000.0;
    if(!GlobalVariableSetOnCondition(key,token,current))
      {
@@ -6937,6 +6939,19 @@ bool STB_EntryLockAcquire(const string symbol,double &token)
      }
 
    return true;
+  }
+
+bool STB_EntryLockStillOwned(const string symbol,const double token)
+  {
+   if(symbol=="" || token==0.0)
+      return false;
+
+   string key=STB_EntryLockKey(symbol);
+   if(!GlobalVariableCheck(key))
+      return false;
+
+   return (GlobalVariableGet(key)==token &&
+           MathFloor(token)>(double)TimeLocal());
   }
 
 void STB_EntryLockRelease(const string symbol,const double token)
@@ -7022,7 +7037,7 @@ void STB_ExecuteTopCandidate()
       bool placed=false;
 
       if(revalidated && STB_FinalAutoGate(validated))
-         placed=PlaceSetup(validated);
+         placed=PlaceSetup(validated,entryLockToken);
 
       STB_EntryLockRelease(symbol,entryLockToken);
 
