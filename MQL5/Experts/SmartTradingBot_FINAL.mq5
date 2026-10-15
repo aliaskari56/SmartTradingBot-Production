@@ -6013,12 +6013,11 @@ string STB_MgmtLeaseKey(const string symbol)
 
 // Central per-symbol management lease. The first instance to reach a symbol
 // claims it; the live owner keeps it; a stale owner (no refresh within
-// STB_MGMT_LEASE_SEC) loses it. Only the owner may pass the broker writers,
-// so one symbol never has two independent position/pending writers.
-// P10 race-safety: after claiming, re-read the owner key. A concurrent
-// claimant may have overwritten it in the same window; the loser must not
-// write to the broker. (MQL5 exposes no atomic CAS, so this verify-after-set
-// plus the TTL lease is the strongest available guard.)
+// STB_MGMT_LEASE_SEC) may lose it. Only the current owner should pass the
+// broker-writer guards. GlobalVariableSetOnCondition provides atomic CAS for
+// claiming/reclaiming the lease within this terminal, but the lease check and
+// broker request are not one atomic operation. Final pre-submit rechecks reduce
+// the race window; this is not a cross-terminal mutex.
 bool STB_SymbolManagementOwnedVerified(const string symbol)
   {
    if(!STB_SymbolManagementOwned(symbol))
