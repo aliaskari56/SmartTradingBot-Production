@@ -50,7 +50,7 @@ def main() -> int:
         "// Minimum distance required by the broker"
     )
     hedge_placement = region(
-        source, "bool OneClickHedge()", "//==================================================================\\n// STOP VALIDATION"
+        source, "bool OneClickHedge()", "//==================================================================\n// STOP VALIDATION"
     )
     manual_stop_placement = region(
         source, "bool PlaceManualPendingDirection(", "bool PlaceManualLimitDirection("
