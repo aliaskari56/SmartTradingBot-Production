@@ -96,18 +96,57 @@ def strip_strings(source: str) -> str:
         i += 1
 
     return "".join(out)
+def find_line_comment_marker(source: str, marker: str, start_offset: int) -> int:
+    """Find a marker at a real // comment boundary, not inside strings or /* */."""
+    state = "code"
+    quote = ""
+    i = 0
+
+    while i < len(source):
+        char = source[i]
+        nxt = source[i + 1] if i + 1 < len(source) else ""
+
+        if state == "code":
+            if char in ('"', "'"):
+                state = "string"
+                quote = char
+            elif char == "/" and nxt == "/":
+                if i >= start_offset and source.startswith(marker, i):
+                    return i
+                state = "line_comment"
+                i += 1
+            elif char == "/" and nxt == "*":
+                state = "block_comment"
+                i += 1
+        elif state == "string":
+            if char == "\\":
+                i += 1
+            elif char == quote:
+                state = "code"
+        elif state == "line_comment":
+            if char == "\n":
+                state = "code"
+        elif state == "block_comment":
+            if char == "*" and nxt == "/":
+                state = "code"
+                i += 1
+
+        i += 1
+
+    return -1
+
+
 def region(source: str, start: str, end: str) -> str:
-    # Use a same-length code-only view to find the start, so signatures inside
-    # comments or quoted strings cannot shadow the real function. Some legacy
-    # boundaries are comment banners, so those end markers are located in the
-    # original text after the validated start offset.
+    # Find the start in executable code so comments and strings cannot shadow
+    # the function/branch signature. Legacy end markers can be comment banners,
+    # so find those only when they begin a genuine // comment.
     code_view = strip_strings(strip_comments(source))
     begin = code_view.find(start)
     if begin < 0:
         return ""
 
     if end.lstrip().startswith("//"):
-        finish = source.find(end, begin + len(start))
+        finish = find_line_comment_marker(source, end, begin + len(start))
     else:
         finish = code_view.find(end, begin + len(start))
 
@@ -210,8 +249,9 @@ def main() -> int:
     code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
     region_sample = (
         "/* bool Target() { int wrong=1; } */\n"
-        'string note="bool Target() { int fake=1; }";\n'
+        'string note="bool Target() { int fake=1; } // END";\n'
         "bool Target() { int expected=1; }\n"
+        "/* // END */\n"
         "// END\n"
         "bool Next() { int tail=1; }\n"
     )
