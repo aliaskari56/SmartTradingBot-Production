@@ -1885,6 +1885,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    long stbOt=OrderGetInteger(ORDER_TYPE);
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
+   double stbCurTP=OrderGetDouble(ORDER_TP);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
@@ -1965,6 +1966,34 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
             " comment=",check.comment);
       return false;
      }
+
+   // OrderCheck can take time. Re-read the ticket and verify that both the
+   // symbol-writer lease and the geometry snapshot are still ours to modify.
+   if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
+      return false;
+   if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+      OrderGetInteger(ORDER_TYPE)!=stbOt)
+      return false;
+   if(!isUserAction && STB_ManualOverrideIs(ticket))
+      return false;
+
+   double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double latestSL=OrderGetDouble(ORDER_SL);
+   double latestTP=OrderGetDouble(ORDER_TP);
+   double latestPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double latestTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double latestTolerance=MathMax(latestPoint*0.5,
+                                  latestTickSize>0.0 ? latestTickSize*0.5:latestPoint*0.5);
+   if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
+      MathAbs(latestSL-stbCurSL)>latestTolerance ||
+      MathAbs(latestTP-stbCurTP)>latestTolerance)
+      return false;
+
+   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
+      !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
+      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+      return false;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -3745,46 +3774,86 @@ bool IsManagedOrder(const ulong ticket)
 
   }
 
+// Exposure deduplication is scoped to this EA instance by Magic Number.
+// Keep these helpers separate from IsManagedPosition/IsManagedOrder because those
+// functions also define the broader scope used by management and trailing code.
+bool STB_IsOwnedPosition(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   return (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic;
+  }
+
+bool STB_IsOwnedPendingOrder(const ulong ticket)
+  {
+   if(ticket==0 || !OrderSelect(ticket))
+      return false;
+   if(!STB_IsManagedPendingType(OrderGetInteger(ORDER_TYPE)))
+      return false;
+   return (ulong)OrderGetInteger(ORDER_MAGIC)==InpMagic;
+  }
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Entry-policy gate: only this EA's own exposure blocks a new setup.
 bool HasManagedExposure(const string symbol)
   {
-   if(InpOneSetupPerSymbol)
+   if(!InpOneSetupPerSymbol || symbol=="")
+      return false;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
      {
-      for(int i=PositionsTotal()-1;i>=0;i--)
-        {
-         ulong ticket=PositionGetTicket(i);
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
+      if(STB_IsOwnedPosition(ticket))
+         return true;
+     }
 
-         if(ticket==0)
-            continue;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol)
+         continue;
+      if(STB_IsOwnedPendingOrder(ticket))
+         return true;
+     }
 
-         if(!PositionSelectByTicket(ticket))
-            continue;
+   return false;
+  }
 
-         if(PositionGetString(POSITION_SYMBOL)!=symbol)
-            continue;
+// Lifecycle gate: preserve quote subscription while any exposure on this
+// symbol remains inside the EA's management scope, independent of entry policy.
+bool STB_HasSymbolExposureForManagement(const string symbol)
+  {
+   if(symbol=="")
+      return false;
 
-         if(IsManagedPosition(ticket))
-            return true;
-        }
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
+      if(IsManagedPosition(ticket))
+         return true;
+     }
 
-      for(int i=OrdersTotal()-1;i>=0;i--)
-        {
-         ulong ticket=OrderGetTicket(i);
-
-         if(ticket==0)
-            continue;
-
-         if(!OrderSelect(ticket))
-            continue;
-
-         if(OrderGetString(ORDER_SYMBOL)!=symbol)
-            continue;
-
-         if(IsManagedOrder(ticket))
-            return true;
-        }
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol)
+         continue;
+      if(IsManagedOrder(ticket))
+         return true;
      }
 
    return false;
@@ -3931,6 +4000,11 @@ bool OneClickHedge()
       return false;
 
    string symbol=_Symbol;
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB HEDGE REJECTED: symbol writer lease not owned symbol=",symbol);
+      return false;
+     }
    ulong sourceTicket=0;
    long sourceType=-1;
    double sourceVolume=0.0;
@@ -4033,6 +4107,16 @@ bool OneClickHedge()
    string comment="STB|HEDGE|"+
                   (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+
                   "|EB"+DoubleToString(hedgeEntryOffset,8);
+
+   // Recheck writer authority and exposure immediately before broker submission.
+   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      HasManagedPositionDirection(symbol,hedgeType) ||
+      STB_HasManagedPendingDirection(symbol,hedgeType))
+     {
+      Print("STB HEDGE REJECTED: writer/exposure changed before submit symbol=",symbol);
+      return false;
+     }
+
    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -5030,6 +5114,11 @@ void STB_ProfitProtectionOne(const ulong ticket)
       return false;
    tp=latestTP;
 
+   // Re-verify writer authority at the last possible point before the broker
+   // request; an earlier lease check can become stale during validation.
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+      return false;
+
    if(!trade.PositionModify(ticket,newSL,tp))
      {
       // Failed writes must not leave the proposed SL as the geometry baseline;
@@ -5989,12 +6078,11 @@ string STB_MgmtLeaseKey(const string symbol)
 
 // Central per-symbol management lease. The first instance to reach a symbol
 // claims it; the live owner keeps it; a stale owner (no refresh within
-// STB_MGMT_LEASE_SEC) loses it. Only the owner may pass the broker writers,
-// so one symbol never has two independent position/pending writers.
-// P10 race-safety: after claiming, re-read the owner key. A concurrent
-// claimant may have overwritten it in the same window; the loser must not
-// write to the broker. (MQL5 exposes no atomic CAS, so this verify-after-set
-// plus the TTL lease is the strongest available guard.)
+// STB_MGMT_LEASE_SEC) may lose it. Only the current owner should pass the
+// broker-writer guards. GlobalVariableSetOnCondition provides atomic CAS for
+// claiming/reclaiming the lease within this terminal, but the lease check and
+// broker request are not one atomic operation. Final pre-submit rechecks reduce
+// the race window; this is not a cross-terminal mutex.
 bool STB_SymbolManagementOwnedVerified(const string symbol)
   {
    if(!STB_SymbolManagementOwned(symbol))
@@ -6508,10 +6596,16 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool PlaceSetup(Setup &s)
+bool PlaceSetup(Setup &s,const double entryLockToken)
   {
    if(!s.valid)
       return false;
+
+   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
+      return STB_LogPlaceReject(s,"ENTRY_LOCK_NOT_OWNED");
+
+   if(!STB_SymbolManagementOwnedVerified(s.symbol))
+      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_NOT_OWNED");
 
    if(!g_autoTrading)
       return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
@@ -6614,6 +6708,15 @@ bool PlaceSetup(Setup &s)
    string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+
                   IntegerToString(s.adaptiveProfile)+"|EB"+
                   DoubleToString(effectiveEntryBuffer,8);
+
+   // Final pre-submit gate: a second instance may have changed exposure while
+   // this setup was being validated and sized.
+   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
+      return STB_LogPlaceReject(s,"ENTRY_LOCK_LOST_BEFORE_SUBMIT");
+   if(!STB_SymbolManagementOwnedVerified(s.symbol))
+      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_LOST");
+   if(HasManagedExposure(s.symbol))
+      return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT");
 
    bool ok=false;
 
@@ -6830,6 +6933,76 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Serialize final scanner revalidation/submission across chart instances.
+// The lock is terminal-local and expires automatically if an instance disappears.
+string STB_EntryLockKey(const string symbol)
+  {
+   return STB_MgmtScopeKey("ENTRY_"+(string)InpMagic,symbol);
+  }
+
+bool STB_EntryLockAcquire(const string symbol,double &token)
+  {
+   token=0.0;
+   if(symbol=="")
+      return false;
+
+   string key=STB_EntryLockKey(symbol);
+   if(!GlobalVariableCheck(key))
+     {
+      ResetLastError();
+      if(!GlobalVariableTemp(key) && !GlobalVariableCheck(key))
+        {
+         Print("STB entry lock creation failed symbol=",symbol,
+               " err=",GetLastError());
+         return false;
+        }
+     }
+
+   if(!GlobalVariableCheck(key))
+      return false;
+
+   // Use local wall-clock time so a quiet server market does not freeze the
+   // lease expiry while other chart instances remain active.
+   datetime now=TimeLocal();
+   double current=GlobalVariableGet(key);
+   if(current!=0.0 && MathFloor(current)>(double)now)
+      return false;
+
+   // Integer part is a 120-second lease expiry; fractional part tags the chart.
+   token=(double)(now+120)+
+         (double)((long)ChartID()%1000000)/1000000.0;
+   if(!GlobalVariableSetOnCondition(key,token,current))
+     {
+      token=0.0;
+      return false;
+     }
+
+   return true;
+  }
+
+bool STB_EntryLockStillOwned(const string symbol,const double token)
+  {
+   if(symbol=="" || token==0.0)
+      return false;
+
+   string key=STB_EntryLockKey(symbol);
+   if(!GlobalVariableCheck(key))
+      return false;
+
+   return (GlobalVariableGet(key)==token &&
+           MathFloor(token)>(double)TimeLocal());
+  }
+
+void STB_EntryLockRelease(const string symbol,const double token)
+  {
+   if(symbol=="" || token==0.0)
+      return;
+
+   string key=STB_EntryLockKey(symbol);
+   if(GlobalVariableCheck(key))
+      GlobalVariableSetOnCondition(key,0.0,token);
+  }
+
 bool STB_ExposureAllowsExecution(const Setup &s)
   {
    if(HasManagedExposure(s.symbol))
@@ -6888,14 +7061,26 @@ void STB_ExecuteTopCandidate()
       if(!wasSelected && !SymbolSelect(symbol,true))
          continue;
 
+      // The lock spans exposure recheck through broker submission so two
+      // chart instances cannot both pass the same-symbol gate concurrently.
+      double entryLockToken=0.0;
+      if(!STB_EntryLockAcquire(symbol,entryLockToken))
+        {
+         if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
+            SymbolSelect(symbol,false);
+         continue;
+        }
+
       Setup validated;
       bool revalidated=STB_FinalCandidateRevalidation(c,validated);
       bool placed=false;
 
       if(revalidated && STB_FinalAutoGate(validated))
-         placed=PlaceSetup(validated);
+         placed=PlaceSetup(validated,entryLockToken);
 
-      if(!wasSelected && !HasManagedExposure(symbol))
+      STB_EntryLockRelease(symbol,entryLockToken);
+
+      if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
          SymbolSelect(symbol,false);
 
       if(placed)
@@ -6918,6 +7103,12 @@ bool PlaceManualPendingDirection(const int direction)
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
       return false;
+
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+     {
+      Print("STB MANUAL PENDING REJECTED: symbol writer lease not owned symbol=",_Symbol);
+      return false;
+     }
 
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
@@ -6972,6 +7163,8 @@ bool PlaceManualPendingDirection(const int direction)
 
    double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
    string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+      return false;
    bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7017,6 +7210,12 @@ bool PlaceManualLimitDirection(const int direction)
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
       return false;
+
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+     {
+      Print("STB MANUAL LIMIT REJECTED: symbol writer lease not owned symbol=",_Symbol);
+      return false;
+     }
 
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
@@ -7072,6 +7271,8 @@ bool PlaceManualLimitDirection(const int direction)
    double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
    string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+
                   "|EB"+DoubleToString(effectiveManualOffset,8);
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+      return false;
    bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7179,15 +7380,17 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
   {
    reason="";
 
-   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
-
-   if(!selected)
-      SymbolSelect(symbol,true);
-
    bool custom=false;
-   if(!SymbolExist(symbol,custom))
+   if(symbol=="" || !SymbolExist(symbol,custom))
      {
       reason="REJECT_SYMBOL_NOT_FOUND";
+      return false;
+     }
+
+   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
+   if(!selected && !SymbolSelect(symbol,true))
+     {
+      reason="REJECT_SYMBOL_SELECT_FAILED";
       return false;
      }
 
@@ -7787,16 +7990,18 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-      if(STB_CalcMarketQuality(c.symbol,q))
-         c.marketQualityScore=q.score;
+      if(!STB_CalcMarketQuality(c.symbol,q))
+         continue;
+      c.marketQualityScore=q.score;
 
       STBRegimeState rr;
-      if(STB_EvaluateRegime(c.symbol,rr))
-        {
-         c.regime=rr.regime;
-         c.regimeStrength=rr.strength;
-         c.regimeScore=STB_RegimeFitScore(c,rr);
-        }
+      if(!STB_EvaluateRegime(c.symbol,rr) ||
+         rr.regime==STB_REGIME_UNSTABLE)
+         continue;
+
+      c.regime=rr.regime;
+      c.regimeStrength=rr.strength;
+      c.regimeScore=STB_RegimeFitScore(c,rr);
 
       c.setupAgeBars=(int)MathMax(0,
                                   (long)((TimeCurrent()-c.setup.setupTime)/900));
@@ -7879,7 +8084,7 @@ void STB_ScannerRun()
      }
 
    for(int i=0;i<ArraySize(symbols) && i<ArraySize(wasSelected);i++)
-      if(!wasSelected[i] && !HasManagedExposure(symbols[i]))
+      if(!wasSelected[i] && !STB_HasSymbolExposureForManagement(symbols[i]))
          SymbolSelect(symbols[i],false);
 
    g_scannerLastCycleBar=cycleBar;
@@ -8333,10 +8538,53 @@ bool ValidateInputs()
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0)
       return false;
-   // Fail at initialization instead of silently rejecting every setup when
-   // risk sizing is enabled with a zero risk budget.
-   if(InpUseRiskSizing && InpRiskPercent<=0.0)
+
+   // Risk-sizing mode must not silently become a no-trade mode because a
+   // stale .set file supplies zero risk.
+   if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
+
+   // Reject NaN/Infinity for every floating-point input before range checks.
+   if(
+      !MathIsValidNumber(InpScannerMinQuality) ||
+      !MathIsValidNumber(InpScannerMinScore) ||
+      !MathIsValidNumber(InpScannerMinTopGap) ||
+      !MathIsValidNumber(InpManualPendingGapPips) ||
+      !MathIsValidNumber(InpRSIBuyLevel) ||
+      !MathIsValidNumber(InpRSISellLevel) ||
+      !MathIsValidNumber(InpCCIBuyLevel) ||
+      !MathIsValidNumber(InpCCISellLevel) ||
+      !MathIsValidNumber(InpRSIWeight) ||
+      !MathIsValidNumber(InpCCIWeight) ||
+      !MathIsValidNumber(InpMaxSpreadPips) ||
+      !MathIsValidNumber(InpAdaptiveBaseScore) ||
+      !MathIsValidNumber(InpAdaptiveMinScore) ||
+      !MathIsValidNumber(InpAdaptiveMaxScore) ||
+      !MathIsValidNumber(InpAdaptiveStep) ||
+      !MathIsValidNumber(InpAdaptiveWeakWinRate) ||
+      !MathIsValidNumber(InpAdaptiveStrongWinRate) ||
+      !MathIsValidNumber(InpAdaptiveHalfLifeDays) ||
+      !MathIsValidNumber(InpAdaptiveUCBExploration) ||
+      !MathIsValidNumber(InpEntryBufferPips) ||
+      !MathIsValidNumber(InpPendingTrailMaxRiskExpansion) ||
+      !MathIsValidNumber(InpPipPointsOverride) ||
+      !MathIsValidNumber(InpSLBufferPips) ||
+      !MathIsValidNumber(InpInitialSLBufferPips) ||
+      !MathIsValidNumber(InpMaxInitialSLPips) ||
+      !MathIsValidNumber(InpMinimumRR) ||
+      !MathIsValidNumber(InpManualSaveStepPips) ||
+      !MathIsValidNumber(InpTrendlineTolerancePips) ||
+      !MathIsValidNumber(InpTrailStartPips) ||
+      !MathIsValidNumber(InpLiveTrailDistancePips) ||
+      !MathIsValidNumber(InpTrailStepPips) ||
+      !MathIsValidNumber(InpRiskPercent) ||
+      !MathIsValidNumber(InpMaxRiskVolume) ||
+      !MathIsValidNumber(InpBaseLots) ||
+      !MathIsValidNumber(InpTrendLotMultiplier) ||
+      !MathIsValidNumber(InpUniversalLotMultiplier)
+     )
+      return false;
+
    if(InpScannerMinQuality<0.0 ||
       InpScannerMinQuality>100.0 ||
       InpScannerMinScore<0.0 ||
