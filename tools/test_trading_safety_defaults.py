@@ -137,6 +137,16 @@ def main() -> int:
          and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete
          and "if(OrderSelect(ticket))" in controlled_delete
          and "STB DELETE CONFIRMED" in controlled_delete),
+        ("all broker pending-order deletion goes through the central writer",
+         source.count("trade.OrderDelete(") == 1
+         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
+        ("rollback deletion requires known creator, matching comment and a fresh order",
+         bool(controlled_delete)
+         and "bool knownCreator=" in controlled_delete
+         and "bool creatorCommentMatches=" in controlled_delete
+         and "authorized=knownCreator && stbComment && creatorCommentMatches &&" in controlled_delete
+         and "setupTime>0 && setupTime<=TimeCurrent()+5" in controlled_delete
+         and "TimeCurrent()-setupTime<=120" in controlled_delete),
         ("automatic pending placement checks server result and initial SL",
          bool(auto_placement)
          and "trade.BuyStop(" in auto_placement
