@@ -195,6 +195,17 @@ def main() -> int:
     manual_limit_placement = region(
         source, "bool PlaceManualLimitDirection(", "STBCandidate g_scannerCurrent[];"
     )
+    permission_gate_code = strip_strings(permission_gate)
+    auto_gate_code = strip_strings(auto_gate)
+    pending_check_code = strip_strings(pending_check)
+    pending_modify_code = strip_strings(pending_modify)
+    auto_placement_code = strip_strings(auto_placement)
+    modify_retcode_code = strip_strings(modify_retcode)
+    placement_retcode_code = strip_strings(placement_retcode)
+    controlled_delete_code = strip_strings(controlled_delete)
+    hedge_placement_code = strip_strings(hedge_placement)
+    manual_stop_placement_code = strip_strings(manual_stop_placement)
+    manual_limit_placement_code = strip_strings(manual_limit_placement)
     # Scope these checks to OnInit(); there are unrelated tester-mode checks
     # elsewhere in the EA, so a file-global substring search would be too broad.
     on_init = region(
@@ -208,11 +219,11 @@ def main() -> int:
     )
     # Use the string-aware comment stripper consistently; a regex alone can
     # mistake comment markers inside quoted source strings for real comments.
-    tester_auto_branch_code = strip_comments(tester_auto_branch)
-    live_auto_branch_code = strip_comments(live_auto_branch)
+    tester_auto_branch_code = strip_strings(tester_auto_branch)
+    live_auto_branch_code = strip_strings(live_auto_branch)
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
-    on_init_compact = re.sub(r"\s+", "", strip_comments(on_init))
+    on_init_compact = re.sub(r"\s+", "", strip_strings(on_init))
 
     # Exercise the stripper itself against comment markers inside strings,
     # both comment styles, and line preservation. Static source checks alone
@@ -300,38 +311,38 @@ def main() -> int:
          and bool(live_auto_branch)
          and "InpTesterForceAutoTrading" not in live_auto_branch_compact),
         ("trade gate checks terminal, program, account-expert and account permissions",
-         bool(permission_gate) and all(token in permission_gate for token in (
+         bool(permission_gate_code) and all(token in permission_gate_code for token in (
              "TERMINAL_TRADE_ALLOWED", "MQL_TRADE_ALLOWED",
              "ACCOUNT_TRADE_EXPERT", "ACCOUNT_TRADE_ALLOWED"))),
         ("automatic execution gate checks AUTO state, permissions and exposure",
-         bool(auto_gate) and all(token in auto_gate for token in (
+         bool(auto_gate_code) and all(token in auto_gate_code for token in (
              "!g_autoTrading", "!STB_TradeEnvironmentAllowed()",
              "!STB_ExposureAllowsExecution(s)"))),
         ("pending-order preflight checks OrderCheck boolean and retcode",
-         bool(pending_check) and "if(!OrderCheck(request,check))" in pending_check
-         and "check.retcode!=0" in pending_check),
+         bool(pending_check_code) and "if(!OrderCheck(request,check))" in pending_check_code
+         and "check.retcode!=0" in pending_check_code),
         ("pending-order modification preflight is scoped to geometry writer",
-         bool(pending_modify)
-         and "if(!OrderCheck(req,check))" in pending_modify
-         and "check.retcode!=0" in pending_modify),
+         bool(pending_modify_code)
+         and "if(!OrderCheck(req,check))" in pending_modify_code
+         and "check.retcode!=0" in pending_modify_code),
         ("pending-order modification checks server retcode and verified final geometry",
-         bool(pending_modify)
-         and "if(!TradeRetcodeModifySucceeded())" in pending_modify
-         and "if(!OrderSelect(ticket))" in pending_modify
-         and "MathAbs(ve-newEntry)>tolerance" in pending_modify
-         and "STB_GeomStore(ticket,false,ve,vs,vt)" in pending_modify),
+         bool(pending_modify_code)
+         and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
+         and "if(!OrderSelect(ticket))" in pending_modify_code
+         and "MathAbs(ve-newEntry)>tolerance" in pending_modify_code
+         and "STB_GeomStore(ticket,false,ve,vs,vt)" in pending_modify_code),
         ("modify success helper restricts accepted server retcodes",
-         bool(modify_retcode)
-         and all(token in modify_retcode for token in (
+         bool(modify_retcode_code)
+         and all(token in modify_retcode_code for token in (
              "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
              "TRADE_RETCODE_NO_CHANGES", "TRADE_RETCODE_ORDER_CHANGED"))),
         ("central pending delete requires authorization, server success and ticket disappearance",
-         bool(controlled_delete)
-         and "if(!authorized)" in controlled_delete
-         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete
-         and "TRADE_RETCODE_DONE" in controlled_delete
-         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete
-         and "if(OrderSelect(ticket))" in controlled_delete
+         bool(controlled_delete_code)
+         and "if(!authorized)" in controlled_delete_code
+         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete_code
+         and "TRADE_RETCODE_DONE" in controlled_delete_code
+         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete_code
+         and "if(OrderSelect(ticket))" in controlled_delete_code
          and "STB DELETE CONFIRMED" in controlled_delete),
         ("all broker pending-order deletion goes through the central writer",
          source_code.count("trade.OrderDelete(") == 1
@@ -346,12 +357,12 @@ def main() -> int:
          and "setupTime>0 && setupTime<=TimeCurrent()+5" in controlled_delete
          and "TimeCurrent()-setupTime<=120" in controlled_delete),
         ("automatic pending placement checks server result and initial SL",
-         bool(auto_placement)
-         and "trade.BuyStop(" in auto_placement
-         and "trade.SellStop(" in auto_placement
-         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement
-         and "trade.ResultRetcode()" in auto_placement
-         and "VerifyPendingInitialSL(" in auto_placement),
+         bool(auto_placement_code)
+         and "trade.BuyStop(" in auto_placement_code
+         and "trade.SellStop(" in auto_placement_code
+         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement_code
+         and "trade.ResultRetcode()" in auto_placement_code
+         and "VerifyPendingInitialSL(" in auto_placement_code),
         ("automatic placement requests rollback if initial SL cannot be verified",
          "if(placedOrder>0 && OrderSelect(placedOrder))" in auto_placement
          and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");"
@@ -359,35 +370,35 @@ def main() -> int:
          and auto_placement.find("VerifyPendingInitialSL(placedOrder)")
          < auto_placement.find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");")),
         ("placement success helper enumerates accepted server retcodes",
-         bool(placement_retcode)
-         and all(token in placement_retcode for token in (
+         bool(placement_retcode_code)
+         and all(token in placement_retcode_code for token in (
              "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
              "TRADE_RETCODE_PLACED"))),
         ("directional symbol permissions are checked before auto placement",
-         bool(auto_placement)
-         and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement),
+         bool(auto_placement_code)
+         and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement_code),
         ("one-click hedge validates server result and initial SL with rollback",
-         bool(hedge_placement)
-         and "trade.BuyStop(" in hedge_placement
-         and "trade.SellStop(" in hedge_placement
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement
-         and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement
+         bool(hedge_placement_code)
+         and "trade.BuyStop(" in hedge_placement_code
+         and "trade.SellStop(" in hedge_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
+         and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
          and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK,\"OneClickHedge\");"
          in hedge_placement),
         ("manual stop placement validates server result and initial SL with rollback",
-         bool(manual_stop_placement)
-         and "trade.BuyStop(" in manual_stop_placement
-         and "trade.SellStop(" in manual_stop_placement
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement
-         and "VerifyPendingInitialSL(ticket)" in manual_stop_placement
+         bool(manual_stop_placement_code)
+         and "trade.BuyStop(" in manual_stop_placement_code
+         and "trade.SellStop(" in manual_stop_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code
+         and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
          in manual_stop_placement),
         ("manual limit placement validates server result and initial SL with rollback",
-         bool(manual_limit_placement)
-         and "trade.BuyLimit(" in manual_limit_placement
-         and "trade.SellLimit(" in manual_limit_placement
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement
-         and "VerifyPendingInitialSL(ticket)" in manual_limit_placement
+         bool(manual_limit_placement_code)
+         and "trade.BuyLimit(" in manual_limit_placement_code
+         and "trade.SellLimit(" in manual_limit_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code
+         and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
          in manual_limit_placement),
     )
