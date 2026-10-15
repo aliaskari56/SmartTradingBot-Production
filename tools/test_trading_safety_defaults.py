@@ -109,6 +109,12 @@ def main() -> int:
          and "if(!TradeRetcodePlacementSucceeded())" in auto_placement
          and "trade.ResultRetcode()" in auto_placement
          and "VerifyPendingInitialSL(" in auto_placement),
+        ("automatic placement requests rollback if initial SL cannot be verified",
+         "if(placedOrder>0 && OrderSelect(placedOrder))" in auto_placement
+         and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");"
+         in auto_placement
+         and auto_placement.find("VerifyPendingInitialSL(placedOrder)")
+         < auto_placement.find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");")),
         ("placement success helper enumerates accepted server retcodes",
          bool(placement_retcode)
          and all(token in placement_retcode for token in (
