@@ -44,12 +44,12 @@ def strip_comments(source: str) -> str:
                 state = "block_comment"
                 i += 1
         elif state == "string":
-            if char == "\\\\":
+            if char == "\\":
                 i += 1
             elif char == quote:
                 state = "code"
         elif state == "line_comment":
-            if char == "\\n":
+            if char == "\n":
                 state = "code"
             else:
                 out[i] = " "
