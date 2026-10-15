@@ -20,10 +20,61 @@ def input_default(name: str, source: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def strip_comments(source: str) -> str:
+    """Remove MQL5 comments while preserving strings and line structure."""
+    out = list(source)
+    state = "code"
+    quote = ""
+    i = 0
+
+    while i < len(source):
+        char = source[i]
+        nxt = source[i + 1] if i + 1 < len(source) else ""
+
+        if state == "code":
+            if char in ('"', "'"):
+                state = "string"
+                quote = char
+            elif char == "/" and nxt == "/":
+                out[i] = out[i + 1] = " "
+                state = "line_comment"
+                i += 1
+            elif char == "/" and nxt == "*":
+                out[i] = out[i + 1] = " "
+                state = "block_comment"
+                i += 1
+        elif state == "string":
+            if char == "\\\\":
+                i += 1
+            elif char == quote:
+                state = "code"
+        elif state == "line_comment":
+            if char == "\\n":
+                state = "code"
+            else:
+                out[i] = " "
+        elif state == "block_comment":
+            if char == "*" and nxt == "/":
+                out[i] = out[i + 1] = " "
+                state = "code"
+                i += 1
+            elif char != "\\n":
+                out[i] = " "
+
+        i += 1
+
+    return "".join(out)
+
+
 def region(source: str, start: str, end: str) -> str:
+    # Locate boundaries in the original text (some legacy boundaries are
+    # comment banners), then inspect code with comments removed so comments
+    # cannot accidentally satisfy a regression guard.
     begin = source.find(start)
     finish = source.find(end, begin + len(start)) if begin >= 0 else -1
-    return source[begin:finish] if begin >= 0 and finish > begin else ""
+    if begin < 0 or finish <= begin:
+        return ""
+    return strip_comments(source[begin:finish])
 
 
 def main() -> int:
