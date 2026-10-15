@@ -97,12 +97,21 @@ def strip_strings(source: str) -> str:
 
     return "".join(out)
 def region(source: str, start: str, end: str) -> str:
-    # Locate boundaries in the original text (some legacy boundaries are
-    # comment banners), then inspect code with comments removed so comments
-    # cannot accidentally satisfy a regression guard.
-    begin = source.find(start)
-    finish = source.find(end, begin + len(start)) if begin >= 0 else -1
-    if begin < 0 or finish <= begin:
+    # Use a same-length code-only view to find the start, so signatures inside
+    # comments or quoted strings cannot shadow the real function. Some legacy
+    # boundaries are comment banners, so those end markers are located in the
+    # original text after the validated start offset.
+    code_view = strip_strings(strip_comments(source))
+    begin = code_view.find(start)
+    if begin < 0:
+        return ""
+
+    if end.lstrip().startswith("//"):
+        finish = source.find(end, begin + len(start))
+    else:
+        finish = code_view.find(end, begin + len(start))
+
+    if finish <= begin:
         return ""
     return strip_comments(source[begin:finish])
 
@@ -199,6 +208,23 @@ def main() -> int:
     ))
     strings_do_not_trigger_code_guards = "TRADE_ACTION_REMOVE" not in code_only_sample
     code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
+    region_sample = (
+        "/* bool Target() { int wrong=1; } */\\n"
+        'string note="bool Target() { int fake=1; }";\\n'
+        "bool Target() { int expected=1; }\\n"
+        "// END\\n"
+        "bool Next() { int tail=1; }\\n"
+    )
+    selected_region = region(region_sample, "bool Target()", "// END")
+    region_ignores_comment_and_string_signatures = (
+        "expected=1;" in selected_region
+        and "wrong=1;" not in selected_region
+        and "fake=1;" not in selected_region
+        and "tail=1;" not in selected_region
+    )
+    region_fails_closed_when_boundary_missing = (
+        region(region_sample, "bool Target()", "missing boundary") == ""
+    )
 
     checks = (
         ("comment stripper preserves comment-like text inside strings",
@@ -213,6 +239,10 @@ def main() -> int:
          strings_do_not_trigger_code_guards),
         ("actual code calls remain visible after string removal",
          code_calls_survive_string_removal),
+        ("region extraction ignores commented and quoted signatures",
+         region_ignores_comment_and_string_signatures),
+        ("region extraction fails closed when a boundary is missing",
+         region_fails_closed_when_boundary_missing),
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source_code) == "false"),
         ("risk-based sizing is opt-in by default",
