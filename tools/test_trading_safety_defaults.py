@@ -43,7 +43,7 @@ def main() -> int:
         source, "bool STB_ModifyPendingOrderGeometry(", "bool PreparePendingSetup("
     )
     auto_placement = region(
-        source, "void STB_ExecuteTopCandidate()", "bool PlaceManualPendingDirection("
+        source, "bool PlaceSetup(", "bool PlaceManualPendingDirection("
     )
     placement_retcode = region(
         source, "bool TradeRetcodePlacementSucceeded()",
