@@ -39,9 +39,6 @@ def main() -> int:
     pending_check = region(
         source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
     )
-    pending_modify = region(
-        source, "bool STB_ModifyPendingOrder(", "bool STB_"
-    )
 
     checks = (
         ("live auto-trading is opt-in by default",
