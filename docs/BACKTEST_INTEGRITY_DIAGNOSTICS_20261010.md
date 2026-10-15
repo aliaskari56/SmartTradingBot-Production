@@ -6,8 +6,8 @@ This change adds observability before a controlled Strategy Tester run. It does 
 
 ## Source change
 
-- `InpAutoTrading` now defaults to `true`.
-- In Strategy Tester, `InpTesterForceAutoTrading=true` now explicitly forces the EA's internal AUTO gate on (`InpAutoTrading || InpTesterForceAutoTrading`). This fixes the previous AND condition, which incorrectly left AUTO off when a `.set` file had `InpAutoTrading=false`.
+- `InpAutoTrading` remains `false` by default, so this diagnostics branch does not enable live automatic trading on installation.
+- In Strategy Tester only, `InpTesterForceAutoTrading=true` forces the EA's internal AUTO gate on (`InpAutoTrading || InpTesterForceAutoTrading`). This is a tester-only override for reproducibility; it does not change the live default. Confirm the exact `.set` inputs and tester behavior before using any test result.
 - This does **not** override MetaTrader terminal/program/account trade permissions, broker/tester order rules, or any strategy/risk validation. Those permissions must be enabled in the test environment, and their effective values are logged at startup.
 - `InpTesterChartSymbolOnly` remains `true` by default; the tester is intentionally restricted to the chart symbol unless the test explicitly changes that universe. This is not a signal filter, but it does limit symbol coverage.
 - Removed an unintended account-wide scanner gate: any open position or pending order anywhere on the account previously prevented the scanner from running. The scanner now runs on its normal M15 signal-bar schedule even when other symbols have exposure; same-symbol managed exposure and the account order limit are still enforced at candidate execution.
