@@ -8342,6 +8342,19 @@ bool ValidateInputs()
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0)
       return false;
+
+   // Risk-sizing mode must not silently become a no-trade mode because a
+   // stale .set file supplies zero risk.
+   if(InpUseRiskSizing && InpRiskPercent<=0.0)
+      return false;
+
+   if(!MathIsValidNumber(InpRiskPercent) ||
+      !MathIsValidNumber(InpMaxRiskVolume) ||
+      !MathIsValidNumber(InpBaseLots) ||
+      !MathIsValidNumber(InpTrendLotMultiplier) ||
+      !MathIsValidNumber(InpUniversalLotMultiplier))
+      return false;
+
    if(InpScannerMinQuality<0.0 ||
       InpScannerMinQuality>100.0 ||
       InpScannerMinScore<0.0 ||
