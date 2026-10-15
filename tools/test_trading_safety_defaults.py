@@ -82,22 +82,20 @@ def strip_strings(source: str) -> str:
                 quote = char
                 out[i] = " "
         elif state == "string":
-            if char == "\\\\" and i + 1 < len(source):
+            if char == "\\" and i + 1 < len(source):
                 out[i] = " "
-                if source[i + 1] != "\\n":
+                if source[i + 1] != "\n":
                     out[i + 1] = " "
                 i += 1
             elif char == quote:
                 out[i] = " "
                 state = "code"
-            elif char != "\\n":
+            elif char != "\n":
                 out[i] = " "
 
         i += 1
 
     return "".join(out)
-
-
 def region(source: str, start: str, end: str) -> str:
     # Locate boundaries in the original text (some legacy boundaries are
     # comment banners), then inspect code with comments removed so comments
@@ -196,8 +194,8 @@ def main() -> int:
         == "false"
     )
     code_only_sample = strip_strings(strip_comments(
-        'string message="TRADE_ACTION_REMOVE trade.OrderDelete("; // comment\\n'
-        'trade.OrderDelete(123);\\n'
+        'string message="escaped \\" quote /*token*/ // text"; // comment\n'
+        'trade.OrderDelete(123);\n'
     ))
     strings_do_not_trigger_code_guards = "TRADE_ACTION_REMOVE" not in code_only_sample
     code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
