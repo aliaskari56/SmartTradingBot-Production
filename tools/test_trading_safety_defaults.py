@@ -40,14 +40,10 @@ def main() -> int:
         source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
     )
     tester_auto_branch = region(
-        source,
-        "if(MQLInfoInteger(MQL_TESTER))",
-        "\\n   else\\n      if(!InpAutoTrading)",
+        source, "if(MQLInfoInteger(MQL_TESTER))", "if(!InpAutoTrading)"
     )
     live_auto_branch = region(
-        source,
-        "\\n   else\\n      if(!InpAutoTrading)",
-        "trade.SetExpertMagicNumber(InpMagic);",
+        source, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
 
     checks = (
