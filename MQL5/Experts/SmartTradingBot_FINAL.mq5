@@ -8348,11 +8348,45 @@ bool ValidateInputs()
    if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
 
-   if(!MathIsValidNumber(InpRiskPercent) ||
+   // Reject NaN/Infinity for every floating-point input before range checks.
+   if(
+      !MathIsValidNumber(InpScannerMinQuality) ||
+      !MathIsValidNumber(InpScannerMinScore) ||
+      !MathIsValidNumber(InpScannerMinTopGap) ||
+      !MathIsValidNumber(InpManualPendingGapPips) ||
+      !MathIsValidNumber(InpRSIBuyLevel) ||
+      !MathIsValidNumber(InpRSISellLevel) ||
+      !MathIsValidNumber(InpCCIBuyLevel) ||
+      !MathIsValidNumber(InpCCISellLevel) ||
+      !MathIsValidNumber(InpRSIWeight) ||
+      !MathIsValidNumber(InpCCIWeight) ||
+      !MathIsValidNumber(InpMaxSpreadPips) ||
+      !MathIsValidNumber(InpAdaptiveBaseScore) ||
+      !MathIsValidNumber(InpAdaptiveMinScore) ||
+      !MathIsValidNumber(InpAdaptiveMaxScore) ||
+      !MathIsValidNumber(InpAdaptiveStep) ||
+      !MathIsValidNumber(InpAdaptiveWeakWinRate) ||
+      !MathIsValidNumber(InpAdaptiveStrongWinRate) ||
+      !MathIsValidNumber(InpAdaptiveHalfLifeDays) ||
+      !MathIsValidNumber(InpAdaptiveUCBExploration) ||
+      !MathIsValidNumber(InpEntryBufferPips) ||
+      !MathIsValidNumber(InpPendingTrailMaxRiskExpansion) ||
+      !MathIsValidNumber(InpPipPointsOverride) ||
+      !MathIsValidNumber(InpSLBufferPips) ||
+      !MathIsValidNumber(InpInitialSLBufferPips) ||
+      !MathIsValidNumber(InpMaxInitialSLPips) ||
+      !MathIsValidNumber(InpMinimumRR) ||
+      !MathIsValidNumber(InpManualSaveStepPips) ||
+      !MathIsValidNumber(InpTrendlineTolerancePips) ||
+      !MathIsValidNumber(InpTrailStartPips) ||
+      !MathIsValidNumber(InpLiveTrailDistancePips) ||
+      !MathIsValidNumber(InpTrailStepPips) ||
+      !MathIsValidNumber(InpRiskPercent) ||
       !MathIsValidNumber(InpMaxRiskVolume) ||
       !MathIsValidNumber(InpBaseLots) ||
       !MathIsValidNumber(InpTrendLotMultiplier) ||
-      !MathIsValidNumber(InpUniversalLotMultiplier))
+      !MathIsValidNumber(InpUniversalLotMultiplier)
+     )
       return false;
 
    if(InpScannerMinQuality<0.0 ||
