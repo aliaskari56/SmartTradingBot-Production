@@ -49,6 +49,15 @@ def main() -> int:
         source, "bool TradeRetcodePlacementSucceeded()",
         "// Minimum distance required by the broker"
     )
+    hedge_placement = region(
+        source, "bool OneClickHedge()", "//==================================================================\\n// STOP VALIDATION"
+    )
+    manual_stop_placement = region(
+        source, "bool PlaceManualPendingDirection(", "bool PlaceManualLimitDirection("
+    )
+    manual_limit_placement = region(
+        source, "bool PlaceManualLimitDirection(", "STBCandidate g_scannerCurrent[];"
+    )
     # Scope these checks to OnInit(); there are unrelated tester-mode checks
     # elsewhere in the EA, so a file-global substring search would be too broad.
     on_init = region(
@@ -123,6 +132,30 @@ def main() -> int:
         ("directional symbol permissions are checked before auto placement",
          bool(auto_placement)
          and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement),
+        ("one-click hedge validates server result and initial SL with rollback",
+         bool(hedge_placement)
+         and "trade.BuyStop(" in hedge_placement
+         and "trade.SellStop(" in hedge_placement
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement
+         and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement
+         and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK,\"OneClickHedge\");"
+         in hedge_placement),
+        ("manual stop placement validates server result and initial SL with rollback",
+         bool(manual_stop_placement)
+         and "trade.BuyStop(" in manual_stop_placement
+         and "trade.SellStop(" in manual_stop_placement
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement
+         and "VerifyPendingInitialSL(ticket)" in manual_stop_placement
+         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
+         in manual_stop_placement),
+        ("manual limit placement validates server result and initial SL with rollback",
+         bool(manual_limit_placement)
+         and "trade.BuyLimit(" in manual_limit_placement
+         and "trade.SellLimit(" in manual_limit_placement
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement
+         and "VerifyPendingInitialSL(ticket)" in manual_limit_placement
+         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
+         in manual_limit_placement),
     )
 
     failed = False
