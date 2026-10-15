@@ -46,12 +46,19 @@ def main() -> int:
         source, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch)
+    live_auto_branch_code = re.sub(
+        r"/\*.*?\*/|//[^\n]*", "", live_auto_branch, flags=re.DOTALL
+    )
+    live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
 
     checks = (
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source) == "false"),
         ("risk-based sizing is opt-in by default",
          input_default("InpUseRiskSizing", source) == "false"),
+        ("live initialization forces AUTO off when input is false",
+         "if(!InpAutoTrading){g_autoTrading=false;GlobalVariableSet(g_autoStateName,0.0);}"
+         in live_auto_branch_compact),
         ("tester AUTO override is isolated from live initialization",
          bool(tester_auto_branch)
          and "g_autoTrading=(InpAutoTrading&&InpTesterForceAutoTrading);" in tester_auto_branch_compact
