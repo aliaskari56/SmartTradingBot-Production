@@ -104,7 +104,8 @@ if ($StagedHash -ne $SourceHash) {
     throw 'Staged source SHA-256 differs from the repository source; compilation aborted.'
 }
 
-$ArgumentString = '/compile:"{0}" /include:"{1}" /log:"{2}"' -f $StagedSource, $MqlRoot, $StagedLog
+# MetaEditor creates <source-name>.log beside the staged source when /log is enabled.
+$ArgumentString = '/compile:"{0}" /include:"{1}" /log' -f $StagedSource, $MqlRoot
 $StartedAt = Get-Date
 $Process = Start-Process -FilePath $MetaEditorPath -ArgumentList $ArgumentString -Wait -PassThru
 
