@@ -6863,6 +6863,61 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Serialize final scanner revalidation/submission across chart instances.
+// The lock is terminal-local and expires automatically if an instance disappears.
+string STB_EntryLockKey(const string symbol)
+  {
+   return STB_MgmtScopeKey("ENTRY_"+(string)InpMagic,symbol);
+  }
+
+bool STB_EntryLockAcquire(const string symbol,double &token)
+  {
+   token=0.0;
+   if(symbol=="")
+      return false;
+
+   string key=STB_EntryLockKey(symbol);
+   if(!GlobalVariableCheck(key))
+     {
+      ResetLastError();
+      if(!GlobalVariableTemp(key) && !GlobalVariableCheck(key))
+        {
+         Print("STB entry lock creation failed symbol=",symbol,
+               " err=",GetLastError());
+         return false;
+        }
+     }
+
+   if(!GlobalVariableCheck(key))
+      return false;
+
+   datetime now=TimeCurrent();
+   double current=GlobalVariableGet(key);
+   if(current!=0.0 && MathFloor(current)>=(double)now)
+      return false;
+
+   // Integer part is the lease expiry; fractional part distinguishes owners.
+   token=(double)(now+30)+
+         (double)((long)ChartID()%1000000)/1000000.0;
+   if(!GlobalVariableSetOnCondition(key,token,current))
+     {
+      token=0.0;
+      return false;
+     }
+
+   return true;
+  }
+
+void STB_EntryLockRelease(const string symbol,const double token)
+  {
+   if(symbol=="" || token==0.0)
+      return;
+
+   string key=STB_EntryLockKey(symbol);
+   if(GlobalVariableCheck(key))
+      GlobalVariableSetOnCondition(key,0.0,token);
+  }
+
 bool STB_ExposureAllowsExecution(const Setup &s)
   {
    if(HasManagedExposure(s.symbol))
@@ -6921,12 +6976,24 @@ void STB_ExecuteTopCandidate()
       if(!wasSelected && !SymbolSelect(symbol,true))
          continue;
 
+      // The lock spans exposure recheck through broker submission so two
+      // chart instances cannot both pass the same-symbol gate concurrently.
+      double entryLockToken=0.0;
+      if(!STB_EntryLockAcquire(symbol,entryLockToken))
+        {
+         if(!wasSelected && !HasManagedExposure(symbol))
+            SymbolSelect(symbol,false);
+         continue;
+        }
+
       Setup validated;
       bool revalidated=STB_FinalCandidateRevalidation(c,validated);
       bool placed=false;
 
       if(revalidated && STB_FinalAutoGate(validated))
          placed=PlaceSetup(validated);
+
+      STB_EntryLockRelease(symbol,entryLockToken);
 
       if(!wasSelected && !HasManagedExposure(symbol))
          SymbolSelect(symbol,false);
