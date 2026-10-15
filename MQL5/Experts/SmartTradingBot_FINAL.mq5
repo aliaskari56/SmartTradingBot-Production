@@ -8333,6 +8333,10 @@ bool ValidateInputs()
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0)
       return false;
+   // Fail at initialization instead of silently rejecting every setup when
+   // risk sizing is enabled with a zero risk budget.
+   if(InpUseRiskSizing && InpRiskPercent<=0.0)
+      return false;
    if(InpScannerMinQuality<0.0 ||
       InpScannerMinQuality>100.0 ||
       InpScannerMinScore<0.0 ||
@@ -8481,13 +8485,10 @@ int OnInit()
 // Every currently open position is checked immediately through the one cycle.
    STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
 
-   if(PositionsTotal()==0 && OrdersTotal()==0)
-     {
-      STB_ScannerRun();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-     }
-   else
-      Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+   // Scanner discovery is independent of account-wide exposure. Execution
+   // still checks managed exposure for the candidate's own symbol.
+   STB_ScannerRun();
+   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
 
    UpdatePanel();
    return INIT_SUCCEEDED;
@@ -8835,14 +8836,12 @@ void OnTick()
    if(m15Bar)
      {
        STB_ReconcileTradeRegistry();
-       if(PositionsTotal()==0 && OrdersTotal()==0)
-         {
-          STB_ScannerRun();
-          STB_ExecuteTopCandidate();
-          g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-         }
-       else
-          Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       // Scan each scheduled M15 cycle even if other symbols have exposure.
+       // PlaceSetup / final execution gates enforce same-symbol exposure and
+       // account order limits before any request is sent.
+       STB_ScannerRun();
+       STB_ExecuteTopCandidate();
+       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
        UpdatePanel();
      }
   }
@@ -8877,14 +8876,11 @@ STB_ReconcileTradeRegistry();
 
 
 
-      if(PositionsTotal()==0 && OrdersTotal()==0)
-        {
-         STB_ScannerRun();
-         STB_ExecuteTopCandidate();
-         g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-        }
-      else
-         Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       // Scan each scheduled M15 cycle even if other symbols have exposure.
+       // Placement and final execution gates enforce symbol exposure and limits.
+       STB_ScannerRun();
+       STB_ExecuteTopCandidate();
+       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
 
 
