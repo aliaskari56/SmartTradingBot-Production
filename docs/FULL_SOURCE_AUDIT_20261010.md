@@ -140,4 +140,10 @@ This pass adds source-level findings only. No MQL5 runtime behavior is inferred 
 
 ### Validation status
 
-These findings are from source inspection of branch `test/backtest-integrity-diagnostics-audit` at source blob `5ba36d34c627bcbe7c420aebb80ca69f94fb7373`. They have **not** been verified by MetaEditor compilation, fault-injected allocation tests, or MT5 runtime testing. No source execution/trading behavior was tested in this pass.
+The finding summary above records the October 10 source-inspection checkpoint, before the later MetaEditor run.
+
+## Integration checkpoint — 2026-10-15
+
+The corresponding source bytes (`MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob `a5cab7fa950571626c8261e14d40890189aa34e5`) passed MetaEditor 5.0.0.6266 compilation with **0 errors and 0 warnings** in [workflow run 38801737418](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/38801737418). A fresh EX5, compiler log, and provenance manifest are available in that workflow's artifact. The live AUTO and risk-sizing defaults remain `false`.
+
+Compilation and static checks do not replace manual-override, M5 bar/restart, broker-geometry, and baseline/candidate Strategy Tester validation. This is not evidence of runtime correctness, broker acceptance, or profitability.
