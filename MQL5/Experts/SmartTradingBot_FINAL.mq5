@@ -3745,46 +3745,55 @@ bool IsManagedOrder(const ulong ticket)
 
   }
 
+// Exposure deduplication is scoped to this EA instance by Magic Number.
+// Keep these helpers separate from IsManagedPosition/IsManagedOrder because those
+// functions also define the broader scope used by management and trailing code.
+bool STB_IsOwnedPosition(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   return (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic;
+  }
+
+bool STB_IsOwnedPendingOrder(const ulong ticket)
+  {
+   if(ticket==0 || !OrderSelect(ticket))
+      return false;
+   if(!STB_IsManagedPendingType(OrderGetInteger(ORDER_TYPE)))
+      return false;
+   return (ulong)OrderGetInteger(ORDER_MAGIC)==InpMagic;
+  }
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
 bool HasManagedExposure(const string symbol)
   {
-   if(InpOneSetupPerSymbol)
+   if(!InpOneSetupPerSymbol || symbol=="")
+      return false;
+
+   // Only positions owned by this EA's Magic Number block another setup.
+   for(int i=PositionsTotal()-1;i>=0;i--)
      {
-      for(int i=PositionsTotal()-1;i>=0;i--)
-        {
-         ulong ticket=PositionGetTicket(i);
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL)!=symbol)
+         continue;
+      if(STB_IsOwnedPosition(ticket))
+         return true;
+     }
 
-         if(ticket==0)
-            continue;
-
-         if(!PositionSelectByTicket(ticket))
-            continue;
-
-         if(PositionGetString(POSITION_SYMBOL)!=symbol)
-            continue;
-
-         if(IsManagedPosition(ticket))
-            return true;
-        }
-
-      for(int i=OrdersTotal()-1;i>=0;i--)
-        {
-         ulong ticket=OrderGetTicket(i);
-
-         if(ticket==0)
-            continue;
-
-         if(!OrderSelect(ticket))
-            continue;
-
-         if(OrderGetString(ORDER_SYMBOL)!=symbol)
-            continue;
-
-         if(IsManagedOrder(ticket))
-            return true;
-        }
+   // Only this EA's pending entry orders block another setup on the same symbol.
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol)
+         continue;
+      if(STB_IsOwnedPendingOrder(ticket))
+         return true;
      }
 
    return false;
