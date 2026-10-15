@@ -154,10 +154,10 @@ def main() -> int:
         stripped_sample.count("\n") == comment_sample.count("\n")
     )
     commented_input_sample = (
-        "/* configuration example\\n"
-        "input bool InpAutoTrading = true;\\n"
-        "*/\\n"
-        "input bool InpAutoTrading = false;\\n"
+        "/* configuration example\n"
+        "input bool InpAutoTrading = true;\n"
+        "*/\n"
+        "input bool InpAutoTrading = false;\n"
     )
     commented_input_is_ignored = (
         input_default("InpAutoTrading", strip_comments(commented_input_sample))
