@@ -209,11 +209,11 @@ def main() -> int:
     strings_do_not_trigger_code_guards = "TRADE_ACTION_REMOVE" not in code_only_sample
     code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
     region_sample = (
-        "/* bool Target() { int wrong=1; } */\\n"
-        'string note="bool Target() { int fake=1; }";\\n'
-        "bool Target() { int expected=1; }\\n"
-        "// END\\n"
-        "bool Next() { int tail=1; }\\n"
+        "/* bool Target() { int wrong=1; } */\n"
+        'string note="bool Target() { int fake=1; }";\n'
+        "bool Target() { int expected=1; }\n"
+        "// END\n"
+        "bool Next() { int tail=1; }\n"
     )
     selected_region = region(region_sample, "bool Target()", "// END")
     region_ignores_comment_and_string_signatures = (
