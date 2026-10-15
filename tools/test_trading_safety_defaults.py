@@ -42,7 +42,7 @@ def main() -> int:
     # Scope these checks to OnInit(); there are unrelated tester-mode checks
     # elsewhere in the EA, so a file-global substring search would be too broad.
     on_init = region(
-        source, "int OnInit()", "//==================================================================\\n// DEINIT"
+        source, "int OnInit()", "//==================================================================\n// DEINIT"
     )
     tester_auto_branch = region(
         on_init, "if(MQLInfoInteger(MQL_TESTER))", "if(!InpAutoTrading)"
@@ -51,15 +51,15 @@ def main() -> int:
         on_init, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
     tester_auto_branch_code = re.sub(
-        r"/\\*.*?\\*/|//[^\\n]*", "", tester_auto_branch, flags=re.DOTALL
+        r"/\*.*?\*/|//[^\n]*", "", tester_auto_branch, flags=re.DOTALL
     )
     live_auto_branch_code = re.sub(
-        r"/\\*.*?\\*/|//[^\\n]*", "", live_auto_branch, flags=re.DOTALL
+        r"/\*.*?\*/|//[^\n]*", "", live_auto_branch, flags=re.DOTALL
     )
-    tester_auto_branch_compact = re.sub(r"\\s+", "", tester_auto_branch_code)
-    live_auto_branch_compact = re.sub(r"\\s+", "", live_auto_branch_code)
+    tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
+    live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(
-        r"/\\*.*?\\*/|//[^\\n]*|\\s+", "", on_init, flags=re.DOTALL
+        r"/\*.*?\*/|//[^\n]*|\s+", "", on_init, flags=re.DOTALL
     )
 
     checks = (
