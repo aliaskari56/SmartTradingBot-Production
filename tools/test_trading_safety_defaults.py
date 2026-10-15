@@ -58,7 +58,7 @@ def strip_comments(source: str) -> str:
                 out[i] = out[i + 1] = " "
                 state = "code"
                 i += 1
-            elif char != "\\n":
+            elif char != "\n":
                 out[i] = " "
 
         i += 1
@@ -135,7 +135,31 @@ def main() -> int:
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(r"\s+", "", strip_comments(on_init))
 
+    # Exercise the stripper itself against comment markers inside strings,
+    # both comment styles, and line preservation. Static source checks alone
+    # would not catch a broken comment parser.
+    comment_sample = (
+        'string url="https://example.test/a/*kept*/"; // line comment\n'
+        '/* block comment\ncontinued */ int value=1;\n'
+    )
+    stripped_sample = strip_comments(comment_sample)
+    stripper_preserves_strings = '"https://example.test/a/*kept*/"' in stripped_sample
+    stripper_removes_comments = (
+        "line comment" not in stripped_sample
+        and "block comment" not in stripped_sample
+        and "continued" not in stripped_sample
+    )
+    stripper_preserves_lines = (
+        stripped_sample.count("\n") == comment_sample.count("\n")
+    )
+
     checks = (
+        ("comment stripper preserves comment-like text inside strings",
+         stripper_preserves_strings),
+        ("comment stripper removes line/block comments",
+         stripper_removes_comments),
+        ("comment stripper preserves newline count",
+         stripper_preserves_lines),
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source) == "false"),
         ("risk-based sizing is opt-in by default",
