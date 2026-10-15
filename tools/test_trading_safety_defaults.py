@@ -39,17 +39,28 @@ def main() -> int:
     pending_check = region(
         source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
     )
+    # Scope these checks to OnInit(); there are unrelated tester-mode checks
+    # elsewhere in the EA, so a file-global substring search would be too broad.
+    on_init = region(
+        source, "int OnInit()", "//==================================================================\\n// DEINIT"
+    )
     tester_auto_branch = region(
-        source, "if(MQLInfoInteger(MQL_TESTER))", "if(!InpAutoTrading)"
+        on_init, "if(MQLInfoInteger(MQL_TESTER))", "if(!InpAutoTrading)"
     )
     live_auto_branch = region(
-        source, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
+        on_init, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
-    tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch)
+    tester_auto_branch_code = re.sub(
+        r"/\\*.*?\\*/|//[^\\n]*", "", tester_auto_branch, flags=re.DOTALL
+    )
     live_auto_branch_code = re.sub(
-        r"/\*.*?\*/|//[^\n]*", "", live_auto_branch, flags=re.DOTALL
+        r"/\\*.*?\\*/|//[^\\n]*", "", live_auto_branch, flags=re.DOTALL
     )
-    live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
+    tester_auto_branch_compact = re.sub(r"\\s+", "", tester_auto_branch_code)
+    live_auto_branch_compact = re.sub(r"\\s+", "", live_auto_branch_code)
+    on_init_compact = re.sub(
+        r"/\\*.*?\\*/|//[^\\n]*|\\s+", "", on_init, flags=re.DOTALL
+    )
 
     checks = (
         ("live auto-trading is opt-in by default",
@@ -59,11 +70,13 @@ def main() -> int:
         ("live initialization forces AUTO off when input is false",
          "if(!InpAutoTrading){g_autoTrading=false;GlobalVariableSet(g_autoStateName,0.0);}"
          in live_auto_branch_compact),
+        ("tester AUTO branch is located inside OnInit",
+         bool(on_init) and bool(tester_auto_branch)),
         ("tester AUTO override is isolated from live initialization",
-         bool(tester_auto_branch)
-         and "g_autoTrading=(InpAutoTrading&&InpTesterForceAutoTrading);" in tester_auto_branch_compact
+         "g_autoTrading=(InpAutoTrading&&InpTesterForceAutoTrading);" in tester_auto_branch_compact
+         and "}else if(!InpAutoTrading){" in on_init_compact
          and bool(live_auto_branch)
-         and "InpTesterForceAutoTrading" not in live_auto_branch),
+         and "InpTesterForceAutoTrading" not in live_auto_branch_compact),
         ("trade gate checks terminal, program, account-expert and account permissions",
          bool(permission_gate) and all(token in permission_gate for token in (
              "TERMINAL_TRADE_ALLOWED", "MQL_TRADE_ALLOWED",
