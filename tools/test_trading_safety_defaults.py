@@ -346,7 +346,7 @@ def main() -> int:
          and "STB DELETE CONFIRMED" in controlled_delete),
         ("all broker pending-order deletion goes through the central writer",
          source_code.count("trade.OrderDelete(") == 1
-         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
+         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete_code),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
          "TRADE_ACTION_REMOVE" not in source_code),
         ("rollback deletion requires known creator, matching comment and a fresh order",
@@ -398,8 +398,6 @@ def main() -> int:
          and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_limit_placement_code),
     )
-
-    failed = False    )
 
     failed = False
     for label, ok in checks:
