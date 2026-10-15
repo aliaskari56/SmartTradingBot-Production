@@ -5116,8 +5116,7 @@ void STB_ProfitProtectionOne(const ulong ticket)
 
    // Re-verify writer authority at the last possible point before the broker
    // request; an earlier lease check can become stale during validation.
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
-      !PositionSelectByTicket(ticket))
+   if(!STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
    if(!trade.PositionModify(ticket,newSL,tp))
