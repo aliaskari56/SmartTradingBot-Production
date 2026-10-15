@@ -74,7 +74,7 @@ def main() -> int:
          bool(on_init) and bool(tester_auto_branch)),
         ("tester AUTO override is isolated from live initialization",
          "g_autoTrading=(InpAutoTrading&&InpTesterForceAutoTrading);" in tester_auto_branch_compact
-         and "}else if(!InpAutoTrading){" in on_init_compact
+         and "}elseif(!InpAutoTrading){" in on_init_compact
          and bool(live_auto_branch)
          and "InpTesterForceAutoTrading" not in live_auto_branch_compact),
         ("trade gate checks terminal, program, account-expert and account permissions",
