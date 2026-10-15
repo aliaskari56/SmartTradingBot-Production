@@ -15,7 +15,7 @@ CTrade trade;
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = true;
+input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -49,7 +49,7 @@ input bool    InpOscillatorHardFilter       = false;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
-input bool    InpUseRiskSizing         = true;  // default ON: size entries from stop-loss risk, not fixed lots
+input bool    InpUseRiskSizing         = false; // false preserves fixed-lot mode
 input double  InpRiskPercent           = 0.50;  // account equity risk per setup
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 
