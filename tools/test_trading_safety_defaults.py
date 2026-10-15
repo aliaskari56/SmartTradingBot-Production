@@ -131,9 +131,9 @@ def main() -> int:
     # mistake comment markers inside quoted source strings for real comments.
     tester_auto_branch_code = strip_comments(tester_auto_branch)
     live_auto_branch_code = strip_comments(live_auto_branch)
-    tester_auto_branch_compact = re.sub(r"\\s+", "", tester_auto_branch_code)
-    live_auto_branch_compact = re.sub(r"\\s+", "", live_auto_branch_code)
-    on_init_compact = re.sub(r"\\s+", "", strip_comments(on_init))
+    tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
+    live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
+    on_init_compact = re.sub(r"\s+", "", strip_comments(on_init))
 
     checks = (
         ("live auto-trading is opt-in by default",
@@ -188,7 +188,7 @@ def main() -> int:
          source.count("trade.OrderDelete(") == 1
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
-         "TRADE_ACTION_REMOVE" not in strip_comments(source),
+         "TRADE_ACTION_REMOVE" not in strip_comments(source)),
         ("rollback deletion requires known creator, matching comment and a fresh order",
          bool(controlled_delete)
          and "bool knownCreator=" in controlled_delete
