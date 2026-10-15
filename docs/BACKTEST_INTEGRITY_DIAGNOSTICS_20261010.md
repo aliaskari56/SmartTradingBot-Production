@@ -55,4 +55,9 @@ The new logs are diagnostic only. They can increase log volume and slightly affe
 
 ## Status
 
-This is a test plan, not a test result. The reviewed M5/scanner changes have been ported onto an integration branch based on current main, preserving live opt-in defaults and mainline writer/entry-lock safeguards. GitHub Actions MetaEditor compile passed for source commit `f740341d118ca9b2417501ec61ececd07246442c` with 0 errors and 0 warnings (MetaEditor 5.0.0.6264; workflow run 38785982207). The fresh EX5, compile log, and SHA-256 provenance manifest are retained as the workflow artifact. No MT5 Strategy Tester or broker runtime comparison is claimed. Do not treat the branch as release-approved until compiler, deterministic baseline/candidate comparison, M5/manual-override tests, and source-to-EX5 provenance are recorded.
+This is a test plan, not a test result. The source edit is committed to a separate review branch. The account-wide scanner-gate fix passed the repository's GitHub Actions static-guardrail workflow (run 38064897055). No MetaEditor compile, terminal run, or Strategy Tester run was available in this environment. Do not treat the branch as a compiled or backtest-approved release.
+
+
+## Integration checkpoint — 2026-10-15
+
+This document is a validation plan, not evidence of a completed Strategy Tester run. The mainline integration candidate retains `InpAutoTrading=false` and `InpUseRiskSizing=false` by default. Its CI compile result must be checked against the exact candidate commit and the generated provenance artifact. No MT5 Strategy Tester equivalence run is claimed here.

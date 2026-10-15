@@ -141,3 +141,8 @@ This pass adds source-level findings only. No MQL5 runtime behavior is inferred 
 ### Validation status
 
 These findings are from source inspection of branch `test/backtest-integrity-diagnostics-audit` at source blob `5ba36d34c627bcbe7c420aebb80ca69f94fb7373`. They have **not** been verified by MetaEditor compilation, fault-injected allocation tests, or MT5 runtime testing. No source execution/trading behavior was tested in this pass.
+
+
+## Integration checkpoint — 2026-10-15
+
+This is a historical audit checkpoint. The currently proposed mainline integration preserves the live AUTO opt-in default and fixed-lot default, and uses the repository's Windows MetaEditor compile workflow for compiler evidence. Static CI and compilation do not replace manual-override, M5 bar/restart, broker-geometry, and baseline/candidate Strategy Tester validation. Do not consider the EA runtime-validated from this document alone.
