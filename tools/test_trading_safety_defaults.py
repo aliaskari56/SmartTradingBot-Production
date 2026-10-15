@@ -39,12 +39,27 @@ def main() -> int:
     pending_check = region(
         source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
     )
+    tester_auto_branch = region(
+        source,
+        "if(MQLInfoInteger(MQL_TESTER))",
+        "\\n   else\\n      if(!InpAutoTrading)",
+    )
+    live_auto_branch = region(
+        source,
+        "\\n   else\\n      if(!InpAutoTrading)",
+        "trade.SetExpertMagicNumber(InpMagic);",
+    )
 
     checks = (
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source) == "false"),
         ("risk-based sizing is opt-in by default",
          input_default("InpUseRiskSizing", source) == "false"),
+        ("tester AUTO override is isolated from live initialization",
+         bool(tester_auto_branch)
+         and "InpTesterForceAutoTrading" in tester_auto_branch
+         and bool(live_auto_branch)
+         and "InpTesterForceAutoTrading" not in live_auto_branch),
         ("trade gate checks terminal, program, account-expert and account permissions",
          bool(permission_gate) and all(token in permission_gate for token in (
              "TERMINAL_TRADE_ALLOWED", "MQL_TRADE_ALLOWED",
