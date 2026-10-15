@@ -265,6 +265,8 @@ def main() -> int:
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
     ]
+    checks.append(("risk sizing requires a positive risk budget when enabled",
+                   "if(InpUseRiskSizing && InpRiskPercent<=0.0)" in source))
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
