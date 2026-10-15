@@ -46,32 +46,30 @@ Tester evidence. No live-trading enablement change is included.
 ## Separate review blocker: PR #8
 
 PR #8 (`test/backtest-integrity-diagnostics-audit`, head
-`0a37d1983488f942fc85d165742c6f2babf80cec`) is still a draft targeting
+`f5ade321b8c535db7bc945e96f8ee235bdda68d4`) is still a draft targeting
 `audit/expose-cleaned-source-20261009`, not `main`, and GitHub currently reports
 it as not mergeable. Its changes are outside this guard-only PR and have not
 been approved by these CI checks.
 
-The currently visible PR #8 patch includes behavior changes that need their
-own explicit review and tests:
+The latest PR #8 update restores `InpAutoTrading=false` and
+`InpUseRiskSizing=false`, so both defaults remain opt-in as on the safety baseline.
+Earlier commits in the PR changed these defaults; the new values must be preserved
+when reconciling the branch. Other behavior changes still need their own explicit
+review and tests:
 
-1. `InpAutoTrading` changes from `false` to `true`; this would remove the
-   existing opt-in safeguard if promoted to a release source.
-2. `InpUseRiskSizing` changes from `false` to `true`; this changes sizing
-   behavior for users who rely on fixed lots, so resulting volume/risk must be
-   checked rather than assuming the change is equivalent.
-3. The Strategy Tester AUTO expression changes from logical AND to logical OR
+1. The Strategy Tester AUTO expression changes from logical AND to logical OR
    between `InpAutoTrading` and `InpTesterForceAutoTrading`. With the tester
    force input enabled, the EA's internal AUTO state can turn on even when the
    other input is false. That override is tester-scoped in the source, but it
    must be validated separately from live-terminal gating.
-4. Automatic M5 candle-follow trailing is allowed to continue for BUY STOP and
+2. Automatic M5 candle-follow trailing is allowed to continue for BUY STOP and
    SELL STOP orders even when the manual-override marker is set. The intended
    ownership semantics need a clear acceptance test; LIMIT and STOP-LIMIT
    orders are intended to retain the prior override pause.
-5. STOP-order trailing changes from live quote extremes to completed M5-candle
+3. STOP-order trailing changes from live quote extremes to completed M5-candle
    OHLC data. Test restart/recovery, unavailable or stale M5 history, bar
    processing exactly once, one-way geometry, and broker stops/freeze levels.
-6. Scanner cadence is changed to allow interval-based runs without a new chart
+4. Scanner cadence is changed to allow interval-based runs without a new chart
    M15 bar. Validate duplicate-candidate suppression, load, and symbol history
    availability in the Strategy Tester.
 
