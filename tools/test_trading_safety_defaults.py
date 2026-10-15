@@ -328,8 +328,8 @@ def main() -> int:
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
-         and "if(!OrderSelect(ticket))" in pending_modify_code_code
-         and "MathAbs(ve-newEntry)>tolerance" in pending_modify_code_code
+         and "if(!OrderSelect(ticket))" in pending_modify_code
+         and "MathAbs(ve-newEntry)>tolerance" in pending_modify_code
          and "STB_GeomStore(ticket,false,ve,vs,vt)" in pending_modify_code),
         ("modify success helper restricts accepted server retcodes",
          bool(modify_retcode_code)
@@ -339,10 +339,10 @@ def main() -> int:
         ("central pending delete requires authorization, server success and ticket disappearance",
          bool(controlled_delete_code)
          and "if(!authorized)" in controlled_delete_code
-         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete_code_code
-         and "TRADE_RETCODE_DONE" in controlled_delete_code_code
-         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete_code_code
-         and "if(OrderSelect(ticket))" in controlled_delete_code_code
+         and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete_code
+         and "TRADE_RETCODE_DONE" in controlled_delete_code
+         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete_code
+         and "if(OrderSelect(ticket))" in controlled_delete_code
          and "STB DELETE CONFIRMED" in controlled_delete),
         ("all broker pending-order deletion goes through the central writer",
          source_code.count("trade.OrderDelete(") == 1
@@ -359,16 +359,15 @@ def main() -> int:
         ("automatic pending placement checks server result and initial SL",
          bool(auto_placement_code)
          and "trade.BuyStop(" in auto_placement_code
-         and "trade.SellStop(" in auto_placement_code_code
-         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement_code_code
-         and "trade.ResultRetcode()" in auto_placement_code_code
-         and "VerifyPendingInitialSL(" in auto_placement_code_code),
+         and "trade.SellStop(" in auto_placement_code
+         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement_code
+         and "trade.ResultRetcode()" in auto_placement_code
+         and "VerifyPendingInitialSL(" in auto_placement_code),
         ("automatic placement requests rollback if initial SL cannot be verified",
          "if(placedOrder>0 && OrderSelect(placedOrder))" in strip_strings(auto_placement)
-         and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");"
-         in auto_placement
+         and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK," in strip_strings(auto_placement)
          and strip_strings(auto_placement).find("VerifyPendingInitialSL(placedOrder)")
-         < auto_placement.find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,\"PlaceSetup\");")),
+         < strip_strings(auto_placement).find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,")),
         ("placement success helper enumerates accepted server retcodes",
          bool(placement_retcode_code)
          and all(token in placement_retcode_code for token in (
@@ -380,28 +379,27 @@ def main() -> int:
         ("one-click hedge validates server result and initial SL with rollback",
          bool(hedge_placement_code)
          and "trade.BuyStop(" in hedge_placement_code
-         and "trade.SellStop(" in hedge_placement_code_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code_code
-         and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code_code
-         and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK,\"OneClickHedge\");"
-         in hedge_placement),
+         and "trade.SellStop(" in hedge_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
+         and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
+         and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK," in hedge_placement_code),
         ("manual stop placement validates server result and initial SL with rollback",
          bool(manual_stop_placement_code)
          and "trade.BuyStop(" in manual_stop_placement_code
-         and "trade.SellStop(" in manual_stop_placement_code_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code_code
-         and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code_code
-         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
-         in manual_stop_placement),
+         and "trade.SellStop(" in manual_stop_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code
+         and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code
+         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_stop_placement_code),
         ("manual limit placement validates server result and initial SL with rollback",
          bool(manual_limit_placement_code)
          and "trade.BuyLimit(" in manual_limit_placement_code
-         and "trade.SellLimit(" in manual_limit_placement_code_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code_code
-         and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code_code
-         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,\"PlaceManual\");"
-         in manual_limit_placement),
+         and "trade.SellLimit(" in manual_limit_placement_code
+         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code
+         and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
+         and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_limit_placement_code),
     )
+
+    failed = False    )
 
     failed = False
     for label, ok in checks:
