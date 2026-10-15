@@ -140,7 +140,55 @@ def main() -> int:
         print(f"FAIL: source file not found: {path}")
         return 2
     source = path.read_text(encoding="utf-8")
+    trail_path = pathlib.Path("MQL5/Include/STB/STB_PendingTrail.mqh")
+    trail_source = (trail_path.read_text(encoding="utf-8")
+                    if trail_path.is_file() else "")
+    on_init = source_region(source, "int OnInit()", "// DEINIT")
+    on_tick = source_region(source, "void OnTick()", "// TIMER")
+    on_timer = source_region(source, "void OnTimer()", "// CHART EVENTS")
+    initial_pending_sl = source_region(
+        source, "bool CalculateInitialPendingProtectionSL(",
+        "bool VerifyPendingInitialSL(")
     checks: list[tuple[str, bool]] = [
+        ("live automatic trading remains opt-in by default",
+         bool(re.search(r"^\\s*input\\s+bool\\s+InpAutoTrading\\s*=\\s*false\\s*;",
+                        source, re.MULTILINE))),
+        ("risk-based sizing remains opt-in by default",
+         bool(re.search(r"^\\s*input\\s+bool\\s+InpUseRiskSizing\\s*=\\s*false\\s*;",
+                        source, re.MULTILINE))),
+        ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
+         "MQL_TESTER" in on_init and
+         "g_autoTrading=(InpAutoTrading ||" in on_init and
+         "if(!InpAutoTrading)" in on_init),
+        ("BUY STOP/SELL STOP initial SL anchors to closed M5 structure and validates broker geometry",
+         "if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)" in initial_pending_sl and
+         "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
+         "iHigh(symbol,PERIOD_M5,1)" in initial_pending_sl and
+         "IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL)" in initial_pending_sl),
+        ("pending STOP trailing reads a closed M5 bar once and validates OHLC before consuming it",
+         bool(trail_source) and
+         "datetime lastProcessedM5Bar;" in trail_source and
+         "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
+         "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
+         "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
+         "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("manual override pause is retained for non-STOP orders while STOP candle-follow is explicit",
+         "&& !stbCandleStop" in source and
+         "&& !candleStop" in trail_source),
+        ("scanner is interval-throttled independently of chart M15 bar",
+         "bool intervalElapsed=(g_scannerLastRun<=0 ||" in source and
+         "if(!newChartBar && !intervalElapsed)" in source and
+         "if(cycleBar>0)" in source),
+        ("OnTick and OnTimer execute only after a new completed scanner cycle",
+         "ulong cycleBefore=g_scannerCycle;" in on_tick and
+         "if(g_scannerCycle!=cycleBefore)" in on_tick and
+         "ulong cycleBefore=g_scannerCycle;" in on_timer and
+         "if(g_scannerCycle!=cycleBefore)" in on_timer),
+        ("timer startup failure aborts initialization",
+         "if(!EventSetTimer(MathMax(1,InpScanSeconds)))" in on_init and
+         "return INIT_FAILED;" in on_init),
+        ("startup logs distinguish expert and account trade permissions",
+         '"accountExpert="' in source and '"accountTrade="' in source),
         ("one direct OrderDelete writer",
          len(re.findall(r"\btrade\s*\.\s*OrderDelete\s*\(", source)) == 1),
         ("one direct PositionModify writer",
