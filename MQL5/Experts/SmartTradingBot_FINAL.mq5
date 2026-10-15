@@ -8481,13 +8481,10 @@ int OnInit()
 // Every currently open position is checked immediately through the one cycle.
    STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
 
-   if(PositionsTotal()==0 && OrdersTotal()==0)
-     {
-      STB_ScannerRun();
-      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-     }
-   else
-      Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+   // Scanner discovery is independent of account-wide exposure. Execution
+   // still checks managed exposure for the candidate's own symbol.
+   STB_ScannerRun();
+   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
 
    UpdatePanel();
    return INIT_SUCCEEDED;
@@ -8835,14 +8832,12 @@ void OnTick()
    if(m15Bar)
      {
        STB_ReconcileTradeRegistry();
-       if(PositionsTotal()==0 && OrdersTotal()==0)
-         {
-          STB_ScannerRun();
-          STB_ExecuteTopCandidate();
-          g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-         }
-       else
-          Print("STB SCAN DEFERRED: active position/order exists; protection has priority");
+       // Scan each scheduled M15 cycle even if other symbols have exposure.
+       // PlaceSetup / final execution gates enforce same-symbol exposure and
+       // account order limits before any request is sent.
+       STB_ScannerRun();
+       STB_ExecuteTopCandidate();
+       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
        UpdatePanel();
      }
   }
