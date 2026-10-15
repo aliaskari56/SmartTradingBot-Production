@@ -1877,12 +1877,14 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
-   if(!isUserAction && STB_ManualOverrideIs(ticket)) return false; // MANUAL_OVERRIDE: auto modify blocked
    if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
 
    //--- P4 central writer: verify symbol, re-read geometry, validate
    //--- broker constraints, monotonic entry direction and risk floor.
    long stbOt=OrderGetInteger(ORDER_TYPE);
+   bool stbCandleStop=(stbOt==ORDER_TYPE_BUY_STOP || stbOt==ORDER_TYPE_SELL_STOP);
+   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
+      return false; // M5 candle-follow owns BUY STOP / SELL STOP pre-trigger geometry
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
    double stbCurTP=OrderGetDouble(ORDER_TP);
@@ -5798,6 +5800,36 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
    if(direction<0)
       return false;
 
+   // BUY STOP / SELL STOP initial protection is anchored to the latest CLOSED
+   // M5 candle, as requested. If that structural SL cannot satisfy broker
+   // constraints, reject the pending order rather than silently substituting
+   // a different timeframe/structure.
+   if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)
+     {
+      double pip=PipSize(symbol);
+      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double minDistance=TradeMinDistance(symbol);
+      if(pip<=0.0 || point<=0.0 || minDistance<=0.0)
+         return false;
+
+      bool buyStop=(orderType==ORDER_TYPE_BUY_STOP);
+      double anchor=(buyStop ? iLow(symbol,PERIOD_M5,1)
+                             : iHigh(symbol,PERIOD_M5,1));
+      if(anchor<=0.0)
+         return false;
+
+      double buffer=MathMax(MathMax(0.0,InpInitialSLBufferPips)*pip,
+                            minDistance+point);
+      double candleSL=NormalizePrice(symbol,
+                                     buyStop ? anchor-buffer:anchor+buffer);
+      if(candleSL<=0.0 ||
+         !IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL))
+         return false;
+
+      sl=candleSL;
+      return true;
+     }
+
    // Same protection source as market positions.
    double candidate=0.0;
 
@@ -7779,8 +7811,11 @@ void STB_SortCandidates(STBCandidate &arr[])
 void STB_ScannerRun()
   {
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
-
-   if(cycleBar<=0 || cycleBar==g_scannerLastCycleBar)
+   bool newChartBar=(cycleBar>0 && cycleBar!=g_scannerLastCycleBar);
+   int scanInterval=MathMax(1,InpScanSeconds);
+   bool intervalElapsed=(g_scannerLastRun<=0 ||
+                         TimeCurrent()-g_scannerLastRun>=scanInterval);
+   if(!newChartBar && !intervalElapsed)
       return;
 
    ulong started=(ulong)GetTickCount();
@@ -8087,7 +8122,10 @@ void STB_ScannerRun()
       if(!wasSelected[i] && !STB_HasSymbolExposureForManagement(symbols[i]))
          SymbolSelect(symbols[i],false);
 
-   g_scannerLastCycleBar=cycleBar;
+   if(cycleBar>0)
+
+      g_scannerLastCycleBar=cycleBar;
+
    g_scannerLastRun=TimeCurrent();
    g_scannerCycle++;
    g_scannerStatus="PASS";
@@ -8529,7 +8567,9 @@ bool ValidateInputs()
    if(InpManualSaveStepPips<0.0)
       return false;
    if(InpTrendlineTolerancePips<0.0 ||
-      InpTrailStartPips<0.0)
+       InpTrailStartPips<0.0 ||
+       InpLiveTrailDistancePips<0.0 ||
+       InpTrailStepPips<0.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
@@ -8637,7 +8677,7 @@ int OnInit()
       // Tester runs must never depend on stale terminal GlobalVariables or
       // on a missing/malformed .set toggle. The explicit tester override is
       // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading &&
+      g_autoTrading=(InpAutoTrading ||
                      InpTesterForceAutoTrading);
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
       STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
@@ -8669,7 +8709,8 @@ int OnInit()
    Print("STB TRADE ENV terminal=",
          TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "ON":"OFF",
          " program=",MQLInfoInteger(MQL_TRADE_ALLOWED) ? "ON":"OFF",
-         " account=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+         " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
+          " accountTrade=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ON":"OFF",
          " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
 
    Print("STB INIT symbol=",_Symbol,
@@ -8705,9 +8746,12 @@ int OnInit()
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
 
    UpdateButtons();
-
-   EventSetTimer(MathMax(1,InpScanSeconds));
-
+    ResetLastError();
+    if(!EventSetTimer(MathMax(1,InpScanSeconds)))
+      {
+       Print("STB INIT FAILED: EventSetTimer failed err=",GetLastError());
+       return INIT_FAILED;
+      }
    g_lastChartBar=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
    g_lastM15Bar=iTime(_Symbol,PERIOD_M15,0);
 
