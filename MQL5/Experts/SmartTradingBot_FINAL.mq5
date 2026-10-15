@@ -3940,6 +3940,11 @@ bool OneClickHedge()
       return false;
 
    string symbol=_Symbol;
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB HEDGE REJECTED: symbol writer lease not owned symbol=",symbol);
+      return false;
+     }
    ulong sourceTicket=0;
    long sourceType=-1;
    double sourceVolume=0.0;
@@ -4042,6 +4047,16 @@ bool OneClickHedge()
    string comment="STB|HEDGE|"+
                   (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+
                   "|EB"+DoubleToString(hedgeEntryOffset,8);
+
+   // Recheck writer authority and exposure immediately before broker submission.
+   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      HasManagedPositionDirection(symbol,hedgeType) ||
+      STB_HasManagedPendingDirection(symbol,hedgeType))
+     {
+      Print("STB HEDGE REJECTED: writer/exposure changed before submit symbol=",symbol);
+      return false;
+     }
+
    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -6522,6 +6537,9 @@ bool PlaceSetup(Setup &s)
    if(!s.valid)
       return false;
 
+   if(!STB_SymbolManagementOwnedVerified(s.symbol))
+      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_NOT_OWNED");
+
    if(!g_autoTrading)
       return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
 
@@ -6623,6 +6641,13 @@ bool PlaceSetup(Setup &s)
    string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+
                   IntegerToString(s.adaptiveProfile)+"|EB"+
                   DoubleToString(effectiveEntryBuffer,8);
+
+   // Final pre-submit gate: a second instance may have changed exposure while
+   // this setup was being validated and sized.
+   if(!STB_SymbolManagementOwnedVerified(s.symbol))
+      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_LOST");
+   if(HasManagedExposure(s.symbol))
+      return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT");
 
    bool ok=false;
 
