@@ -66,6 +66,38 @@ def strip_comments(source: str) -> str:
     return "".join(out)
 
 
+def strip_strings(source: str) -> str:
+    """Blank string literals while preserving code and line structure."""
+    out = list(source)
+    state = "code"
+    quote = ""
+    i = 0
+
+    while i < len(source):
+        char = source[i]
+
+        if state == "code":
+            if char in ('"', "'"):
+                state = "string"
+                quote = char
+                out[i] = " "
+        elif state == "string":
+            if char == "\\\\" and i + 1 < len(source):
+                out[i] = " "
+                if source[i + 1] != "\\n":
+                    out[i + 1] = " "
+                i += 1
+            elif char == quote:
+                out[i] = " "
+                state = "code"
+            elif char != "\\n":
+                out[i] = " "
+
+        i += 1
+
+    return "".join(out)
+
+
 def region(source: str, start: str, end: str) -> str:
     # Locate boundaries in the original text (some legacy boundaries are
     # comment banners), then inspect code with comments removed so comments
@@ -83,7 +115,7 @@ def main() -> int:
         return 2
 
     source = SOURCE.read_text(encoding="utf-8")
-    source_code = strip_comments(source)
+    source_code = strip_strings(strip_comments(source))
     permission_gate = region(
         source, "bool STB_TradeEnvironmentAllowed()", "bool IsSpreadAcceptable("
     )
@@ -160,9 +192,15 @@ def main() -> int:
         "input bool InpAutoTrading = false;\n"
     )
     commented_input_is_ignored = (
-        input_default("InpAutoTrading", strip_comments(commented_input_sample))
+        input_default("InpAutoTrading", strip_strings(strip_comments(commented_input_sample)))
         == "false"
     )
+    code_only_sample = strip_strings(strip_comments(
+        'string message="TRADE_ACTION_REMOVE trade.OrderDelete("; // comment\\n'
+        'trade.OrderDelete(123);\\n'
+    ))
+    strings_do_not_trigger_code_guards = "TRADE_ACTION_REMOVE" not in code_only_sample
+    code_calls_survive_string_removal = "trade.OrderDelete(123);" in code_only_sample
 
     checks = (
         ("comment stripper preserves comment-like text inside strings",
@@ -173,6 +211,10 @@ def main() -> int:
          stripper_preserves_lines),
         ("commented-out input declarations cannot satisfy default checks",
          commented_input_is_ignored),
+        ("string contents cannot trigger code-only request guards",
+         strings_do_not_trigger_code_guards),
+        ("actual code calls remain visible after string removal",
+         code_calls_survive_string_removal),
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source_code) == "false"),
         ("risk-based sizing is opt-in by default",
@@ -225,7 +267,7 @@ def main() -> int:
          source_code.count("trade.OrderDelete(") == 1
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete),
         ("no raw TRADE_ACTION_REMOVE request bypasses the central delete writer",
-         "TRADE_ACTION_REMOVE" not in strip_comments(source)),
+         "TRADE_ACTION_REMOVE" not in source_code),
         ("rollback deletion requires known creator, matching comment and a fresh order",
          bool(controlled_delete)
          and "bool knownCreator=" in controlled_delete
