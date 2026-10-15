@@ -8345,7 +8345,7 @@ bool ValidateInputs()
 
    // Risk-sizing mode must not silently become a no-trade mode because a
    // stale .set file supplies zero risk.
-   if(InpUseRiskSizing && InpRiskPercent<=0.0)
+   if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
 
    if(!MathIsValidNumber(InpRiskPercent) ||
