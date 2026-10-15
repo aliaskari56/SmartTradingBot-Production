@@ -6953,6 +6953,12 @@ bool PlaceManualPendingDirection(const int direction)
       !STB_TradeEnvironmentAllowed())
       return false;
 
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+     {
+      Print("STB MANUAL PENDING REJECTED: symbol writer lease not owned symbol=",_Symbol);
+      return false;
+     }
+
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
       tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
@@ -7006,6 +7012,8 @@ bool PlaceManualPendingDirection(const int direction)
 
    double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
    string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+      return false;
    bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7051,6 +7059,12 @@ bool PlaceManualLimitDirection(const int direction)
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
       return false;
+
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+     {
+      Print("STB MANUAL LIMIT REJECTED: symbol writer lease not owned symbol=",_Symbol);
+      return false;
+     }
 
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
@@ -7106,6 +7120,8 @@ bool PlaceManualLimitDirection(const int direction)
    double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
    string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+
                   "|EB"+DoubleToString(effectiveManualOffset,8);
+   if(!STB_SymbolManagementOwnedVerified(_Symbol))
+      return false;
    bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
