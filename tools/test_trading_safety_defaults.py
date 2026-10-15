@@ -45,6 +45,7 @@ def main() -> int:
     live_auto_branch = region(
         source, "if(!InpAutoTrading)", "trade.SetExpertMagicNumber(InpMagic);"
     )
+    tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch)
 
     checks = (
         ("live auto-trading is opt-in by default",
@@ -53,7 +54,7 @@ def main() -> int:
          input_default("InpUseRiskSizing", source) == "false"),
         ("tester AUTO override is isolated from live initialization",
          bool(tester_auto_branch)
-         and "InpTesterForceAutoTrading" in tester_auto_branch
+         and "g_autoTrading=(InpAutoTrading&&InpTesterForceAutoTrading);" in tester_auto_branch_compact
          and bool(live_auto_branch)
          and "InpTesterForceAutoTrading" not in live_auto_branch),
         ("trade gate checks terminal, program, account-expert and account permissions",
