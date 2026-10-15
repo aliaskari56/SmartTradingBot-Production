@@ -151,11 +151,9 @@ def main() -> int:
         "bool VerifyPendingInitialSL(")
     checks: list[tuple[str, bool]] = [
         ("live automatic trading remains opt-in by default",
-         bool(re.search(r"^\\s*input\\s+bool\\s+InpAutoTrading\\s*=\\s*false\\s*;",
-                        source, re.MULTILINE))),
+         "input bool    InpAutoTrading            = false;" in source,
         ("risk-based sizing remains opt-in by default",
-         bool(re.search(r"^\\s*input\\s+bool\\s+InpUseRiskSizing\\s*=\\s*false\\s*;",
-                        source, re.MULTILINE))),
+         "input bool    InpUseRiskSizing         = false;" in source,
         ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
          "MQL_TESTER" in on_init and
          "g_autoTrading=(InpAutoTrading ||" in on_init and
