@@ -6567,6 +6567,9 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    if(!s.valid)
       return false;
 
+   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
+      return STB_LogPlaceReject(s,"ENTRY_LOCK_NOT_OWNED");
+
    if(!STB_SymbolManagementOwnedVerified(s.symbol))
       return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_NOT_OWNED");
 
@@ -6674,6 +6677,8 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
 
    // Final pre-submit gate: a second instance may have changed exposure while
    // this setup was being validated and sized.
+   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
+      return STB_LogPlaceReject(s,"ENTRY_LOCK_LOST_BEFORE_SUBMIT");
    if(!STB_SymbolManagementOwnedVerified(s.symbol))
       return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_LOST");
    if(HasManagedExposure(s.symbol))
