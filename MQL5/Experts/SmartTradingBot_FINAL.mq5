@@ -7922,7 +7922,12 @@ void STB_ScannerRun()
 
    if(prevCount>0)
      {
-      ArrayResize(g_scannerPrevious,prevCount);
+      if(ArrayResize(g_scannerPrevious,prevCount)!=prevCount)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: previous-snapshot allocation failed");
+         return;
+        }
       for(int p=0;p<prevCount;p++)
          g_scannerPrevious[p]=g_scannerCurrent[p];
      }
@@ -7944,11 +7949,16 @@ void STB_ScannerRun()
    g_scannerStatus="RUNNING";
 
    string symbols[];
-   ArrayResize(symbols,0);
+   ArrayFree(symbols);
 
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
      {
-      ArrayResize(symbols,1);
+      if(ArrayResize(symbols,1)!=1)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: tester symbol allocation failed");
+         return;
+        }
       symbols[0]=_Symbol;
      }
    else if(StringLen(InpScannerSymbols)>0)
@@ -7981,7 +7991,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: symbol-list allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -8005,7 +8020,12 @@ void STB_ScannerRun()
    g_scannerUniverseCount=ArraySize(symbols);
 
    bool wasSelected[];
-   ArrayResize(wasSelected,g_scannerUniverseCount);
+   if(ArrayResize(wasSelected,g_scannerUniverseCount)!=g_scannerUniverseCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: symbol-selection snapshot allocation failed");
+      return;
+     }
 
    for(int i=0;i<g_scannerUniverseCount;i++)
      {
