@@ -27,10 +27,10 @@ void STB_RenkoRender()
  double last=MathRound(r[0].close/step)*step;
  int dir=0, count=0, maxCount=InpRenkoBarsToDraw;
  datetime ts[500]; double op[500],cl[500]; int dr[500];
- for(int i=1;i<copied && count<maxCount;i++)
+ for(int i=1;i<copied;i++)
  {
   double p=r[i].close; int guard=0;
-  while(guard++<100 && count<maxCount)
+  while(guard++<100)
   {
    double o=last,c=last; int d=0;
    if(dir==0)
@@ -39,6 +39,11 @@ void STB_RenkoRender()
    { if(p>=last+step){c=last+step;d=1;} else if(p<=last-2*step){o=last-step;c=last-2*step;d=-1;} else break; }
    else
    { if(p<=last-step){c=last-step;d=-1;} else if(p>=last+2*step){o=last+step;c=last+2*step;d=1;} else break; }
+   if(count==500)
+   {
+    for(int k=1;k<500;k++){ts[k-1]=ts[k];op[k-1]=op[k];cl[k-1]=cl[k];dr[k-1]=dr[k];}
+    count=499;
+   }
    ts[count]=r[i].time;op[count]=o;cl[count]=c;dr[count]=d;count++;last=c;dir=d;
   }
  }
