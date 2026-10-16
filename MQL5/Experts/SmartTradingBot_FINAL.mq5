@@ -8012,7 +8012,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: Market Watch symbol allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -8125,7 +8130,15 @@ void STB_ScannerRun()
             continue;
 
          int idx=ArraySize(g_scannerCurrent);
-         ArrayResize(g_scannerCurrent,idx+1);
+         if(ArrayResize(g_scannerCurrent,idx+1)!=idx+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: candidate allocation failed symbol=",symbol);
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+            return;
+           }
          g_scannerCurrent[idx]=candidate;
 
          if(direction>0)
@@ -8141,7 +8154,15 @@ void STB_ScannerRun()
    int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,50));
    int watchCount=MathMin(watchLimit,ArraySize(g_scannerCurrent));
 
-   ArrayResize(g_scannerWatchlist,watchCount);
+   if(ArrayResize(g_scannerWatchlist,watchCount)!=watchCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: watchlist allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<watchCount;i++)
       g_scannerWatchlist[i]=g_scannerCurrent[i];
@@ -8207,14 +8228,30 @@ void STB_ScannerRun()
       validWatch++;
      }
 
-   ArrayResize(g_scannerWatchlist,validWatch);
+   if(ArrayResize(g_scannerWatchlist,validWatch)!=validWatch)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: validated-watchlist resize failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
    STB_SortCandidates(g_scannerWatchlist);
    g_scannerWatchlistCount=ArraySize(g_scannerWatchlist);
 
    int topCount=MathMin(MathMax(1,InpScannerTopN),10);
    topCount=MathMin(topCount,g_scannerWatchlistCount);
 
-   ArrayResize(g_scannerTop10,topCount);
+   if(ArrayResize(g_scannerTop10,topCount)!=topCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: top-list allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<topCount;i++)
       g_scannerTop10[i]=g_scannerWatchlist[i];
