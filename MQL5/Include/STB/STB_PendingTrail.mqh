@@ -568,11 +568,17 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(direction==0 || point<=0.0)
       return true;
 
+   // A failed qualifying candle remains eligible for a bounded retry.
+   if(!manual && g_stbPendingTrail[idx].nextRetryTime>0 &&
+      TimeCurrent()<g_stbPendingTrail[idx].nextRetryTime)
+      return true;
+
    // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
    // BUY STOP moves only after a bearish M5 candle and anchors to its low.
    // SELL STOP moves only after a bullish M5 candle and anchors to its high.
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
+   datetime candidateClosedBar=0;
    if(candleStop)
      {
       datetime closedBar=iTime(symbol,PERIOD_M5,1);
@@ -587,20 +593,26 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
          return true;
 
-      // Consume the closed bar only after its OHLC data passed validation.
-      // If history is temporarily unavailable, the same bar can be retried.
-      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+      // Retain the candidate bar until a qualifying update succeeds; a failed
+      // resolver/broker request can then retry this same closed candle.
+      candidateClosedBar=closedBar;
 
       if(orderType==(long)ORDER_TYPE_BUY_STOP)
         {
          if(barClose>=barOpen)
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
             return true; // only a completed bearish candle may move BUY STOP down
+           }
          extreme=barLow;
         }
       else
         {
          if(barClose<=barOpen)
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
             return true; // only a completed bullish candle may move SELL STOP up
+           }
          extreme=barHigh;
         }
      }
@@ -625,6 +637,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(!isNewExtreme)
    {
+      // This closed candle is fully evaluated; there is no candidate to retry.
+      if(candidateClosedBar>0)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=candidateClosedBar;
       // 2) No new extreme -> NO MODIFY (rate-limited).
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
@@ -660,7 +675,14 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                " reason=",res.reason);
       }
 
-      // State NOT committed as success.
+      // Retry this same qualifying candle with bounded backoff; do not mark
+      // it processed because the candidate was not resolved/committed.
+      g_stbPendingTrail[idx].failureCount++;
+      int fc=g_stbPendingTrail[idx].failureCount;
+      int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
+                            : (fc==2 ? STB_PEND_BACKOFF_2_SEC
+                                     : STB_PEND_BACKOFF_3_SEC));
+      g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
       return true;
    }
 
@@ -692,6 +714,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       else
          g_stbPendingTrail[idx].trackedExtreme=
             MathMax(g_stbPendingTrail[idx].trackedExtreme,extreme);
+
+      if(candidateClosedBar>0)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=candidateClosedBar;
 
       Print("PENDING_TRAIL_UPDATE ticket=",IntegerToString((int)ticket),
             " symbol=",symbol,
