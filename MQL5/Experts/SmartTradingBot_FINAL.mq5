@@ -8648,7 +8648,7 @@ void STB_RenkoEnforceDrawLimit()
          maxIndex=index;
      }
 
-   int keep=MathMax(20,MathMin(500,InpRenkoBarsToDraw));
+   int keep=(int)MathMax(20,MathMin(500,InpRenkoBarsToDraw));
    int excess=(maxIndex+1)-keep;
    for(int j=0;j<excess;j++)
       ObjectDelete(0,brickPrefix+IntegerToString(j));
