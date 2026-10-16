@@ -11,7 +11,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `18d30d6a0f8372e5b4cf1565473ffb8b1cf91622` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the current source Git blob `b6b41d8ed06444934405f5da6f9aecf892460192` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
 | BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
@@ -78,6 +78,7 @@ Do not label the build production-ready until the exact source revision has a re
 | EVT-05 | Stale lease takeover | Leave an expired management lease and start a new instance | CAS takeover succeeds safely; live owner is not displaced | NOT RUN |
 | EVT-06 | Disconnect/reconnect | Interrupt connection during modify/delete and restore it | EA reconciles live state; does not assume timed-out requests failed or succeeded without checking | NOT RUN |
 | EVT-07 | Multi-chart/multi-symbol | Run supported combinations concurrently | No cross-symbol state leakage or ticket mix-up | NOT RUN |
+| EVT-08 | Lease tracking allocation failure | In a failure-injection harness, force `g_stbLeaseSymbols` append allocation to fail immediately after a lease claim or refresh | Lease tracking failure is logged, ownership is released with owner-checked CAS, and the function refuses management ownership | STATIC REVIEW; FAILURE INJECTION NOT RUN |
 
 ## F. Strategy behavior and operational guardrails
 
@@ -103,13 +104,13 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary
 
-- Candidate source blob: `18d30d6a0f8372e5b4cf1565473ffb8b1cf91622` (Git blob identifier for `MQL5/Experts/SmartTradingBot_FINAL.mq5`, not raw-file SHA-256).
+- Candidate source blob: `b6b41d8ed06444934405f5da6f9aecf892460192` (Git blob identifier for `MQL5/Experts/SmartTradingBot_FINAL.mq5`, not raw-file SHA-256).
 - Candidate pending-trail include blob: `3c853a22c717c7bdbf465783ab9084ea98006367` (`MQL5/Include/STB/STB_PendingTrail.mqh`).
-- Candidate branch head at this matrix update: `a62d6cdaa986b412905037c70cc7683607b028f3` (commit SHA).
+- Candidate source-code commit: `7f9946b5c2f939060203ec4fe80150accd937c61` (commit SHA); docs-only commits may follow. The prior source revision compiled successfully in MetaEditor CI with zero errors and zero warnings; compile of this lease-allocation fix is pending.
 - Verified static CI run `37950552410`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - The resolver now enforces the active profit-lock floor, uses a deterministic no-SL fail-safe fallback where appropriate, and the flush only credits saved lock state after the actual SL meets the normalized lock target.
 - Functional tests for SL-01 through SL-12 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
-- MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
+- The current lease-allocation fix's MetaEditor compile is pending. Strategy Tester, demo tests, exact-source EX5 provenance for the current source, and package/license review remain unverified.
 - Release decision: **BLOCKED / NOT VERIFIED**.
