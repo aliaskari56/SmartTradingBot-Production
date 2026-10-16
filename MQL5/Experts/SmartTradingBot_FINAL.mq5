@@ -6110,18 +6110,26 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // broker writer, regardless of which magic/EA created it.
 string g_stbLeaseSymbols[];
 
-void STB_LeaseTrackSymbol(const string symbol)
+bool STB_LeaseTrackSymbol(const string symbol)
   {
    if(symbol=="")
-      return;
+      return false;
 
    for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
       if(g_stbLeaseSymbols[i]==symbol)
-         return;
+         return true;
 
    int n=ArraySize(g_stbLeaseSymbols);
    if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
+     {
       g_stbLeaseSymbols[n]=symbol;
+      return true;
+     }
+
+   Print("STB lease tracking allocation failed; releasing symbol lease symbol=",symbol,
+         " err=",GetLastError());
+   STB_ReleaseSymbolManagement(symbol);
+   return false;
   }
 
 string STB_MgmtScopeKey(const string purpose,const string symbol)
@@ -6194,7 +6202,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
          return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6204,7 +6213,8 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6213,7 +6223,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
          return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
