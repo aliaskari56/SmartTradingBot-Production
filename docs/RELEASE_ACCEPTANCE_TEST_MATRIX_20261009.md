@@ -1,6 +1,6 @@
 # Release Acceptance Test Matrix — SmartTradingBot FINAL
 Date: 2026-10-09
-Branch: `audit/expose-cleaned-source-20261009`
+Branch: `fix/array-resize-guards-20261016`
 Scope: test plan for the current source; this document records required tests, not tests already executed.
 
 ## Release rule
@@ -11,7 +11,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `6bca33bc8e0c961f317b0828e46faf7a6b9929b4` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the current source Git blob `18d30d6a0f8372e5b4cf1565473ffb8b1cf91622` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
 | BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
@@ -39,6 +39,16 @@ Do not label the build production-ready until the exact source revision has a re
 | DEL-07 | Stale rollback request | Attempt rollback outside the permitted fresh-setup window | Delete is refused | NOT RUN |
 | DEL-08 | Broker response ambiguity | Simulate timeout/rejection/transaction delay around deletion | Logs include retcode; subsequent state is re-read; no false success claim | NOT RUN |
 | DEL-09 | Expiry writer ownership gate | Request expiry while another chart owns the symbol lease or ownership is stale; compare with the valid owner | Final writer rejects wrong-source/unverified-owner requests; eligible expiry succeeds only through the managed owner | NOT RUN |
+
+## C.1 Pending-order trailing resilience — release-critical
+
+| ID | Scenario | Procedure | Expected result | Status |
+|---|---|---|---|---|
+| PND-TR-01 | Resolver rejects qualifying M5 candle | For BUY STOP and SELL STOP, create a qualifying closed candle whose candidate fails pending-distance validation; then make a later retry valid without closing another M5 candle | The same candidate remains eligible and is retried after bounded backoff; it is not silently consumed | NOT RUN |
+| PND-TR-02 | Broker modify failure then recovery | Cause a temporary pending-order modify failure, then restore normal broker conditions while the same qualifying candle remains current | Retry respects backoff; success updates entry/SL and tracked extreme exactly once | NOT RUN |
+| PND-TR-03 | Benign Step/cooldown skip | Generate a qualifying candle whose proposal is below the configured step or inside the modify cooldown | No per-tick retry loop; candidate is consumed when no retry window remains | NOT RUN |
+| PND-TR-04 | Candle direction not eligible | Test bullish and bearish M5 candles against BUY STOP and SELL STOP eligibility rules | Non-qualifying candle is marked processed without modify; qualifying direction remains retryable on actual failure | NOT RUN |
+| PND-TR-05 | Allocation failure guards | Review all newly guarded dynamic-array append paths and, where practical, inject allocation failure in a test harness | No out-of-range write; clear error/status; scanner restores symbols it temporarily selected | STATIC REVIEW ONLY; FAILURE INJECTION NOT RUN |
 
 ## D. Stop-loss and position management — release-critical
 
@@ -82,7 +92,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## G. Evidence to attach before approval
 
-- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `6bca33bc8e0c961f317b0828e46faf7a6b9929b4`)
+- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `18d30d6a0f8372e5b4cf1565473ffb8b1cf91622`)
 - [ ] MetaEditor version/build and complete compile log
 - [ ] EX5 SHA-256 and source-to-binary provenance manifest
 - [ ] Strategy Tester configuration, data range, modelling mode, report and journal
@@ -93,7 +103,9 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary
 
-- Current source blob: `6bca33bc8e0c961f317b0828e46faf7a6b9929b4` (Git blob identifier, not raw-file SHA-256).
+- Candidate source blob: `18d30d6a0f8372e5b4cf1565473ffb8b1cf91622` (Git blob identifier for `MQL5/Experts/SmartTradingBot_FINAL.mq5`, not raw-file SHA-256).
+- Candidate pending-trail include blob: `3c853a22c717c7bdbf465783ab9084ea98006367` (`MQL5/Include/STB/STB_PendingTrail.mqh`).
+- Candidate branch head at this matrix update: `a62d6cdaa986b412905037c70cc7683607b028f3` (commit SHA).
 - Verified static CI run `37950552410`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - The resolver now enforces the active profit-lock floor, uses a deterministic no-SL fail-safe fallback where appropriate, and the flush only credits saved lock state after the actual SL meets the normalized lock target.
