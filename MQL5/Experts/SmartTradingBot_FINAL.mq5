@@ -8471,6 +8471,52 @@ void STB_DrawTradingLevels()
       DrawHLine(tag+"S",OrderGetDouble(ORDER_SL),clrSilver);
       DrawHLine(tag+"T",OrderGetDouble(ORDER_TP),clrDeepSkyBlue);
      }
+
+   // Visualize the latest confirmed M15 swing break in each direction.
+   // This detector does not classify BOS versus CHoCH, so avoid a false label.
+   for(int direction=-1;direction<=1;direction+=2)
+     {
+      int pivotShift=-1;
+      int breakShift=-1;
+      SwingPoint brokenSwing;
+      if(!DetectStructure(sym,direction,pivotShift,breakShift,brokenSwing))
+         continue;
+
+      datetime breakTime=iTime(sym,PERIOD_M15,breakShift);
+      datetime pivotTime=brokenSwing.time;
+      if(pivotTime<=0 || breakTime<=0 || pivotTime>=breakTime ||
+         brokenSwing.price<=0.0)
+         continue;
+
+      string side=(direction>0 ? "BUY":"SELL");
+      string lineName=pref+"STRUCT_"+side;
+      string labelName=pref+"STRUCT_LABEL_"+side;
+      color lineColor=(direction>0 ? clrLimeGreen:clrTomato);
+
+      if(ObjectCreate(0,lineName,OBJ_TREND,0,
+                      pivotTime,brokenSwing.price,
+                      breakTime,brokenSwing.price))
+        {
+         ObjectSetInteger(0,lineName,OBJPROP_COLOR,lineColor);
+         ObjectSetInteger(0,lineName,OBJPROP_STYLE,STYLE_DASH);
+         ObjectSetInteger(0,lineName,OBJPROP_WIDTH,2);
+         ObjectSetInteger(0,lineName,OBJPROP_RAY_RIGHT,true);
+         ObjectSetInteger(0,lineName,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,lineName,OBJPROP_HIDDEN,true);
+        }
+
+      double pip=PipSize(sym);
+      double labelOffset=MathMax(pip,SymbolInfoDouble(sym,SYMBOL_POINT))*3.0;
+      double labelPrice=brokenSwing.price+(direction>0 ? labelOffset:-labelOffset);
+      if(ObjectCreate(0,labelName,OBJ_TEXT,0,breakTime,labelPrice))
+        {
+         ObjectSetString(0,labelName,OBJPROP_TEXT,"M15 STRUCTURE BREAK "+side);
+         ObjectSetInteger(0,labelName,OBJPROP_COLOR,lineColor);
+         ObjectSetInteger(0,labelName,OBJPROP_FONTSIZE,8);
+         ObjectSetInteger(0,labelName,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,labelName,OBJPROP_HIDDEN,true);
+        }
+     }
   }
 
 void UpdatePanel()
@@ -8560,6 +8606,54 @@ int TrailAllPendingOrdersNow()
 //|                                                                  |
 //+------------------------------------------------------------------+
 #include <STB\STB_RenkoTrendView.mqh>
+
+// Enforce the configured visual cap without modifying the protected Include
+// module. Keep only the newest InpRenkoBarsToDraw brick objects on the chart.
+void STB_RenkoEnforceDrawLimit()
+  {
+   if(!g_stbRenkoViewEnabled || g_stbRenkoPrefix=="")
+      return;
+
+   string brickPrefix=g_stbRenkoPrefix+"B";
+   int maxIndex=-1;
+   int total=ObjectsTotal(0,-1,-1);
+
+   for(int i=0;i<total;i++)
+     {
+      string name=ObjectName(0,i,-1,-1);
+      if(StringFind(name,brickPrefix)!=0)
+         continue;
+
+      string suffix=StringSubstr(name,StringLen(brickPrefix));
+      int length=StringLen(suffix);
+      if(length<=0)
+         continue;
+
+      bool digitsOnly=true;
+      for(int k=0;k<length;k++)
+        {
+         ushort ch=StringGetCharacter(suffix,k);
+         if(ch<'0' || ch>'9')
+           {
+            digitsOnly=false;
+            break;
+           }
+        }
+
+      if(!digitsOnly)
+         continue;
+
+      int index=(int)StringToInteger(suffix);
+      if(index>=0 && index>maxIndex)
+         maxIndex=index;
+     }
+
+   int keep=MathMax(20,MathMin(500,InpRenkoBarsToDraw));
+   int excess=(maxIndex+1)-keep;
+   for(int j=0;j<excess;j++)
+      ObjectDelete(0,brickPrefix+IntegerToString(j));
+  }
+
 
 void STB_UpdateControlBarLayout()
   {
@@ -8983,6 +9077,7 @@ int OnInit()
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
    CreateButton(g_prefix+"RENKO_VIEW","RENKO ON",8,8,96,26,clrDarkSlateBlue);
    STB_RenkoInit();
+   STB_RenkoEnforceDrawLimit();
 
    UpdateButtons();
     ResetLastError();
@@ -9388,6 +9483,7 @@ void OnTimer()
    UpdatePanel();
    UpdateButtons();
    STB_RenkoRender();
+   STB_RenkoEnforceDrawLimit();
   }
 
 //==================================================================
@@ -9757,6 +9853,7 @@ void OnChartEvent(const int id,
    if(sparam==renkoName)
      {
       STB_RenkoSetEnabled(!g_stbRenkoViewEnabled);
+      STB_RenkoEnforceDrawLimit();
       g_dashboardLastAction=g_stbRenkoViewEnabled ? "RENKO VIEW ENABLED" : "RENKO VIEW DISABLED";
       UpdateButtons();
       ChartRedraw(0);
