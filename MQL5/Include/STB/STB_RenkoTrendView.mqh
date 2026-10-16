@@ -22,10 +22,12 @@ void STB_RenkoRender()
  if(step<=0 || InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500) return;
  MqlRates r[];
  ArraySetAsSeries(r,false);
- int copied=CopyRates(_Symbol,(ENUM_TIMEFRAMES)_Period,1,MathMin(4000,MathMax(300,InpRenkoBarsToDraw*8)),r);
+ int wanted=MathMax(300,InpRenkoBarsToDraw*8);
+ wanted=MathMin(wanted,4000);
+ int copied=CopyRates(_Symbol,(ENUM_TIMEFRAMES)_Period,1,wanted,r);
  if(copied<30) return;
  double last=MathRound(r[0].close/step)*step;
- int dir=0, count=0, maxCount=InpRenkoBarsToDraw;
+ int dir=0, count=0;
  datetime ts[500]; double op[500],cl[500]; int dr[500];
  for(int i=1;i<copied;i++)
  {
