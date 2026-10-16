@@ -3236,7 +3236,18 @@ bool BuildSetup(const string symbol,
    int maxAge=STB_EffectiveMaxSetupAgeBars();
 
    if(maxAge>0 && bosShift>maxAge)
+     {
+      Print("STB SETUP REJECT DETAIL",
+            " symbol=",symbol,
+            " dir=",(direction>0 ? "BUY":"SELL"),
+            " reason=BOS_TOO_OLD",
+            " bosShift=",IntegerToString(bosShift),
+            " maxAgeBars=",IntegerToString(maxAge),
+            " timeframe=M15",
+            " profile=",(g_activeAdaptiveProfileValid ?
+                          IntegerToString(g_activeAdaptiveProfile.id) : "INPUT"));
       return STB_BuildReject(symbol,direction,"BOS_TOO_OLD");
+     }
 
    int fvgShift=-1;
    bool hasFVG=FindFVG(symbol,direction,bosShift,fvgShift);
@@ -8275,15 +8286,33 @@ void STB_ScannerRun()
    STB_SortCandidates(g_scannerTop10);
    g_scannerTop10Count=ArraySize(g_scannerTop10);
 
+   string confidenceReason="NO_CANDIDATES";
+   string diagnosticTopSymbol="";
+   double diagnosticTopScore=0.0;
+   double diagnosticSecondScore=0.0;
+   double diagnosticScoreGap=0.0;
+
    if(g_scannerTop10Count<=0)
       g_scannerConfidence="NO_CLEAR_WINNER";
    else
      {
-      double topScore=g_scannerTop10[0].opportunityScore;
-      bool clear=(topScore>=InpScannerMinScore);
+      diagnosticTopSymbol=g_scannerTop10[0].symbol;
+      diagnosticTopScore=g_scannerTop10[0].opportunityScore;
+      if(g_scannerTop10Count>1)
+         diagnosticSecondScore=g_scannerTop10[1].opportunityScore;
+      diagnosticScoreGap=diagnosticTopScore-diagnosticSecondScore;
 
-      if(clear && g_scannerTop10Count>1)
-         clear=(topScore-g_scannerTop10[1].opportunityScore)>=InpScannerMinTopGap;
+      bool clear=(diagnosticTopScore>=InpScannerMinScore);
+      if(!clear)
+         confidenceReason="TOP_SCORE_BELOW_MIN";
+      else if(g_scannerTop10Count>1 &&
+              diagnosticScoreGap<InpScannerMinTopGap)
+        {
+         clear=false;
+         confidenceReason="TOP_GAP_BELOW_MIN";
+        }
+      else
+         confidenceReason="THRESHOLDS_MET";
 
       g_scannerConfidence=(clear ? "CLEAR":"WEAK");
      }
@@ -8342,6 +8371,13 @@ void STB_ScannerRun()
          " watchlist=",IntegerToString(g_scannerWatchlistCount),
          " top10=",IntegerToString(g_scannerTop10Count),
          " confidence=",g_scannerConfidence,
+         " confidenceReason=",confidenceReason,
+         " topSymbol=",diagnosticTopSymbol,
+         " topScore=",DoubleToString(diagnosticTopScore,2),
+         " secondScore=",DoubleToString(diagnosticSecondScore,2),
+         " scoreGap=",DoubleToString(diagnosticScoreGap,2),
+         " requiredScore=",DoubleToString(InpScannerMinScore,2),
+         " requiredGap=",DoubleToString(InpScannerMinTopGap,2),
          " durationMs=",IntegerToString((int)elapsed));
   }
 
