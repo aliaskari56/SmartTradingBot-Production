@@ -726,6 +726,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
             " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,digits));
    }
 
+   // A non-committed proposal can also be a benign Step/cooldown skip rather
+   // than a broker failure. Keep retrying only while a real backoff/cooldown
+   // window is active; otherwise consume this candle to avoid per-tick repeats.
+   if(!committed && candidateClosedBar>0 &&
+      (g_stbPendingTrail[idx].nextRetryTime<=TimeCurrent()) &&
+      (g_stbPendingTrail[idx].lastModifyTime<=0 ||
+       TimeCurrent()>=g_stbPendingTrail[idx].lastModifyTime+
+                     STB_PEND_TRAIL_COOLDOWN_SEC))
+      g_stbPendingTrail[idx].lastProcessedM5Bar=candidateClosedBar;
+
    return true;
 }
 
