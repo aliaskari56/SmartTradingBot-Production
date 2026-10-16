@@ -8784,6 +8784,13 @@ bool ValidateInputs()
    if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
 
+   // Renko settings are validated only when this chart-only feature is enabled.
+   if(InpShowRenkoTrendView &&
+      (!MathIsValidNumber(InpRenkoBrickSizePoints) ||
+       InpRenkoBrickSizePoints<=0.0 ||
+       InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500))
+      return false;
+
    // Reject NaN/Infinity for every floating-point input before range checks.
    if(
       !MathIsValidNumber(InpScannerMinQuality) ||
