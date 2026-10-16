@@ -1,95 +1,247 @@
 #ifndef STB_RENKO_TREND_VIEW_MQH
 #define STB_RENKO_TREND_VIEW_MQH
-bool g_stbRenkoViewEnabled=false;
-string g_stbRenkoPrefix="";
-datetime g_stbRenkoLastBar=0;
+
+// Chart-only Renko overlay. This module must not place or manage trades.
+bool     g_stbRenkoViewEnabled = false;
+string   g_stbRenkoPrefix      = "";
+datetime g_stbRenkoLastBar     = 0;
+
+// Delete only objects owned by this module. Never clear the chart when the
+// prefix has not yet been initialized.
 void STB_RenkoClear()
-{
- int n=ObjectsTotal(0,-1,-1);
- for(int i=n-1;i>=0;i--)
- {
-  string name=ObjectName(0,i,-1,-1);
-  if(StringFind(name,g_stbRenkoPrefix)==0) ObjectDelete(0,name);
- }
-}
+  {
+   if(g_stbRenkoPrefix == "")
+      return;
+
+   int total = ObjectsTotal(0, -1, -1);
+   for(int i = total - 1; i >= 0; i--)
+     {
+      string name = ObjectName(0, i, -1, -1);
+      if(StringFind(name, g_stbRenkoPrefix) == 0)
+         ObjectDelete(0, name);
+     }
+  }
+
 void STB_RenkoRender()
-{
- if(!g_stbRenkoViewEnabled) return;
- datetime bar=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
- if(bar==0 || bar==g_stbRenkoLastBar) return;
- g_stbRenkoLastBar=bar;
- double step=InpRenkoBrickSizePoints*_Point;
- if(step<=0 || InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500) return;
- MqlRates r[];
- ArraySetAsSeries(r,false);
- int wanted=MathMax(300,InpRenkoBarsToDraw*8);
- wanted=MathMin(wanted,4000);
- int copied=CopyRates(_Symbol,(ENUM_TIMEFRAMES)_Period,1,wanted,r);
- if(copied<30) return;
- double last=MathRound(r[0].close/step)*step;
- int dir=0, count=0;
- datetime ts[500]; double op[500],cl[500]; int dr[500];
- for(int i=1;i<copied;i++)
- {
-  double p=r[i].close; int guard=0;
-  while(guard++<100)
   {
-   double o=last,c=last; int d=0;
-   if(dir==0)
-   { if(p>=last+step){c=last+step;d=1;} else if(p<=last-step){c=last-step;d=-1;} else break; }
-   else if(dir>0)
-   { if(p>=last+step){c=last+step;d=1;} else if(p<=last-2*step){o=last-step;c=last-2*step;d=-1;} else break; }
+   if(!g_stbRenkoViewEnabled || g_stbRenkoPrefix == "")
+      return;
+
+   datetime currentBar = iTime(_Symbol, (ENUM_TIMEFRAMES)_Period, 0);
+   if(currentBar == 0 || currentBar == g_stbRenkoLastBar)
+      return;
+
+   double brickPoints = InpRenkoBrickSizePoints;
+   if(!MathIsValidNumber(brickPoints) || brickPoints <= 0.0 ||
+      InpRenkoBarsToDraw < 20 || InpRenkoBarsToDraw > 500)
+      return;
+
+   g_stbRenkoLastBar = currentBar;
+   double step = brickPoints * _Point;
+   if(!MathIsValidNumber(step) || step <= 0.0)
+      return;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+
+   int requested = (int)MathMax(300, InpRenkoBarsToDraw * 8);
+   requested = (int)MathMin(requested, 4000);
+   int copied = CopyRates(_Symbol, (ENUM_TIMEFRAMES)_Period, 1, requested, rates);
+   if(copied < 30)
+      return;
+
+   double lastClose = MathRound(rates[0].close / step) * step;
+   int direction = 0;
+   int count = 0;
+
+   datetime brickTime[500];
+   double brickOpen[500];
+   double brickClose[500];
+   int brickDirection[500];
+
+   for(int i = 1; i < copied; i++)
+     {
+      double price = rates[i].close;
+      int guard = 0;
+
+      while(guard++ < 100)
+        {
+         double openPrice = lastClose;
+         double closePrice = lastClose;
+         int newDirection = 0;
+
+         if(direction == 0)
+           {
+            if(price >= lastClose + step)
+              {
+               closePrice = lastClose + step;
+               newDirection = 1;
+              }
+            else
+               if(price <= lastClose - step)
+                 {
+                  closePrice = lastClose - step;
+                  newDirection = -1;
+                 }
+               else
+                  break;
+           }
+         else
+            if(direction > 0)
+              {
+               if(price >= lastClose + step)
+                 {
+                  closePrice = lastClose + step;
+                  newDirection = 1;
+                 }
+               else
+                  if(price <= lastClose - 2.0 * step)
+                    {
+                     openPrice = lastClose - step;
+                     closePrice = lastClose - 2.0 * step;
+                     newDirection = -1;
+                    }
+                  else
+                     break;
+              }
+            else
+              {
+               if(price <= lastClose - step)
+                 {
+                  closePrice = lastClose - step;
+                  newDirection = -1;
+                 }
+               else
+                  if(price >= lastClose + 2.0 * step)
+                    {
+                     openPrice = lastClose + step;
+                     closePrice = lastClose + 2.0 * step;
+                     newDirection = 1;
+                    }
+                  else
+                     break;
+              }
+
+         if(count >= 500)
+           {
+            for(int k = 1; k < 500; k++)
+              {
+               brickTime[k - 1] = brickTime[k];
+               brickOpen[k - 1] = brickOpen[k];
+               brickClose[k - 1] = brickClose[k];
+               brickDirection[k - 1] = brickDirection[k];
+              }
+            count = 499;
+           }
+
+         brickTime[count] = rates[i].time;
+         brickOpen[count] = openPrice;
+         brickClose[count] = closePrice;
+         brickDirection[count] = newDirection;
+         count++;
+
+         lastClose = closePrice;
+         direction = newDirection;
+        }
+     }
+
+   STB_RenkoClear();
+
+   for(int j = 0; j < count; j++)
+     {
+      string name = g_stbRenkoPrefix + "B" + IntegerToString(j);
+      datetime endTime = brickTime[j] +
+                         (datetime)MathMax(60, PeriodSeconds((ENUM_TIMEFRAMES)_Period));
+
+      double highPrice = MathMax(brickOpen[j], brickClose[j]);
+      double lowPrice = MathMin(brickOpen[j], brickClose[j]);
+
+      if(ObjectCreate(0, name, OBJ_RECTANGLE, 0,
+                      brickTime[j], highPrice, endTime, lowPrice))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR,
+                          brickDirection[j] > 0 ? clrDodgerBlue : clrTomato);
+         ObjectSetInteger(0, name, OBJPROP_FILL, true);
+         ObjectSetInteger(0, name, OBJPROP_BACK, false);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        }
+     }
+
+   // Draw automatic resistance/support trendlines using the last two
+   // confirmed Renko reversal pivots. User-created chart trendlines are untouched.
+   int high1 = -1;
+   int high2 = -1;
+   int low1  = -1;
+   int low2  = -1;
+
+   for(int j = 1; j < count; j++)
+     {
+      if(brickDirection[j - 1] > 0 && brickDirection[j] < 0)
+        {
+         high2 = high1;
+         high1 = j - 1;
+        }
+
+      if(brickDirection[j - 1] < 0 && brickDirection[j] > 0)
+        {
+         low2 = low1;
+         low1 = j - 1;
+        }
+     }
+
+   if(high1 >= 0 && high2 >= 0 && brickTime[high2] < brickTime[high1])
+     {
+      string name = g_stbRenkoPrefix + "HIGH";
+      if(ObjectCreate(0, name, OBJ_TREND, 0,
+                      brickTime[high2], brickClose[high2],
+                      brickTime[high1], brickClose[high1]))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrangeRed);
+         ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+         ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        }
+     }
+
+   if(low1 >= 0 && low2 >= 0 && brickTime[low2] < brickTime[low1])
+     {
+      string name = g_stbRenkoPrefix + "LOW";
+      if(ObjectCreate(0, name, OBJ_TREND, 0,
+                      brickTime[low2], brickClose[low2],
+                      brickTime[low1], brickClose[low1]))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrDeepSkyBlue);
+         ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+         ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        }
+     }
+
+   ChartRedraw(0);
+  }
+
+void STB_RenkoSetEnabled(const bool enabled)
+  {
+   g_stbRenkoViewEnabled = enabled;
+   g_stbRenkoLastBar = 0;
+
+   if(!enabled)
+      STB_RenkoClear();
    else
-   { if(p<=last-step){c=last-step;d=-1;} else if(p>=last+2*step){o=last+step;c=last+2*step;d=1;} else break; }
-   if(count==500)
-   {
-    for(int k=1;k<500;k++){ts[k-1]=ts[k];op[k-1]=op[k];cl[k-1]=cl[k];dr[k-1]=dr[k];}
-    count=499;
-   }
-   ts[count]=r[i].time;op[count]=o;cl[count]=c;dr[count]=d;count++;last=c;dir=d;
+      STB_RenkoRender();
   }
- }
- STB_RenkoClear();
- for(int j=0;j<count;j++)
- {
-  string nm=g_stbRenkoPrefix+"B"+IntegerToString(j);
-  datetime t2=ts[j]+(datetime)MathMax(60,PeriodSeconds((ENUM_TIMEFRAMES)_Period));
-  if(ObjectCreate(0,nm,OBJ_RECTANGLE,0,ts[j],MathMax(op[j],cl[j]),t2,MathMin(op[j],cl[j])))
-  {
-   ObjectSetInteger(0,nm,OBJPROP_COLOR,dr[j]>0?clrDodgerBlue:clrTomato);
-   ObjectSetInteger(0,nm,OBJPROP_FILL,true);ObjectSetInteger(0,nm,OBJPROP_BACK,false);
-   ObjectSetInteger(0,nm,OBJPROP_SELECTABLE,false);ObjectSetInteger(0,nm,OBJPROP_HIDDEN,true);
-  }
- }
- int h1=-1,h2=-1,l1=-1,l2=-1;
- for(int j=1;j<count;j++)
- {
-  if(dr[j-1]>0 && dr[j]<0){h2=h1;h1=j-1;}
-  if(dr[j-1]<0 && dr[j]>0){l2=l1;l1=j-1;}
- }
- if(h1>=0 && h2>=0 && ts[h2]<ts[h1])
- {
-  string nm=g_stbRenkoPrefix+"HIGH";
-  if(ObjectCreate(0,nm,OBJ_TREND,0,ts[h2],cl[h2],ts[h1],cl[h1]))
-  {ObjectSetInteger(0,nm,OBJPROP_COLOR,clrOrangeRed);ObjectSetInteger(0,nm,OBJPROP_RAY_RIGHT,true);ObjectSetInteger(0,nm,OBJPROP_WIDTH,2);ObjectSetInteger(0,nm,OBJPROP_HIDDEN,true);}
- }
- if(l1>=0 && l2>=0 && ts[l2]<ts[l1])
- {
-  string nm=g_stbRenkoPrefix+"LOW";
-  if(ObjectCreate(0,nm,OBJ_TREND,0,ts[l2],cl[l2],ts[l1],cl[l1]))
-  {ObjectSetInteger(0,nm,OBJPROP_COLOR,clrDeepSkyBlue);ObjectSetInteger(0,nm,OBJPROP_RAY_RIGHT,true);ObjectSetInteger(0,nm,OBJPROP_WIDTH,2);ObjectSetInteger(0,nm,OBJPROP_HIDDEN,true);}
- }
- ChartRedraw(0);
-}
-void STB_RenkoSetEnabled(bool enabled)
-{
- g_stbRenkoViewEnabled=enabled;g_stbRenkoLastBar=0;
- if(!enabled) STB_RenkoClear(); else STB_RenkoRender();
-}
+
 void STB_RenkoInit()
-{
- g_stbRenkoPrefix=g_prefix+"RENKO_";
- g_stbRenkoViewEnabled=InpShowRenkoTrendView;g_stbRenkoLastBar=0;
- if(g_stbRenkoViewEnabled) STB_RenkoRender(); else STB_RenkoClear();
-}
-#endif
+  {
+   g_stbRenkoPrefix = g_prefix + "RENKO_";
+   g_stbRenkoViewEnabled = InpShowRenkoTrendView;
+   g_stbRenkoLastBar = 0;
+
+   if(g_stbRenkoViewEnabled)
+      STB_RenkoRender();
+   else
+      STB_RenkoClear();
+  }
+
+#endif // STB_RENKO_TREND_VIEW_MQH
