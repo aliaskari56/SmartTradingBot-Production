@@ -8951,7 +8951,7 @@ int OnInit()
    CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",8,8,88,26,clrTomato);
    CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",8,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
-   CreateButton(g_prefix+"RENKO_VIEW","RENKO OFF",8,8,96,26,clrDimGray);
+   CreateButton(g_prefix+"RENKO_VIEW","RENKO ON",8,8,96,26,clrDarkSlateBlue);
    STB_RenkoInit();
 
    UpdateButtons();
