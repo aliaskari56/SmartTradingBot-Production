@@ -1294,7 +1294,11 @@ void STB_LogBuildReject(const string symbol,
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP REJECT LOG: diagnostic-state allocation failed symbol=",symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=symbol;
       g_diagnosticStates[idx].direction=direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -1338,7 +1342,11 @@ void STB_LogSetupReady(const Setup &s)
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP READY LOG: diagnostic-state allocation failed symbol=",s.symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=s.symbol;
       g_diagnosticStates[idx].direction=s.direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -2364,7 +2372,13 @@ bool EnsureIndicatorHandles(const string symbol,int &rsiHandle,int &cciHandle)
    if(idx<0)
      {
       int n=ArraySize(g_indicatorCache);
-      ArrayResize(g_indicatorCache,n+1);
+      if(ArrayResize(g_indicatorCache,n+1)!=n+1)
+        {
+         IndicatorRelease(hRsi);
+         IndicatorRelease(hCci);
+         Print("STB OSC: indicator-cache allocation failed symbol=",symbol);
+         return false;
+        }
       g_indicatorCache[n].symbol=symbol;
       g_indicatorCache[n].rsiHandle=hRsi;
       g_indicatorCache[n].cciHandle=hCci;
@@ -4542,7 +4556,11 @@ int STB_ExposureEnsure(const ulong ticket,const bool isPosition)
    if(idx<0)
      {
       idx=ArraySize(g_stbExposure);
-      ArrayResize(g_stbExposure,idx+1);
+      if(ArrayResize(g_stbExposure,idx+1)!=idx+1)
+        {
+         Print("STB exposure registry: allocation failed ticket=",IntegerToString((int)ticket));
+         return -1;
+        }
       g_stbExposure[idx].ticket=ticket;
       g_stbExposure[idx].manualOverride=false;
       g_stbExposure[idx].lastWriteCycle=0;
