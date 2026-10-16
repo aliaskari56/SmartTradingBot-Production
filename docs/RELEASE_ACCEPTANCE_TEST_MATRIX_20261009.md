@@ -48,7 +48,7 @@ Do not label the build production-ready until the exact source revision has a re
 | PND-TR-02 | Broker modify failure then recovery | Cause a temporary pending-order modify failure, then restore normal broker conditions while the same qualifying candle remains current | Retry respects backoff; success updates entry/SL and tracked extreme exactly once | NOT RUN |
 | PND-TR-03 | Benign Step/cooldown skip | Generate a qualifying candle whose proposal is below the configured step or inside the modify cooldown | No per-tick retry loop; candidate is consumed when no retry window remains | NOT RUN |
 | PND-TR-04 | Candle direction not eligible | Test bullish and bearish M5 candles against BUY STOP and SELL STOP eligibility rules | Non-qualifying candle is marked processed without modify; qualifying direction remains retryable on actual failure | NOT RUN |
-| PND-TR-05 | Allocation failure guards | Review all newly guarded dynamic-array append paths and, where practical, inject allocation failure in a test harness | No out-of-range write; clear error/status; scanner restores symbols it temporarily selected | STATIC REVIEW ONLY; FAILURE INJECTION NOT RUN |
+| PND-TR-05 | Allocation failure guards | Review all newly guarded dynamic-array append paths and, where practical, inject allocation failure in a test harness | No out-of-range write; clear error/status; scanner restores symbols it temporarily selected | STATIC REVIEW ONLY; FAILURE INJECTION NOT RUN |\n| PND-TR-06 | Malformed `EB` comment token | Recover a pending order whose comment contains `|EBabc`, an empty `|EB`, or a non-numeric token before the next delimiter | Parser uses the geometry-derived fallback instead of silently accepting `StringToDouble()`'s zero result | NOT RUN |
 
 ## D. Stop-loss and position management — release-critical
 
@@ -105,8 +105,8 @@ Do not label the build production-ready until the exact source revision has a re
 ## Current evidence summary
 
 - Candidate source blob: `b6b41d8ed06444934405f5da6f9aecf892460192` (Git blob identifier for `MQL5/Experts/SmartTradingBot_FINAL.mq5`, not raw-file SHA-256).
-- Candidate pending-trail include blob: `3c853a22c717c7bdbf465783ab9084ea98006367` (`MQL5/Include/STB/STB_PendingTrail.mqh`).
-- Candidate source-code commit: `7f9946b5c2f939060203ec4fe80150accd937c61` (commit SHA); later commits only updated documentation. MetaEditor CI run `38855780381` passed for this source tree; its artifact includes compiler log, EX5, and provenance manifest, pending independent manifest review.
+- Candidate pending-trail include blob: `9abfe98004607d2e81641c79c495017924799ee1` (`MQL5/Include/STB/STB_PendingTrail.mqh`); latest fix rejects malformed `EB` tags before numeric conversion.
+- Candidate source-code commit: `23c28d74f6ed40bccc63647c1eaca794550a0352` (commit SHA; malformed-`EB` parser fix). Earlier MetaEditor CI run `38855780381` passed before this latest include change; the latest compile for this commit must pass before the candidate can be considered build-verified. Artifact provenance still requires independent manifest review.
 - Verified static CI run `37950552410`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
 - The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
 - The resolver now enforces the active profit-lock floor, uses a deterministic no-SL fail-safe fallback where appropriate, and the flush only credits saved lock state after the actual SL meets the normalized lock target.
