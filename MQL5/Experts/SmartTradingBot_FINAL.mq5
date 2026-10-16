@@ -8530,7 +8530,7 @@ int TrailAllPendingOrdersNow()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-#include <STB\\STB_RenkoTrendView.mqh>
+#include <STB\STB_RenkoTrendView.mqh>
 
 void STB_UpdateControlBarLayout()
   {
@@ -8784,11 +8784,11 @@ bool ValidateInputs()
    if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
 
-   // Renko settings are validated only when this chart-only feature is enabled.
-   if(InpShowRenkoTrendView &&
-      (!MathIsValidNumber(InpRenkoBrickSizePoints) ||
-       InpRenkoBrickSizePoints<=0.0 ||
-       InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500))
+   // The RENKO button can enable this view at runtime, so validate its
+   // settings regardless of the initial input toggle state.
+   if(!MathIsValidNumber(InpRenkoBrickSizePoints) ||
+      InpRenkoBrickSizePoints<=0.0 ||
+      InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500)
       return false;
 
    // Reject NaN/Infinity for every floating-point input before range checks.
@@ -8797,6 +8797,7 @@ bool ValidateInputs()
       !MathIsValidNumber(InpScannerMinScore) ||
       !MathIsValidNumber(InpScannerMinTopGap) ||
       !MathIsValidNumber(InpManualPendingGapPips) ||
+      !MathIsValidNumber(InpRenkoBrickSizePoints) ||
       !MathIsValidNumber(InpRSIBuyLevel) ||
       !MathIsValidNumber(InpRSISellLevel) ||
       !MathIsValidNumber(InpCCIBuyLevel) ||
