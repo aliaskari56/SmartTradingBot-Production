@@ -6,6 +6,37 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
    int end=StringFind(comment,"|",start);
    string raw=(end>=0 ? StringSubstr(comment,start,end-start)
                       : StringSubstr(comment,start));
+
+   // StringToDouble() can turn malformed text such as "abc" into zero.
+   // Validate the complete token first so a corrupt EB tag cannot silently
+   // override the geometry-derived fallback with a zero-distance buffer.
+   int length=StringLen(raw);
+   if(length<=0)
+      return fallback;
+
+   bool hasDigit=false;
+   bool hasDecimalPoint=false;
+   for(int i=0;i<length;i++)
+   {
+      ushort ch=StringGetCharacter(raw,i);
+      if(ch>='0' && ch<='9')
+      {
+         hasDigit=true;
+         continue;
+      }
+
+      if(ch=='.' && !hasDecimalPoint)
+      {
+         hasDecimalPoint=true;
+         continue;
+      }
+
+      return fallback;
+   }
+
+   if(!hasDigit)
+      return fallback;
+
    double value=StringToDouble(raw);
    return (MathIsValidNumber(value) && value>=0.0) ? value:fallback;
 }
