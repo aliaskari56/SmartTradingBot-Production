@@ -1912,10 +1912,6 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
       return false;
 
-
-   if(newEntry<=0.0)
-      return false;
-
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
    datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
