@@ -17,14 +17,14 @@ input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
 input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
-input bool    InpAllowUniversal         = true;
+input bool    InpAllowUniversal         = false;
 input bool    InpOneSetupPerSymbol      = true;
 input string  InpScannerSymbols         = "";   // empty = selected Market Watch; comma/semicolon separated
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
-input double  InpScannerMinQuality        = 45.0;
-input double  InpScannerMinScore          = 55.0;
-input double  InpScannerMinTopGap         = 3.0;
+input double  InpScannerMinQuality        = 70.0;
+input double  InpScannerMinScore          = 75.0;
+input double  InpScannerMinTopGap         = 8.0;
 input int     InpScannerMaxWatchlist      = 50;
 input int     InpScannerTopN              = 10;
 input int     InpScannerMaxQuoteAgeSec    = 300;
@@ -45,7 +45,7 @@ input double  InpCCIBuyLevel                = 50.0;
 input double  InpCCISellLevel               = -50.0;
 input double  InpRSIWeight                  = 7.0;
 input double  InpCCIWeight                  = 8.0;
-input bool    InpOscillatorHardFilter       = false;
+input bool    InpOscillatorHardFilter       = true;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
@@ -87,13 +87,13 @@ input double  InpPipPointsOverride      = 0.0;  // 0 = automatic; >0 = points pe
 input double  InpSLBufferPips           = 1.0;
 input double  InpInitialSLBufferPips    = 2.0;  // automatic SL: distance beyond nearest confirmed swing
 input double  InpMaxInitialSLPips        = 0.0;  // 0 = disabled; strategy cap on Entry->SL distance (scalping)
-input double  InpMinimumRR              = 1.0;
+input double  InpMinimumRR              = 3.0;
 input int     InpMaxPendingBars         = 4;
 
 input group "=== FVG / OB ==="
 input bool    InpRequireFVG             = true;
 input bool    InpRequireOB              = true;
-input bool    InpStrictPatternFilters   = false; // true = FVG/OB mandatory; false = quality score only
+input bool    InpStrictPatternFilters   = true; // high-confidence mode requires FVG/OB
 input int     InpPatternWindowBars      = 12;
 
 input group "=== PROFIT PROTECTION ==="
@@ -774,10 +774,13 @@ double STB_EffectiveSLBuffer()
 //+------------------------------------------------------------------+
 double STB_EffectiveMinimumRR()
   {
+   // Hard entry policy: adaptive profiles and stale .set files may never
+   // lower the minimum reward-to-risk ratio below 3:1.
+   double configured=InpMinimumRR;
    if(g_activeAdaptiveProfileValid)
-      return g_activeAdaptiveProfile.minimumRR;
+      configured=MathMax(configured,g_activeAdaptiveProfile.minimumRR);
 
-   return InpMinimumRR;
+   return MathMax(3.0,configured);
   }
 
 //+------------------------------------------------------------------+
@@ -3258,6 +3261,25 @@ bool BuildSetup(const string symbol,
 
    if(InpStrictPatternFilters && InpRequireOB && !hasOB)
       return STB_BuildReject(symbol,direction,"OB_REQUIRED");
+
+   // Non-configurable high-confidence entry gate. A setup must have
+   // independent H4 trend, M15 oscillator, FVG and OB confirmation.
+   // If any evidence is missing or contradictory, do not place an order.
+   if(!aligned)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_H4_ALIGNMENT_REQUIRED");
+
+   if(!oscReady)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_DATA_REQUIRED");
+
+   if((direction>0 && !osc.buyConfirmed) ||
+      (direction<0 && !osc.sellConfirmed))
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_CONFIRMATION_REQUIRED");
+
+   if(!hasFVG)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_FVG_REQUIRED");
+
+   if(!hasOB)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_ORDER_BLOCK_REQUIRED");
 
    // If OB is optional and none is found, use the confirmed break swing as
    // the structural fallback. The mandatory-OB case already rejected above.
@@ -6986,7 +7008,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
       return false;
      }
 
-   if(q.score+1e-9<InpScannerMinQuality)
+   if(q.score+1e-9<MathMax(70.0,InpScannerMinQuality))
      {
       c.rejectReason="REJECT_QUALITY_SCORE_BELOW_MINIMUM";
       return false;
@@ -7704,7 +7726,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
       return false;
      }
 
-   if(q.score+1e-9<InpScannerMinQuality)
+   if(q.score+1e-9<MathMax(70.0,InpScannerMinQuality))
      {
       q.reason="REJECT_QUALITY_SCORE";
       return false;
@@ -8146,7 +8168,7 @@ void STB_ScannerRun()
          candidate.opportunityScore=
             MathMax(0.0,MathMin(100.0,candidate.opportunityScore));
 
-         if(candidate.opportunityScore+1e-9<InpScannerMinScore)
+         if(candidate.opportunityScore+1e-9<MathMax(75.0,InpScannerMinScore))
             continue;
 
          int idx=ArraySize(g_scannerCurrent);
@@ -8241,7 +8263,7 @@ void STB_ScannerRun()
       c.opportunityScore=
          MathMax(0.0,MathMin(100.0,c.opportunityScore));
 
-      if(c.opportunityScore+1e-9<InpScannerMinScore)
+      if(c.opportunityScore+1e-9<MathMax(75.0,InpScannerMinScore))
          continue;
 
       g_scannerWatchlist[validWatch]=c;
@@ -8295,11 +8317,11 @@ void STB_ScannerRun()
          diagnosticSecondScore=g_scannerTop10[1].opportunityScore;
       diagnosticScoreGap=diagnosticTopScore-diagnosticSecondScore;
 
-      bool clear=(diagnosticTopScore>=InpScannerMinScore);
+      bool clear=(diagnosticTopScore>=MathMax(75.0,InpScannerMinScore));
       if(!clear)
          confidenceReason="TOP_SCORE_BELOW_MIN";
       else if(g_scannerTop10Count>1 &&
-              diagnosticScoreGap<InpScannerMinTopGap)
+              diagnosticScoreGap<MathMax(8.0,InpScannerMinTopGap))
         {
          clear=false;
          confidenceReason="TOP_GAP_BELOW_MIN";
@@ -8369,8 +8391,8 @@ void STB_ScannerRun()
          " topScore=",DoubleToString(diagnosticTopScore,2),
          " secondScore=",DoubleToString(diagnosticSecondScore,2),
          " scoreGap=",DoubleToString(diagnosticScoreGap,2),
-         " requiredScore=",DoubleToString(InpScannerMinScore,2),
-         " requiredGap=",DoubleToString(InpScannerMinTopGap,2),
+         " requiredScore=",DoubleToString(MathMax(75.0,InpScannerMinScore),2),
+         " requiredGap=",DoubleToString(MathMax(8.0,InpScannerMinTopGap),2),
          " durationMs=",IntegerToString((int)elapsed));
   }
 
