@@ -117,7 +117,7 @@ input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance afte
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
 input group "=== RENKO + TRENDLINE VIEW ==="
-input bool    InpShowRenkoTrendView       = false;
+input bool    InpShowRenkoTrendView       = true;
 input double  InpRenkoBrickSizePoints     = 100.0;
 input int     InpRenkoBarsToDraw           = 120;
 
