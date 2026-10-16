@@ -1989,7 +1989,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
+   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
       return false;
 
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
