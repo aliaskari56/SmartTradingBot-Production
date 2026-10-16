@@ -1862,7 +1862,7 @@ bool STB_PendingEntryDirectionOK(const long orderType,const double curEntry,
    return false;
   }
 
-bool STB_PendingRiskFloorOK(const long orderType,const double curEntry,
+bool STB_PendingRiskFloorOK(const double curEntry,
                             const double curSL,const double newEntry,
                             const double newSL)
   {
@@ -1909,7 +1909,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
       return false;
 
-   if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
+   if(!STB_PendingRiskFloorOK(stbCurEntry,stbCurSL,newEntry,newSL))
       return false;
 
    ENUM_ORDER_TYPE_TIME typeTime=
@@ -2003,7 +2003,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
-      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+      !STB_PendingRiskFloorOK(latestEntry,latestSL,newEntry,newSL))
       return false;
 
    trade.SetExpertMagicNumber(InpMagic);
