@@ -2529,8 +2529,13 @@ int CollectSwings(const string symbol,
    if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
-   ArrayResize(highs,0);
-   ArrayResize(lows,0);
+   if(ArrayResize(highs,0)!=0 || ArrayResize(lows,0)!=0)
+     {
+      ArrayFree(highs);
+      ArrayFree(lows);
+      Print("STB SWING: failed to reset swing arrays symbol=",symbol);
+      return 0;
+     }
 
    int left  = STB_EffectiveSwingLeft(tf);
    int right = STB_EffectiveSwingRight(tf);
@@ -2570,7 +2575,13 @@ int CollectSwings(const string symbol,
       if(isHigh)
         {
          int n=ArraySize(highs);
-         ArrayResize(highs,n+1);
+         if(ArrayResize(highs,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: high-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          highs[n].shift=s;
          highs[n].time=r[s].time;
@@ -2581,7 +2592,13 @@ int CollectSwings(const string symbol,
       if(isLow)
         {
          int n=ArraySize(lows);
-         ArrayResize(lows,n+1);
+         if(ArrayResize(lows,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: low-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          lows[n].shift=s;
          lows[n].time=r[s].time;
