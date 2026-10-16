@@ -149,10 +149,7 @@ double STB_ProfitLockTriggerPips()
 double STB_ProfitLockLockPips()
   {
    // Mandatory policy value; stray .set / chart inputs must never change it.
-   double configured=STB_PROFIT_LOCK_MIN_PIPS;
-   if(configured<STB_PROFIT_LOCK_MIN_PIPS)
-      configured=STB_PROFIT_LOCK_MIN_PIPS;
-   return configured;
+   return STB_PROFIT_LOCK_MIN_PIPS;
   }
 
 //==================================================================
