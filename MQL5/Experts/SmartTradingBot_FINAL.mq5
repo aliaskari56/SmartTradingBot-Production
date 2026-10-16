@@ -1294,7 +1294,11 @@ void STB_LogBuildReject(const string symbol,
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP REJECT LOG: diagnostic-state allocation failed symbol=",symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=symbol;
       g_diagnosticStates[idx].direction=direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -1338,7 +1342,11 @@ void STB_LogSetupReady(const Setup &s)
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP READY LOG: diagnostic-state allocation failed symbol=",s.symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=s.symbol;
       g_diagnosticStates[idx].direction=s.direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -2364,7 +2372,13 @@ bool EnsureIndicatorHandles(const string symbol,int &rsiHandle,int &cciHandle)
    if(idx<0)
      {
       int n=ArraySize(g_indicatorCache);
-      ArrayResize(g_indicatorCache,n+1);
+      if(ArrayResize(g_indicatorCache,n+1)!=n+1)
+        {
+         IndicatorRelease(hRsi);
+         IndicatorRelease(hCci);
+         Print("STB OSC: indicator-cache allocation failed symbol=",symbol);
+         return false;
+        }
       g_indicatorCache[n].symbol=symbol;
       g_indicatorCache[n].rsiHandle=hRsi;
       g_indicatorCache[n].cciHandle=hCci;
@@ -2515,8 +2529,13 @@ int CollectSwings(const string symbol,
    if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
-   ArrayResize(highs,0);
-   ArrayResize(lows,0);
+   if(ArrayResize(highs,0)!=0 || ArrayResize(lows,0)!=0)
+     {
+      ArrayFree(highs);
+      ArrayFree(lows);
+      Print("STB SWING: failed to reset swing arrays symbol=",symbol);
+      return 0;
+     }
 
    int left  = STB_EffectiveSwingLeft(tf);
    int right = STB_EffectiveSwingRight(tf);
@@ -2556,7 +2575,13 @@ int CollectSwings(const string symbol,
       if(isHigh)
         {
          int n=ArraySize(highs);
-         ArrayResize(highs,n+1);
+         if(ArrayResize(highs,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: high-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          highs[n].shift=s;
          highs[n].time=r[s].time;
@@ -2567,7 +2592,13 @@ int CollectSwings(const string symbol,
       if(isLow)
         {
          int n=ArraySize(lows);
-         ArrayResize(lows,n+1);
+         if(ArrayResize(lows,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: low-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          lows[n].shift=s;
          lows[n].time=r[s].time;
@@ -4542,7 +4573,11 @@ int STB_ExposureEnsure(const ulong ticket,const bool isPosition)
    if(idx<0)
      {
       idx=ArraySize(g_stbExposure);
-      ArrayResize(g_stbExposure,idx+1);
+      if(ArrayResize(g_stbExposure,idx+1)!=idx+1)
+        {
+         Print("STB exposure registry: allocation failed ticket=",IntegerToString((int)ticket));
+         return -1;
+        }
       g_stbExposure[idx].ticket=ticket;
       g_stbExposure[idx].manualOverride=false;
       g_stbExposure[idx].lastWriteCycle=0;
@@ -6075,18 +6110,26 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // broker writer, regardless of which magic/EA created it.
 string g_stbLeaseSymbols[];
 
-void STB_LeaseTrackSymbol(const string symbol)
+bool STB_LeaseTrackSymbol(const string symbol)
   {
    if(symbol=="")
-      return;
+      return false;
 
    for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
       if(g_stbLeaseSymbols[i]==symbol)
-         return;
+         return true;
 
    int n=ArraySize(g_stbLeaseSymbols);
    if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
+     {
       g_stbLeaseSymbols[n]=symbol;
+      return true;
+     }
+
+   Print("STB lease tracking allocation failed; releasing symbol lease symbol=",symbol,
+         " err=",GetLastError());
+   STB_ReleaseSymbolManagement(symbol);
+   return false;
   }
 
 string STB_MgmtScopeKey(const string purpose,const string symbol)
@@ -6159,7 +6202,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
          return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6169,7 +6213,8 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6178,7 +6223,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
          return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -7887,7 +7933,12 @@ void STB_ScannerRun()
 
    if(prevCount>0)
      {
-      ArrayResize(g_scannerPrevious,prevCount);
+      if(ArrayResize(g_scannerPrevious,prevCount)!=prevCount)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: previous-snapshot allocation failed");
+         return;
+        }
       for(int p=0;p<prevCount;p++)
          g_scannerPrevious[p]=g_scannerCurrent[p];
      }
@@ -7909,11 +7960,16 @@ void STB_ScannerRun()
    g_scannerStatus="RUNNING";
 
    string symbols[];
-   ArrayResize(symbols,0);
+   ArrayFree(symbols);
 
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
      {
-      ArrayResize(symbols,1);
+      if(ArrayResize(symbols,1)!=1)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: tester symbol allocation failed");
+         return;
+        }
       symbols[0]=_Symbol;
      }
    else if(StringLen(InpScannerSymbols)>0)
@@ -7946,7 +8002,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: symbol-list allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -7962,7 +8023,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: Market Watch symbol allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -7970,7 +8036,12 @@ void STB_ScannerRun()
    g_scannerUniverseCount=ArraySize(symbols);
 
    bool wasSelected[];
-   ArrayResize(wasSelected,g_scannerUniverseCount);
+   if(ArrayResize(wasSelected,g_scannerUniverseCount)!=g_scannerUniverseCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: symbol-selection snapshot allocation failed");
+      return;
+     }
 
    for(int i=0;i<g_scannerUniverseCount;i++)
      {
@@ -8070,7 +8141,15 @@ void STB_ScannerRun()
             continue;
 
          int idx=ArraySize(g_scannerCurrent);
-         ArrayResize(g_scannerCurrent,idx+1);
+         if(ArrayResize(g_scannerCurrent,idx+1)!=idx+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: candidate allocation failed symbol=",symbol);
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+            return;
+           }
          g_scannerCurrent[idx]=candidate;
 
          if(direction>0)
@@ -8086,7 +8165,15 @@ void STB_ScannerRun()
    int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,50));
    int watchCount=MathMin(watchLimit,ArraySize(g_scannerCurrent));
 
-   ArrayResize(g_scannerWatchlist,watchCount);
+   if(ArrayResize(g_scannerWatchlist,watchCount)!=watchCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: watchlist allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<watchCount;i++)
       g_scannerWatchlist[i]=g_scannerCurrent[i];
@@ -8152,14 +8239,30 @@ void STB_ScannerRun()
       validWatch++;
      }
 
-   ArrayResize(g_scannerWatchlist,validWatch);
+   if(ArrayResize(g_scannerWatchlist,validWatch)!=validWatch)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: validated-watchlist resize failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
    STB_SortCandidates(g_scannerWatchlist);
    g_scannerWatchlistCount=ArraySize(g_scannerWatchlist);
 
    int topCount=MathMin(MathMax(1,InpScannerTopN),10);
    topCount=MathMin(topCount,g_scannerWatchlistCount);
 
-   ArrayResize(g_scannerTop10,topCount);
+   if(ArrayResize(g_scannerTop10,topCount)!=topCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: top-list allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<topCount;i++)
       g_scannerTop10[i]=g_scannerWatchlist[i];
