@@ -116,6 +116,11 @@ input double  InpTrailStartPips         = 150.0;
 input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance after +InpTrailStartPips, manual + EA
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
+input group "=== RENKO + TRENDLINE VIEW ==="
+input bool    InpShowRenkoTrendView       = false;
+input double  InpRenkoBrickSizePoints     = 100.0;
+input int     InpRenkoBarsToDraw           = 120;
+
 bool g_modifyWasNoChanges=false;
 
 //==================================================================
@@ -8525,6 +8530,8 @@ int TrailAllPendingOrdersNow()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+#include <STB\\STB_RenkoTrendView.mqh>
+
 void STB_UpdateControlBarLayout()
   {
 // EA control keys.
@@ -8536,19 +8543,14 @@ void STB_UpdateControlBarLayout()
    const int height=19;
    const int gap=2;
 
-   string names[8]=
+   string names[9]=
      {
-      g_prefix+"SAVE20",
-      g_prefix+"SELL_STOP",
-      g_prefix+"BUY_STOP",
-      g_prefix+"PEND_TRAIL",
-      g_prefix+"HEDGE",
-      g_prefix+"SELL_LIMIT",
-      g_prefix+"BUY_LIMIT",
-      g_prefix+"AUTO"
+      g_prefix+"SAVE20",g_prefix+"SELL_STOP",g_prefix+"BUY_STOP",
+      g_prefix+"PEND_TRAIL",g_prefix+"HEDGE",g_prefix+"SELL_LIMIT",
+      g_prefix+"BUY_LIMIT",g_prefix+"AUTO",g_prefix+"RENKO_VIEW"
      };
 
-   for(int i=0;i<8;i++)
+   for(int i=0;i<9;i++)
      {
       if(ObjectFind(0,names[i])<0)
          continue;
@@ -8575,6 +8577,7 @@ void UpdateButtons()
    string saveName=g_prefix+"SAVE20";
    string hedgeName=g_prefix+"HEDGE";
    string trailName=g_prefix+"PEND_TRAIL";
+   string renkoName=g_prefix+"RENKO_VIEW";
 
    ObjectSetString(0,buyName,OBJPROP_TEXT,"BUY STOP");
    ObjectSetInteger(0,buyName,OBJPROP_BGCOLOR,clrSeaGreen);
@@ -8602,6 +8605,9 @@ void UpdateButtons()
                    IntegerToString(CountManagedPendingOrders()));
    ObjectSetInteger(0,trailName,OBJPROP_BGCOLOR,clrSlateBlue);
    ObjectSetInteger(0,trailName,OBJPROP_COLOR,clrWhite);
+   ObjectSetString(0,renkoName,OBJPROP_TEXT,g_stbRenkoViewEnabled ? "RENKO ON" : "RENKO OFF");
+   ObjectSetInteger(0,renkoName,OBJPROP_BGCOLOR,g_stbRenkoViewEnabled ? clrDarkSlateBlue : clrDimGray);
+   ObjectSetInteger(0,renkoName,OBJPROP_COLOR,clrWhite);
   }
 
 //==================================================================
@@ -8938,6 +8944,8 @@ int OnInit()
    CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",8,8,88,26,clrTomato);
    CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",8,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
+   CreateButton(g_prefix+"RENKO_VIEW","RENKO OFF",8,8,96,26,clrDimGray);
+   STB_RenkoInit();
 
    UpdateButtons();
     ResetLastError();
@@ -9061,6 +9069,8 @@ void OnDeinit(const int reason)
    ObjectDelete(0,g_prefix+"SELL_LIMIT");
    ObjectDelete(0,g_prefix+"BUY_LIMIT");
    ObjectDelete(0,g_prefix+"PEND_TRAIL");
+   ObjectDelete(0,g_prefix+"RENKO_VIEW");
+   STB_RenkoClear();
    ObjectDelete(0,g_prefix+"H4_TRENDLINE");
    ObjectDelete(0,g_prefix+"TF_TREND_BASE");
    ObjectDelete(0,g_prefix+"TF_TREND_EXT");
@@ -9340,6 +9350,7 @@ void OnTimer()
      }
    UpdatePanel();
    UpdateButtons();
+   STB_RenkoRender();
   }
 
 //==================================================================
@@ -9620,6 +9631,7 @@ void OnChartEvent(const int id,
    string sellLimitName=g_prefix+"SELL_LIMIT";
    string buyLimitName=g_prefix+"BUY_LIMIT";
    string trailName=g_prefix+"PEND_TRAIL";
+   string renkoName=g_prefix+"RENKO_VIEW";
 
    if(sparam==buyName)
      {
@@ -9705,6 +9717,15 @@ void OnChartEvent(const int id,
       ChartRedraw(0);
       return;
      }
+   if(sparam==renkoName)
+     {
+      STB_RenkoSetEnabled(!g_stbRenkoViewEnabled);
+      g_dashboardLastAction=g_stbRenkoViewEnabled ? "RENKO VIEW ENABLED" : "RENKO VIEW DISABLED";
+      UpdateButtons();
+      ChartRedraw(0);
+      return;
+     }
+
    if(sparam==trailName)
      {
       int moved=TrailAllPendingOrdersNow();
