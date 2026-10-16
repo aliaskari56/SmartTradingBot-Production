@@ -3268,6 +3268,9 @@ bool BuildSetup(const string symbol,
    if(!aligned)
       return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_H4_ALIGNMENT_REQUIRED");
 
+   if(!InpOscillatorConfirmation)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_FILTER_DISABLED");
+
    if(!oscReady)
       return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_DATA_REQUIRED");
 
