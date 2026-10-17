@@ -1985,8 +1985,6 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
-   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
-      return false;
 
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double latestSL=OrderGetDouble(ORDER_SL);
@@ -3809,24 +3807,32 @@ bool STB_IsSymbolAllowed(const string s)
      }
 
    return false;
-  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
+  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; }
+
+// Management scope is intentionally broader than scanner/entry scope.
+// Live mode manages every account symbol; tester chart-only isolation remains
+// an explicit test boundary. Scanner symbol filters must not strand exposure.
+bool STB_IsManagementSymbolAllowed(const string s)
+  {
+   if(s=="")
+      return false;
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+      return s==_Symbol;
+   return true;
+  }
+
+bool STB_IsProtectionPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
-   // Live protection covers all account positions regardless of origin/symbol.
-   // Respect the explicit chart-only isolation setting in Strategy Tester.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return PositionGetString(POSITION_SYMBOL)==_Symbol;
-   return true;
+   return STB_IsManagementSymbolAllowed(PositionGetString(POSITION_SYMBOL));
   }
 
 bool IsManagedPosition(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
-   return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
-
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   return STB_IsManagementSymbolAllowed(PositionGetString(POSITION_SYMBOL));
   }
 
 //+------------------------------------------------------------------+
@@ -3834,11 +3840,11 @@ bool IsManagedPosition(const ulong ticket)
 //+------------------------------------------------------------------+
 bool IsManagedOrder(const ulong ticket)
   {
-   if(ticket==0 || !OrderSelect(ticket)) return false;
-   return STB_IsSymbolAllowed(OrderGetString(ORDER_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
-
+   if(ticket==0 || !OrderSelect(ticket))
+      return false;
+   if(!STB_IsManagedPendingType(OrderGetInteger(ORDER_TYPE)))
+      return false;
+   return STB_IsManagementSymbolAllowed(OrderGetString(ORDER_SYMBOL));
   }
 
 // Exposure deduplication is scoped to this EA instance by Magic Number.
