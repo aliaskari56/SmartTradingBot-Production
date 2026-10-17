@@ -622,11 +622,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
    datetime candidateClosedBar=0;
-   datetime closedBar=0;
    bool initialStopAnchor=false;
    if(candleStop)
      {
-      closedBar=iTime(symbol,PERIOD_M5,1);
+      datetime closedBar=iTime(symbol,PERIOD_M5,1);
       if(closedBar<=0 ||
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
@@ -680,7 +679,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    {
       // This closed candle is fully evaluated; there is no candidate to retry.
       if(candidateClosedBar>0)
-         g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+         g_stbPendingTrail[idx].lastProcessedM5Bar=candidateClosedBar;
       // 2) No new extreme -> NO MODIFY (rate-limited).
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
