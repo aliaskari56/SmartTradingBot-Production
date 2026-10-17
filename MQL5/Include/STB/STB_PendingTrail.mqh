@@ -51,8 +51,9 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
-//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - BUY STOP: each new closed M5 lower low drives trailing      |
+//|   - SELL STOP: each new closed M5 higher high drives trailing    |
+//|   - initial/recovered STOPs immediately anchor to latest M5 bar  |
 //|   - other pending types retain live Bid/Ask extreme trailing     |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
@@ -364,7 +365,13 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.lastSL=currentSL;
    st.lastModifyTime=0;
    st.lastNoNewExtremeLogBar=0;
-   st.lastProcessedM5Bar=iTime(symbol,PERIOD_M5,1);
+   // STOP orders must immediately re-anchor to the latest closed M5
+   // candle on registration/recovery, then continue only on new closed bars.
+   // Zero means the initial candle still needs to be applied.
+   st.lastProcessedM5Bar=
+      (orderType==(long)ORDER_TYPE_BUY_STOP ||
+       orderType==(long)ORDER_TYPE_SELL_STOP)
+      ? 0 : iTime(symbol,PERIOD_M5,1);
    st.lastFailLogBar=0;
    st.lastProcessedCycle=-1;
    st.entryBufferPips=entryBufferPips;
@@ -607,12 +614,15 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       TimeCurrent()<g_stbPendingTrail[idx].nextRetryTime)
       return true;
 
-   // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
-   // BUY STOP moves only after a bearish M5 candle and anchors to its low.
-   // SELL STOP moves only after a bullish M5 candle and anchors to its high.
+   // 1) STOP orders follow closed M5 extremes, never transient ticks.
+   // BUY STOP follows every new lower low, regardless of candle body color.
+   // SELL STOP follows every new higher high, regardless of candle body color.
+   // On first registration/recovery, immediately apply the latest closed bar.
+   // Once no new extreme is made, trailing naturally stops until a new extreme.
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
    datetime candidateClosedBar=0;
+   bool initialStopAnchor=false;
    if(candleStop)
      {
       datetime closedBar=iTime(symbol,PERIOD_M5,1);
@@ -620,35 +630,15 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
 
-      double barOpen=iOpen(symbol,PERIOD_M5,1);
-      double barClose=iClose(symbol,PERIOD_M5,1);
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
-      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+      if(barLow<=0.0 || barHigh<=0.0)
          return true;
 
-      // Retain the candidate bar until a qualifying update succeeds; a failed
-      // resolver/broker request can then retry this same closed candle.
+      // Keep this bar eligible until a valid geometry update succeeds.
       candidateClosedBar=closedBar;
-
-      if(orderType==(long)ORDER_TYPE_BUY_STOP)
-        {
-         if(barClose>=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            return true; // only a completed bearish candle may move BUY STOP down
-           }
-         extreme=barLow;
-        }
-      else
-        {
-         if(barClose<=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            return true; // only a completed bullish candle may move SELL STOP up
-           }
-         extreme=barHigh;
-        }
+      initialStopAnchor=(g_stbPendingTrail[idx].lastProcessedM5Bar<=0);
+      extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);
      }
    else
      {
@@ -664,7 +654,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // P4 monotonic trackedExtreme: BUY side only moves down, SELL side only up.
    bool isNewExtreme=false;
 
-   if(direction>0)
+   if(initialStopAnchor)
+      isNewExtreme=true; // force first alignment to the latest closed M5 candle
+   else if(direction>0)
       isNewExtreme=(extreme < g_stbPendingTrail[idx].trackedExtreme-point*0.5);
    else
       isNewExtreme=(extreme > g_stbPendingTrail[idx].trackedExtreme+point*0.5);
@@ -683,13 +675,36 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // 3) Build a PROPOSAL: resolve entry + SL via the immutable metadata.
    STBPendingResolution res;
 
+   // For BUY STOP / SELL STOP, keep the SL beyond the candle's
+   // structural low/high, not merely beyond the pending entry. Account for
+   // current spread and broker stop distance before resolving the geometry.
+   double proposalSLBufferPips=g_stbPendingTrail[idx].slBufferPips;
+   if(candleStop)
+     {
+      MqlTick trailTick;
+      double pip=PipSize(symbol);
+      double pointSize=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double minDistance=TradeMinDistance(symbol);
+      if(!SymbolInfoTick(symbol,trailTick) || pip<=0.0 ||
+         pointSize<=0.0 || minDistance<=0.0)
+         return true;
+
+      double spread=MathMax(0.0,trailTick.ask-trailTick.bid);
+      double effectiveEntryOffset=MathMax(
+         g_stbPendingTrail[idx].entryBufferPips*pip,
+         spread+minDistance+pointSize);
+      double requiredSLBuffer=(effectiveEntryOffset+
+                               minDistance+pointSize)/pip;
+      proposalSLBufferPips=MathMax(proposalSLBufferPips,requiredSLBuffer);
+     }
+
    bool resolved=
       STB_ResolvePendingDistance(symbol,
                                  (ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType,
                                  extreme,
                                  g_stbPendingTrail[idx].entryBufferPips,
                                  res,
-                                 g_stbPendingTrail[idx].slBufferPips);
+                                 proposalSLBufferPips);
 
    if(!resolved || !res.valid)
    {
