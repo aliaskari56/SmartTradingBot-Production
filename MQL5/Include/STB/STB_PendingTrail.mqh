@@ -622,10 +622,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
    datetime candidateClosedBar=0;
+   datetime closedBar=0;
    bool initialStopAnchor=false;
    if(candleStop)
      {
-      datetime closedBar=iTime(symbol,PERIOD_M5,1);
+      closedBar=iTime(symbol,PERIOD_M5,1);
       if(closedBar<=0 ||
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
