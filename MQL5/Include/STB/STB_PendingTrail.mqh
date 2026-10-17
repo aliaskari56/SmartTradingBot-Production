@@ -630,9 +630,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
 
+      double barOpen=iOpen(symbol,PERIOD_M5,1);
+      double barClose=iClose(symbol,PERIOD_M5,1);
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
-      if(barLow<=0.0 || barHigh<=0.0)
+      // Validate the complete closed candle snapshot, but do not gate trailing
+      // on candle body color: the new low/high is the actual trailing signal.
+      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
          return true;
 
       // Keep this bar eligible until a valid geometry update succeeds.
