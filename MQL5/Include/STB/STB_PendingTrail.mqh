@@ -470,9 +470,12 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
       now<g_stbPendingTrail[idx].lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC)
       return false;
 
-   // Step gate: skip a proposal whose protection improvement is below the
-   // configured meaningful step (existing input, no new input introduced).
-   if(OrderSelect(ticket) && pip>0.0)
+   // Closed-M5 BUY STOP / SELL STOP candidates are already rate-limited
+   // to one fresh candle, with bounded retry on failure. Do not apply the
+   // generic pip-step gate to them: it can consume a valid candle forever
+   // when both Entry and SL move less than InpTrailStepPips.
+   // Keep the existing step gate for other pending-order types.
+   if(!candleStop && OrderSelect(ticket) && pip>0.0)
    {
       double step=MathMax(0.0,InpTrailStepPips)*pip;
       double curEntry=OrderGetDouble(ORDER_PRICE_OPEN);
