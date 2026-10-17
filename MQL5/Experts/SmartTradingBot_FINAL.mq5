@@ -17,14 +17,14 @@ input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
 input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
-input bool    InpAllowUniversal         = true;
+input bool    InpAllowUniversal         = false;
 input bool    InpOneSetupPerSymbol      = true;
 input string  InpScannerSymbols         = "";   // empty = selected Market Watch; comma/semicolon separated
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
-input double  InpScannerMinQuality        = 45.0;
-input double  InpScannerMinScore          = 55.0;
-input double  InpScannerMinTopGap         = 3.0;
+input double  InpScannerMinQuality        = 70.0;
+input double  InpScannerMinScore          = 75.0;
+input double  InpScannerMinTopGap         = 8.0;
 input int     InpScannerMaxWatchlist      = 50;
 input int     InpScannerTopN              = 10;
 input int     InpScannerMaxQuoteAgeSec    = 300;
@@ -45,7 +45,7 @@ input double  InpCCIBuyLevel                = 50.0;
 input double  InpCCISellLevel               = -50.0;
 input double  InpRSIWeight                  = 7.0;
 input double  InpCCIWeight                  = 8.0;
-input bool    InpOscillatorHardFilter       = false;
+input bool    InpOscillatorHardFilter       = true;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
@@ -87,13 +87,13 @@ input double  InpPipPointsOverride      = 0.0;  // 0 = automatic; >0 = points pe
 input double  InpSLBufferPips           = 1.0;
 input double  InpInitialSLBufferPips    = 2.0;  // automatic SL: distance beyond nearest confirmed swing
 input double  InpMaxInitialSLPips        = 0.0;  // 0 = disabled; strategy cap on Entry->SL distance (scalping)
-input double  InpMinimumRR              = 1.0;
+input double  InpMinimumRR              = 3.0;
 input int     InpMaxPendingBars         = 4;
 
 input group "=== FVG / OB ==="
 input bool    InpRequireFVG             = true;
 input bool    InpRequireOB              = true;
-input bool    InpStrictPatternFilters   = false; // true = FVG/OB mandatory; false = quality score only
+input bool    InpStrictPatternFilters   = true; // high-confidence mode requires FVG/OB
 input int     InpPatternWindowBars      = 12;
 
 input group "=== PROFIT PROTECTION ==="
@@ -115,6 +115,11 @@ input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
 input double  InpTrailStartPips         = 150.0;
 input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance after +InpTrailStartPips, manual + EA
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
+
+input group "=== RENKO + TRENDLINE VIEW ==="
+input bool    InpShowRenkoTrendView       = true;
+input double  InpRenkoBrickSizePoints     = 100.0;
+input int     InpRenkoBarsToDraw           = 120;
 
 bool g_modifyWasNoChanges=false;
 
@@ -144,10 +149,7 @@ double STB_ProfitLockTriggerPips()
 double STB_ProfitLockLockPips()
   {
    // Mandatory policy value; stray .set / chart inputs must never change it.
-   double configured=STB_PROFIT_LOCK_MIN_PIPS;
-   if(configured<STB_PROFIT_LOCK_MIN_PIPS)
-      configured=STB_PROFIT_LOCK_MIN_PIPS;
-   return configured;
+   return STB_PROFIT_LOCK_MIN_PIPS;
   }
 
 //==================================================================
@@ -772,10 +774,13 @@ double STB_EffectiveSLBuffer()
 //+------------------------------------------------------------------+
 double STB_EffectiveMinimumRR()
   {
+   // Hard entry policy: adaptive profiles and stale .set files may never
+   // lower the minimum reward-to-risk ratio below 3:1.
+   double configured=InpMinimumRR;
    if(g_activeAdaptiveProfileValid)
-      return g_activeAdaptiveProfile.minimumRR;
+      configured=MathMax(configured,g_activeAdaptiveProfile.minimumRR);
 
-   return InpMinimumRR;
+   return MathMax(3.0,configured);
   }
 
 //+------------------------------------------------------------------+
@@ -1294,7 +1299,11 @@ void STB_LogBuildReject(const string symbol,
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP REJECT LOG: diagnostic-state allocation failed symbol=",symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=symbol;
       g_diagnosticStates[idx].direction=direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -1338,7 +1347,11 @@ void STB_LogSetupReady(const Setup &s)
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB SETUP READY LOG: diagnostic-state allocation failed symbol=",s.symbol);
+         return;
+        }
       g_diagnosticStates[idx].symbol=s.symbol;
       g_diagnosticStates[idx].direction=s.direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -1849,7 +1862,7 @@ bool STB_PendingEntryDirectionOK(const long orderType,const double curEntry,
    return false;
   }
 
-bool STB_PendingRiskFloorOK(const long orderType,const double curEntry,
+bool STB_PendingRiskFloorOK(const double curEntry,
                             const double curSL,const double newEntry,
                             const double newSL)
   {
@@ -1896,11 +1909,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
       return false;
 
-   if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
-      return false;
-
-
-   if(newEntry<=0.0)
+   if(!STB_PendingRiskFloorOK(stbCurEntry,stbCurSL,newEntry,newSL))
       return false;
 
    ENUM_ORDER_TYPE_TIME typeTime=
@@ -1976,8 +1985,6 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
-      return false;
 
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double latestSL=OrderGetDouble(ORDER_SL);
@@ -1994,7 +2001,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
-      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+      !STB_PendingRiskFloorOK(latestEntry,latestSL,newEntry,newSL))
       return false;
 
    trade.SetExpertMagicNumber(InpMagic);
@@ -2364,7 +2371,13 @@ bool EnsureIndicatorHandles(const string symbol,int &rsiHandle,int &cciHandle)
    if(idx<0)
      {
       int n=ArraySize(g_indicatorCache);
-      ArrayResize(g_indicatorCache,n+1);
+      if(ArrayResize(g_indicatorCache,n+1)!=n+1)
+        {
+         IndicatorRelease(hRsi);
+         IndicatorRelease(hCci);
+         Print("STB OSC: indicator-cache allocation failed symbol=",symbol);
+         return false;
+        }
       g_indicatorCache[n].symbol=symbol;
       g_indicatorCache[n].rsiHandle=hRsi;
       g_indicatorCache[n].cciHandle=hCci;
@@ -2515,8 +2528,13 @@ int CollectSwings(const string symbol,
    if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
-   ArrayResize(highs,0);
-   ArrayResize(lows,0);
+   if(ArrayResize(highs,0)!=0 || ArrayResize(lows,0)!=0)
+     {
+      ArrayFree(highs);
+      ArrayFree(lows);
+      Print("STB SWING: failed to reset swing arrays symbol=",symbol);
+      return 0;
+     }
 
    int left  = STB_EffectiveSwingLeft(tf);
    int right = STB_EffectiveSwingRight(tf);
@@ -2556,7 +2574,13 @@ int CollectSwings(const string symbol,
       if(isHigh)
         {
          int n=ArraySize(highs);
-         ArrayResize(highs,n+1);
+         if(ArrayResize(highs,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: high-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          highs[n].shift=s;
          highs[n].time=r[s].time;
@@ -2567,7 +2591,13 @@ int CollectSwings(const string symbol,
       if(isLow)
         {
          int n=ArraySize(lows);
-         ArrayResize(lows,n+1);
+         if(ArrayResize(lows,n+1)!=n+1)
+           {
+            ArrayFree(highs);
+            ArrayFree(lows);
+            Print("STB SWING: low-pivot allocation failed symbol=",symbol);
+            return 0;
+           }
 
          lows[n].shift=s;
          lows[n].time=r[s].time;
@@ -3200,7 +3230,18 @@ bool BuildSetup(const string symbol,
    int maxAge=STB_EffectiveMaxSetupAgeBars();
 
    if(maxAge>0 && bosShift>maxAge)
+     {
+      Print("STB SETUP REJECT DETAIL",
+            " symbol=",symbol,
+            " dir=",(direction>0 ? "BUY":"SELL"),
+            " reason=BOS_TOO_OLD",
+            " bosShift=",IntegerToString(bosShift),
+            " maxAgeBars=",IntegerToString(maxAge),
+            " timeframe=M15",
+            " profile=",(g_activeAdaptiveProfileValid ?
+                          IntegerToString(g_activeAdaptiveProfile.id) : "INPUT"));
       return STB_BuildReject(symbol,direction,"BOS_TOO_OLD");
+     }
 
    int fvgShift=-1;
    bool hasFVG=FindFVG(symbol,direction,bosShift,fvgShift);
@@ -3218,6 +3259,28 @@ bool BuildSetup(const string symbol,
 
    if(InpStrictPatternFilters && InpRequireOB && !hasOB)
       return STB_BuildReject(symbol,direction,"OB_REQUIRED");
+
+   // Non-configurable high-confidence entry gate. A setup must have
+   // independent H4 trend, M15 oscillator, FVG and OB confirmation.
+   // If any evidence is missing or contradictory, do not place an order.
+   if(!aligned)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_H4_ALIGNMENT_REQUIRED");
+
+   if(!InpOscillatorConfirmation)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_FILTER_DISABLED");
+
+   if(!oscReady)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_DATA_REQUIRED");
+
+   if((direction>0 && !osc.buyConfirmed) ||
+      (direction<0 && !osc.sellConfirmed))
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_OSCILLATOR_CONFIRMATION_REQUIRED");
+
+   if(!hasFVG)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_FVG_REQUIRED");
+
+   if(!hasOB)
+      return STB_BuildReject(symbol,direction,"HIGH_CONFIDENCE_ORDER_BLOCK_REQUIRED");
 
    // If OB is optional and none is found, use the confirmed break swing as
    // the structural fallback. The mandatory-OB case already rejected above.
@@ -3744,24 +3807,32 @@ bool STB_IsSymbolAllowed(const string s)
      }
 
    return false;
-  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
+  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; }
+
+// Management scope is intentionally broader than scanner/entry scope.
+// Live mode manages every account symbol; tester chart-only isolation remains
+// an explicit test boundary. Scanner symbol filters must not strand exposure.
+bool STB_IsManagementSymbolAllowed(const string s)
+  {
+   if(s=="")
+      return false;
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+      return s==_Symbol;
+   return true;
+  }
+
+bool STB_IsProtectionPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
-   // Live protection covers all account positions regardless of origin/symbol.
-   // Respect the explicit chart-only isolation setting in Strategy Tester.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return PositionGetString(POSITION_SYMBOL)==_Symbol;
-   return true;
+   return STB_IsManagementSymbolAllowed(PositionGetString(POSITION_SYMBOL));
   }
 
 bool IsManagedPosition(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
-   return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
-
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   return STB_IsManagementSymbolAllowed(PositionGetString(POSITION_SYMBOL));
   }
 
 //+------------------------------------------------------------------+
@@ -3769,11 +3840,11 @@ bool IsManagedPosition(const ulong ticket)
 //+------------------------------------------------------------------+
 bool IsManagedOrder(const ulong ticket)
   {
-   if(ticket==0 || !OrderSelect(ticket)) return false;
-   return STB_IsSymbolAllowed(OrderGetString(ORDER_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
-
+   if(ticket==0 || !OrderSelect(ticket))
+      return false;
+   if(!STB_IsManagedPendingType(OrderGetInteger(ORDER_TYPE)))
+      return false;
+   return STB_IsManagementSymbolAllowed(OrderGetString(ORDER_SYMBOL));
   }
 
 // Exposure deduplication is scoped to this EA instance by Magic Number.
@@ -4542,7 +4613,11 @@ int STB_ExposureEnsure(const ulong ticket,const bool isPosition)
    if(idx<0)
      {
       idx=ArraySize(g_stbExposure);
-      ArrayResize(g_stbExposure,idx+1);
+      if(ArrayResize(g_stbExposure,idx+1)!=idx+1)
+        {
+         Print("STB exposure registry: allocation failed ticket=",IntegerToString((int)ticket));
+         return -1;
+        }
       g_stbExposure[idx].ticket=ticket;
       g_stbExposure[idx].manualOverride=false;
       g_stbExposure[idx].lastWriteCycle=0;
@@ -6075,18 +6150,26 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // broker writer, regardless of which magic/EA created it.
 string g_stbLeaseSymbols[];
 
-void STB_LeaseTrackSymbol(const string symbol)
+bool STB_LeaseTrackSymbol(const string symbol)
   {
    if(symbol=="")
-      return;
+      return false;
 
    for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
       if(g_stbLeaseSymbols[i]==symbol)
-         return;
+         return true;
 
    int n=ArraySize(g_stbLeaseSymbols);
    if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
+     {
       g_stbLeaseSymbols[n]=symbol;
+      return true;
+     }
+
+   Print("STB lease tracking allocation failed; releasing symbol lease symbol=",symbol,
+         " err=",GetLastError());
+   STB_ReleaseSymbolManagement(symbol);
+   return false;
   }
 
 string STB_MgmtScopeKey(const string purpose,const string symbol)
@@ -6159,7 +6242,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
          return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6169,7 +6253,8 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6178,7 +6263,8 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
          return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+         return false;
       return true;
      }
 
@@ -6931,7 +7017,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
       return false;
      }
 
-   if(q.score+1e-9<InpScannerMinQuality)
+   if(q.score+1e-9<MathMax(70.0,InpScannerMinQuality))
      {
       c.rejectReason="REJECT_QUALITY_SCORE_BELOW_MINIMUM";
       return false;
@@ -7649,7 +7735,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
       return false;
      }
 
-   if(q.score+1e-9<InpScannerMinQuality)
+   if(q.score+1e-9<MathMax(70.0,InpScannerMinQuality))
      {
       q.reason="REJECT_QUALITY_SCORE";
       return false;
@@ -7887,7 +7973,12 @@ void STB_ScannerRun()
 
    if(prevCount>0)
      {
-      ArrayResize(g_scannerPrevious,prevCount);
+      if(ArrayResize(g_scannerPrevious,prevCount)!=prevCount)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: previous-snapshot allocation failed");
+         return;
+        }
       for(int p=0;p<prevCount;p++)
          g_scannerPrevious[p]=g_scannerCurrent[p];
      }
@@ -7909,11 +8000,16 @@ void STB_ScannerRun()
    g_scannerStatus="RUNNING";
 
    string symbols[];
-   ArrayResize(symbols,0);
+   ArrayFree(symbols);
 
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
      {
-      ArrayResize(symbols,1);
+      if(ArrayResize(symbols,1)!=1)
+        {
+         g_scannerStatus="ALLOCATION_FAILED";
+         Print("STB SCANNER: tester symbol allocation failed");
+         return;
+        }
       symbols[0]=_Symbol;
      }
    else if(StringLen(InpScannerSymbols)>0)
@@ -7946,7 +8042,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: symbol-list allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -7962,7 +8063,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: Market Watch symbol allocation failed symbol=",symbol);
+            return;
+           }
          symbols[n]=symbol;
         }
      }
@@ -7970,7 +8076,12 @@ void STB_ScannerRun()
    g_scannerUniverseCount=ArraySize(symbols);
 
    bool wasSelected[];
-   ArrayResize(wasSelected,g_scannerUniverseCount);
+   if(ArrayResize(wasSelected,g_scannerUniverseCount)!=g_scannerUniverseCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: symbol-selection snapshot allocation failed");
+      return;
+     }
 
    for(int i=0;i<g_scannerUniverseCount;i++)
      {
@@ -8066,11 +8177,19 @@ void STB_ScannerRun()
          candidate.opportunityScore=
             MathMax(0.0,MathMin(100.0,candidate.opportunityScore));
 
-         if(candidate.opportunityScore+1e-9<InpScannerMinScore)
+         if(candidate.opportunityScore+1e-9<MathMax(75.0,InpScannerMinScore))
             continue;
 
          int idx=ArraySize(g_scannerCurrent);
-         ArrayResize(g_scannerCurrent,idx+1);
+         if(ArrayResize(g_scannerCurrent,idx+1)!=idx+1)
+           {
+            g_scannerStatus="ALLOCATION_FAILED";
+            Print("STB SCANNER: candidate allocation failed symbol=",symbol);
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+            return;
+           }
          g_scannerCurrent[idx]=candidate;
 
          if(direction>0)
@@ -8086,7 +8205,15 @@ void STB_ScannerRun()
    int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,50));
    int watchCount=MathMin(watchLimit,ArraySize(g_scannerCurrent));
 
-   ArrayResize(g_scannerWatchlist,watchCount);
+   if(ArrayResize(g_scannerWatchlist,watchCount)!=watchCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: watchlist allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<watchCount;i++)
       g_scannerWatchlist[i]=g_scannerCurrent[i];
@@ -8145,21 +8272,37 @@ void STB_ScannerRun()
       c.opportunityScore=
          MathMax(0.0,MathMin(100.0,c.opportunityScore));
 
-      if(c.opportunityScore+1e-9<InpScannerMinScore)
+      if(c.opportunityScore+1e-9<MathMax(75.0,InpScannerMinScore))
          continue;
 
       g_scannerWatchlist[validWatch]=c;
       validWatch++;
      }
 
-   ArrayResize(g_scannerWatchlist,validWatch);
+   if(ArrayResize(g_scannerWatchlist,validWatch)!=validWatch)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: validated-watchlist resize failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
    STB_SortCandidates(g_scannerWatchlist);
    g_scannerWatchlistCount=ArraySize(g_scannerWatchlist);
 
    int topCount=MathMin(MathMax(1,InpScannerTopN),10);
    topCount=MathMin(topCount,g_scannerWatchlistCount);
 
-   ArrayResize(g_scannerTop10,topCount);
+   if(ArrayResize(g_scannerTop10,topCount)!=topCount)
+     {
+      g_scannerStatus="ALLOCATION_FAILED";
+      Print("STB SCANNER: top-list allocation failed");
+         for(int restore=0;restore<ArraySize(symbols) && restore<ArraySize(wasSelected);restore++)
+            if(!wasSelected[restore] && !STB_HasSymbolExposureForManagement(symbols[restore]))
+               SymbolSelect(symbols[restore],false);
+      return;
+     }
 
    for(int i=0;i<topCount;i++)
       g_scannerTop10[i]=g_scannerWatchlist[i];
@@ -8167,15 +8310,33 @@ void STB_ScannerRun()
    STB_SortCandidates(g_scannerTop10);
    g_scannerTop10Count=ArraySize(g_scannerTop10);
 
+   string confidenceReason="NO_CANDIDATES";
+   string diagnosticTopSymbol="";
+   double diagnosticTopScore=0.0;
+   double diagnosticSecondScore=0.0;
+   double diagnosticScoreGap=0.0;
+
    if(g_scannerTop10Count<=0)
       g_scannerConfidence="NO_CLEAR_WINNER";
    else
      {
-      double topScore=g_scannerTop10[0].opportunityScore;
-      bool clear=(topScore>=InpScannerMinScore);
+      diagnosticTopSymbol=g_scannerTop10[0].symbol;
+      diagnosticTopScore=g_scannerTop10[0].opportunityScore;
+      if(g_scannerTop10Count>1)
+         diagnosticSecondScore=g_scannerTop10[1].opportunityScore;
+      diagnosticScoreGap=diagnosticTopScore-diagnosticSecondScore;
 
-      if(clear && g_scannerTop10Count>1)
-         clear=(topScore-g_scannerTop10[1].opportunityScore)>=InpScannerMinTopGap;
+      bool clear=(diagnosticTopScore>=MathMax(75.0,InpScannerMinScore));
+      if(!clear)
+         confidenceReason="TOP_SCORE_BELOW_MIN";
+      else if(g_scannerTop10Count>1 &&
+              diagnosticScoreGap<MathMax(8.0,InpScannerMinTopGap))
+        {
+         clear=false;
+         confidenceReason="TOP_GAP_BELOW_MIN";
+        }
+      else
+         confidenceReason="THRESHOLDS_MET";
 
       g_scannerConfidence=(clear ? "CLEAR":"WEAK");
      }
@@ -8234,6 +8395,13 @@ void STB_ScannerRun()
          " watchlist=",IntegerToString(g_scannerWatchlistCount),
          " top10=",IntegerToString(g_scannerTop10Count),
          " confidence=",g_scannerConfidence,
+         " confidenceReason=",confidenceReason,
+         " topSymbol=",diagnosticTopSymbol,
+         " topScore=",DoubleToString(diagnosticTopScore,2),
+         " secondScore=",DoubleToString(diagnosticSecondScore,2),
+         " scoreGap=",DoubleToString(diagnosticScoreGap,2),
+         " requiredScore=",DoubleToString(MathMax(75.0,InpScannerMinScore),2),
+         " requiredGap=",DoubleToString(MathMax(8.0,InpScannerMinTopGap),2),
          " durationMs=",IntegerToString((int)elapsed));
   }
 
@@ -8334,6 +8502,52 @@ void STB_DrawTradingLevels()
       DrawHLine(tag+"S",OrderGetDouble(ORDER_SL),clrSilver);
       DrawHLine(tag+"T",OrderGetDouble(ORDER_TP),clrDeepSkyBlue);
      }
+
+   // Visualize the latest confirmed M15 swing break in each direction.
+   // This detector does not classify BOS versus CHoCH, so avoid a false label.
+   for(int direction=-1;direction<=1;direction+=2)
+     {
+      int pivotShift=-1;
+      int breakShift=-1;
+      SwingPoint brokenSwing;
+      if(!DetectStructure(sym,direction,pivotShift,breakShift,brokenSwing))
+         continue;
+
+      datetime breakTime=iTime(sym,PERIOD_M15,breakShift);
+      datetime pivotTime=brokenSwing.time;
+      if(pivotTime<=0 || breakTime<=0 || pivotTime>=breakTime ||
+         brokenSwing.price<=0.0)
+         continue;
+
+      string side=(direction>0 ? "BUY":"SELL");
+      string lineName=pref+"STRUCT_"+side;
+      string labelName=pref+"STRUCT_LABEL_"+side;
+      color lineColor=(direction>0 ? clrLimeGreen:clrTomato);
+
+      if(ObjectCreate(0,lineName,OBJ_TREND,0,
+                      pivotTime,brokenSwing.price,
+                      breakTime,brokenSwing.price))
+        {
+         ObjectSetInteger(0,lineName,OBJPROP_COLOR,lineColor);
+         ObjectSetInteger(0,lineName,OBJPROP_STYLE,STYLE_DASH);
+         ObjectSetInteger(0,lineName,OBJPROP_WIDTH,2);
+         ObjectSetInteger(0,lineName,OBJPROP_RAY_RIGHT,true);
+         ObjectSetInteger(0,lineName,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,lineName,OBJPROP_HIDDEN,true);
+        }
+
+      double pip=PipSize(sym);
+      double labelOffset=MathMax(pip,SymbolInfoDouble(sym,SYMBOL_POINT))*3.0;
+      double labelPrice=brokenSwing.price+(direction>0 ? labelOffset:-labelOffset);
+      if(ObjectCreate(0,labelName,OBJ_TEXT,0,breakTime,labelPrice))
+        {
+         ObjectSetString(0,labelName,OBJPROP_TEXT,"M15 STRUCTURE BREAK "+side);
+         ObjectSetInteger(0,labelName,OBJPROP_COLOR,lineColor);
+         ObjectSetInteger(0,labelName,OBJPROP_FONTSIZE,8);
+         ObjectSetInteger(0,labelName,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,labelName,OBJPROP_HIDDEN,true);
+        }
+     }
   }
 
 void UpdatePanel()
@@ -8422,6 +8636,56 @@ int TrailAllPendingOrdersNow()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+#include <STB\STB_RenkoTrendView.mqh>
+
+// Enforce the configured visual cap without modifying the protected Include
+// module. Keep only the newest InpRenkoBarsToDraw brick objects on the chart.
+void STB_RenkoEnforceDrawLimit()
+  {
+   if(!g_stbRenkoViewEnabled || g_stbRenkoPrefix=="")
+      return;
+
+   string brickPrefix=g_stbRenkoPrefix+"B";
+   int maxIndex=-1;
+   int total=ObjectsTotal(0,-1,-1);
+
+   for(int i=0;i<total;i++)
+     {
+      string name=ObjectName(0,i,-1,-1);
+      if(StringFind(name,brickPrefix)!=0)
+         continue;
+
+      string suffix=StringSubstr(name,StringLen(brickPrefix));
+      int length=StringLen(suffix);
+      if(length<=0)
+         continue;
+
+      bool digitsOnly=true;
+      for(int k=0;k<length;k++)
+        {
+         ushort ch=StringGetCharacter(suffix,k);
+         if(ch<'0' || ch>'9')
+           {
+            digitsOnly=false;
+            break;
+           }
+        }
+
+      if(!digitsOnly)
+         continue;
+
+      int index=(int)StringToInteger(suffix);
+      if(index>=0 && index>maxIndex)
+         maxIndex=index;
+     }
+
+   int keep=(int)MathMax(20,MathMin(500,InpRenkoBarsToDraw));
+   int excess=(maxIndex+1)-keep;
+   for(int j=0;j<excess;j++)
+      ObjectDelete(0,brickPrefix+IntegerToString(j));
+  }
+
+
 void STB_UpdateControlBarLayout()
   {
 // EA control keys.
@@ -8433,19 +8697,14 @@ void STB_UpdateControlBarLayout()
    const int height=19;
    const int gap=2;
 
-   string names[8]=
+   string names[9]=
      {
-      g_prefix+"SAVE20",
-      g_prefix+"SELL_STOP",
-      g_prefix+"BUY_STOP",
-      g_prefix+"PEND_TRAIL",
-      g_prefix+"HEDGE",
-      g_prefix+"SELL_LIMIT",
-      g_prefix+"BUY_LIMIT",
-      g_prefix+"AUTO"
+      g_prefix+"SAVE20",g_prefix+"SELL_STOP",g_prefix+"BUY_STOP",
+      g_prefix+"PEND_TRAIL",g_prefix+"HEDGE",g_prefix+"SELL_LIMIT",
+      g_prefix+"BUY_LIMIT",g_prefix+"AUTO",g_prefix+"RENKO_VIEW"
      };
 
-   for(int i=0;i<8;i++)
+   for(int i=0;i<9;i++)
      {
       if(ObjectFind(0,names[i])<0)
          continue;
@@ -8472,6 +8731,7 @@ void UpdateButtons()
    string saveName=g_prefix+"SAVE20";
    string hedgeName=g_prefix+"HEDGE";
    string trailName=g_prefix+"PEND_TRAIL";
+   string renkoName=g_prefix+"RENKO_VIEW";
 
    ObjectSetString(0,buyName,OBJPROP_TEXT,"BUY STOP");
    ObjectSetInteger(0,buyName,OBJPROP_BGCOLOR,clrSeaGreen);
@@ -8499,6 +8759,9 @@ void UpdateButtons()
                    IntegerToString(CountManagedPendingOrders()));
    ObjectSetInteger(0,trailName,OBJPROP_BGCOLOR,clrSlateBlue);
    ObjectSetInteger(0,trailName,OBJPROP_COLOR,clrWhite);
+   ObjectSetString(0,renkoName,OBJPROP_TEXT,g_stbRenkoViewEnabled ? "RENKO ON" : "RENKO OFF");
+   ObjectSetInteger(0,renkoName,OBJPROP_BGCOLOR,g_stbRenkoViewEnabled ? clrDarkSlateBlue : clrDimGray);
+   ObjectSetInteger(0,renkoName,OBJPROP_COLOR,clrWhite);
   }
 
 //==================================================================
@@ -8675,12 +8938,20 @@ bool ValidateInputs()
    if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
       return false;
 
+   // The RENKO button can enable this view at runtime, so validate its
+   // settings regardless of the initial input toggle state.
+   if(!MathIsValidNumber(InpRenkoBrickSizePoints) ||
+      InpRenkoBrickSizePoints<=0.0 ||
+      InpRenkoBarsToDraw<20 || InpRenkoBarsToDraw>500)
+      return false;
+
    // Reject NaN/Infinity for every floating-point input before range checks.
    if(
       !MathIsValidNumber(InpScannerMinQuality) ||
       !MathIsValidNumber(InpScannerMinScore) ||
       !MathIsValidNumber(InpScannerMinTopGap) ||
       !MathIsValidNumber(InpManualPendingGapPips) ||
+      !MathIsValidNumber(InpRenkoBrickSizePoints) ||
       !MathIsValidNumber(InpRSIBuyLevel) ||
       !MathIsValidNumber(InpRSISellLevel) ||
       !MathIsValidNumber(InpCCIBuyLevel) ||
@@ -8835,6 +9106,9 @@ int OnInit()
    CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",8,8,88,26,clrTomato);
    CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",8,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
+   CreateButton(g_prefix+"RENKO_VIEW","RENKO ON",8,8,96,26,clrDarkSlateBlue);
+   STB_RenkoInit();
+   STB_RenkoEnforceDrawLimit();
 
    UpdateButtons();
     ResetLastError();
@@ -8958,6 +9232,8 @@ void OnDeinit(const int reason)
    ObjectDelete(0,g_prefix+"SELL_LIMIT");
    ObjectDelete(0,g_prefix+"BUY_LIMIT");
    ObjectDelete(0,g_prefix+"PEND_TRAIL");
+   ObjectDelete(0,g_prefix+"RENKO_VIEW");
+   STB_RenkoClear();
    ObjectDelete(0,g_prefix+"H4_TRENDLINE");
    ObjectDelete(0,g_prefix+"TF_TREND_BASE");
    ObjectDelete(0,g_prefix+"TF_TREND_EXT");
@@ -9237,6 +9513,8 @@ void OnTimer()
      }
    UpdatePanel();
    UpdateButtons();
+   STB_RenkoRender();
+   STB_RenkoEnforceDrawLimit();
   }
 
 //==================================================================
@@ -9517,6 +9795,7 @@ void OnChartEvent(const int id,
    string sellLimitName=g_prefix+"SELL_LIMIT";
    string buyLimitName=g_prefix+"BUY_LIMIT";
    string trailName=g_prefix+"PEND_TRAIL";
+   string renkoName=g_prefix+"RENKO_VIEW";
 
    if(sparam==buyName)
      {
@@ -9602,6 +9881,16 @@ void OnChartEvent(const int id,
       ChartRedraw(0);
       return;
      }
+   if(sparam==renkoName)
+     {
+      STB_RenkoSetEnabled(!g_stbRenkoViewEnabled);
+      STB_RenkoEnforceDrawLimit();
+      g_dashboardLastAction=g_stbRenkoViewEnabled ? "RENKO VIEW ENABLED" : "RENKO VIEW DISABLED";
+      UpdateButtons();
+      ChartRedraw(0);
+      return;
+     }
+
    if(sparam==trailName)
      {
       int moved=TrailAllPendingOrdersNow();
