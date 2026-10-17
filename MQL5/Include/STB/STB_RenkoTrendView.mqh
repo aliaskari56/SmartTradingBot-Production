@@ -202,18 +202,39 @@ void STB_RenkoRender()
    int low1  = -1;
    int low2  = -1;
 
-   for(int j = 1; j < count; j++)
+   // Scan newest-to-oldest. A single source candle can generate several
+   // Renko bricks, so adjacent reversal pivots may share the same timestamp.
+   // Keep the newest pivot, then select the newest older pivot with a
+   // strictly earlier timestamp; otherwise MT5 cannot form a valid trendline.
+   for(int j = count - 1; j >= 1; j--)
      {
       if(brickDirection[j - 1] > 0 && brickDirection[j] < 0)
         {
-         high2 = high1;
-         high1 = j - 1;
+         int pivot = j - 1;
+         if(high1 < 0)
+            high1 = pivot;
+         else
+            if(brickTime[pivot] < brickTime[high1])
+              {
+               high2 = pivot;
+               break;
+              }
         }
+     }
 
+   for(int j = count - 1; j >= 1; j--)
+     {
       if(brickDirection[j - 1] < 0 && brickDirection[j] > 0)
         {
-         low2 = low1;
-         low1 = j - 1;
+         int pivot = j - 1;
+         if(low1 < 0)
+            low1 = pivot;
+         else
+            if(brickTime[pivot] < brickTime[low1])
+              {
+               low2 = pivot;
+               break;
+              }
         }
      }
 
