@@ -622,11 +622,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
    datetime candidateClosedBar=0;
-   datetime closedBar=0;
    bool initialStopAnchor=false;
    if(candleStop)
      {
-      closedBar=iTime(symbol,PERIOD_M5,1);
+      datetime closedBar=iTime(symbol,PERIOD_M5,1);
       if(closedBar<=0 ||
          closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
@@ -644,6 +643,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       candidateClosedBar=closedBar;
       initialStopAnchor=(g_stbPendingTrail[idx].lastProcessedM5Bar<=0);
       extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);
+
+      // Explicitly consume a completed bar when it made no new extreme.
+      // This is safe because this branch is reached only after the full OHLC
+      // snapshot is validated; it avoids re-evaluating the same flat bar.
+      if(!initialStopAnchor &&
+         ((direction>0 &&
+           extreme>=g_stbPendingTrail[idx].trackedExtreme-point*0.5) ||
+          (direction<0 &&
+           extreme<=g_stbPendingTrail[idx].trackedExtreme+point*0.5)))
+         g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
      }
    else
      {
