@@ -1910,7 +1910,33 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    if(!STB_PendingRiskFloorOK(stbCurEntry,stbCurSL,newEntry,newSL))
+     {
+      // Keep the hard risk cap. Make the rejection observable without
+      // weakening the guard; rate-limit this diagnostic per M15 bar/ticket.
+      int riskLogIdx=STB_PendingTrailFind(ticket);
+      datetime riskLogBar=iTime(symbol,PERIOD_M15,1);
+      if(riskLogBar<=0)
+         riskLogBar=TimeCurrent();
+
+      if(riskLogIdx>=0 &&
+         g_stbPendingTrail[riskLogIdx].lastFailLogBar!=riskLogBar)
+        {
+         g_stbPendingTrail[riskLogIdx].lastFailLogBar=riskLogBar;
+         double oldRisk=MathAbs(stbCurEntry-stbCurSL);
+         double proposedRisk=MathAbs(newEntry-newSL);
+         int riskDigits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+         double riskCap=MathMin(1.0,(InpPendingTrailMaxRiskExpansion>0.0 ?
+                                    InpPendingTrailMaxRiskExpansion:1.0));
+         Print("PENDING_TRAIL_MODIFY_BLOCKED ticket=",ticket,
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(stbOt),
+               " reason=RISK_EXPANSION_CAP",
+               " oldRisk=",DoubleToString(oldRisk,riskDigits),
+               " proposedRisk=",DoubleToString(proposedRisk,riskDigits),
+               " capRatio=",DoubleToString(riskCap,2));
+        }
       return false;
+     }
 
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
