@@ -8529,51 +8529,7 @@ void STB_DrawTradingLevels()
       DrawHLine(tag+"T",OrderGetDouble(ORDER_TP),clrDeepSkyBlue);
      }
 
-   // Visualize the latest confirmed M15 swing break in each direction.
-   // This detector does not classify BOS versus CHoCH, so avoid a false label.
-   for(int direction=-1;direction<=1;direction+=2)
-     {
-      int pivotShift=-1;
-      int breakShift=-1;
-      SwingPoint brokenSwing;
-      if(!DetectStructure(sym,direction,pivotShift,breakShift,brokenSwing))
-         continue;
 
-      datetime breakTime=iTime(sym,PERIOD_M15,breakShift);
-      datetime pivotTime=brokenSwing.time;
-      if(pivotTime<=0 || breakTime<=0 || pivotTime>=breakTime ||
-         brokenSwing.price<=0.0)
-         continue;
-
-      string side=(direction>0 ? "BUY":"SELL");
-      string lineName=pref+"STRUCT_"+side;
-      string labelName=pref+"STRUCT_LABEL_"+side;
-      color lineColor=(direction>0 ? clrLimeGreen:clrTomato);
-
-      if(ObjectCreate(0,lineName,OBJ_TREND,0,
-                      pivotTime,brokenSwing.price,
-                      breakTime,brokenSwing.price))
-        {
-         ObjectSetInteger(0,lineName,OBJPROP_COLOR,lineColor);
-         ObjectSetInteger(0,lineName,OBJPROP_STYLE,STYLE_DASH);
-         ObjectSetInteger(0,lineName,OBJPROP_WIDTH,2);
-         ObjectSetInteger(0,lineName,OBJPROP_RAY_RIGHT,true);
-         ObjectSetInteger(0,lineName,OBJPROP_SELECTABLE,false);
-         ObjectSetInteger(0,lineName,OBJPROP_HIDDEN,true);
-        }
-
-      double pip=PipSize(sym);
-      double labelOffset=MathMax(pip,SymbolInfoDouble(sym,SYMBOL_POINT))*3.0;
-      double labelPrice=brokenSwing.price+(direction>0 ? labelOffset:-labelOffset);
-      if(ObjectCreate(0,labelName,OBJ_TEXT,0,breakTime,labelPrice))
-        {
-         ObjectSetString(0,labelName,OBJPROP_TEXT,"M15 STRUCTURE BREAK "+side);
-         ObjectSetInteger(0,labelName,OBJPROP_COLOR,lineColor);
-         ObjectSetInteger(0,labelName,OBJPROP_FONTSIZE,8);
-         ObjectSetInteger(0,labelName,OBJPROP_SELECTABLE,false);
-         ObjectSetInteger(0,labelName,OBJPROP_HIDDEN,true);
-        }
-     }
   }
 
 void UpdatePanel()
