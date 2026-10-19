@@ -1,0 +1,313 @@
+#ifndef STB_RENKO_TREND_VIEW_MQH
+#define STB_RENKO_TREND_VIEW_MQH
+
+// Chart-only Renko overlay. This module must not place or manage trades.
+bool     g_stbRenkoViewEnabled = false;
+string   g_stbRenkoPrefix      = "";
+datetime g_stbRenkoLastBar     = 0;
+datetime g_stbRenkoLastWaitLogBar = 0;
+
+// Delete only objects owned by this module. Never clear the chart when the
+// prefix has not yet been initialized.
+void STB_RenkoClear()
+  {
+   if(g_stbRenkoPrefix == "")
+      return;
+
+   int total = ObjectsTotal(0, -1, -1);
+   for(int i = total - 1; i >= 0; i--)
+     {
+      string name = ObjectName(0, i, -1, -1);
+      if(StringFind(name, g_stbRenkoPrefix) == 0)
+         ObjectDelete(0, name);
+     }
+  }
+
+void STB_RenkoRender()
+  {
+   if(!g_stbRenkoViewEnabled || g_stbRenkoPrefix == "")
+      return;
+
+   datetime currentBar = iTime(_Symbol, (ENUM_TIMEFRAMES)_Period, 0);
+   if(currentBar == 0 || currentBar == g_stbRenkoLastBar)
+      return;
+
+   double brickPoints = InpRenkoBrickSizePoints;
+   if(!MathIsValidNumber(brickPoints) || brickPoints <= 0.0 ||
+      InpRenkoBarsToDraw < 20 || InpRenkoBarsToDraw > 500)
+     {
+      if(g_stbRenkoLastWaitLogBar != currentBar)
+        {
+         Print("STB RENKO INVALID INPUT symbol=",_Symbol,
+               " brickPoints=",DoubleToString(brickPoints,2),
+               " barsToDraw=",IntegerToString(InpRenkoBarsToDraw));
+         g_stbRenkoLastWaitLogBar=currentBar;
+        }
+      return;
+     }
+
+   double step = brickPoints * _Point;
+   if(!MathIsValidNumber(step) || step <= 0.0)
+      return;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+
+   int requested = (int)MathMax(300, InpRenkoBarsToDraw * 8);
+   requested = (int)MathMin(requested, 4000);
+   ResetLastError();
+   int copied = CopyRates(_Symbol, (ENUM_TIMEFRAMES)_Period, 1, requested, rates);
+   int copyError = GetLastError();
+   if(copied < 30)
+     {
+      if(g_stbRenkoLastWaitLogBar != currentBar)
+        {
+         Print("STB RENKO WAIT HISTORY symbol=",_Symbol,
+               " timeframe=",EnumToString((ENUM_TIMEFRAMES)_Period),
+               " copied=",IntegerToString(copied),
+               " requested=",IntegerToString(requested),
+               " error=",IntegerToString(copyError));
+         g_stbRenkoLastWaitLogBar=currentBar;
+        }
+      return;
+     }
+
+   double lastClose = MathRound(rates[0].close / step) * step;
+   int direction = 0;
+   int count = 0;
+
+   datetime brickTime[500];
+   double brickOpen[500];
+   double brickClose[500];
+   int brickDirection[500];
+
+   for(int i = 1; i < copied; i++)
+     {
+      double price = rates[i].close;
+      int guard = 0;
+
+      while(guard++ < 100)
+        {
+         double openPrice = lastClose;
+         double closePrice = lastClose;
+         int newDirection = 0;
+
+         if(direction == 0)
+           {
+            if(price >= lastClose + step)
+              {
+               closePrice = lastClose + step;
+               newDirection = 1;
+              }
+            else
+               if(price <= lastClose - step)
+                 {
+                  closePrice = lastClose - step;
+                  newDirection = -1;
+                 }
+               else
+                  break;
+           }
+         else
+            if(direction > 0)
+              {
+               if(price >= lastClose + step)
+                 {
+                  closePrice = lastClose + step;
+                  newDirection = 1;
+                 }
+               else
+                  if(price <= lastClose - 2.0 * step)
+                    {
+                     openPrice = lastClose - step;
+                     closePrice = lastClose - 2.0 * step;
+                     newDirection = -1;
+                    }
+                  else
+                     break;
+              }
+            else
+              {
+               if(price <= lastClose - step)
+                 {
+                  closePrice = lastClose - step;
+                  newDirection = -1;
+                 }
+               else
+                  if(price >= lastClose + 2.0 * step)
+                    {
+                     openPrice = lastClose + step;
+                     closePrice = lastClose + 2.0 * step;
+                     newDirection = 1;
+                    }
+                  else
+                     break;
+              }
+
+         if(count >= 500)
+           {
+            for(int k = 1; k < 500; k++)
+              {
+               brickTime[k - 1] = brickTime[k];
+               brickOpen[k - 1] = brickOpen[k];
+               brickClose[k - 1] = brickClose[k];
+               brickDirection[k - 1] = brickDirection[k];
+              }
+            count = 499;
+           }
+
+         brickTime[count] = rates[i].time;
+         brickOpen[count] = openPrice;
+         brickClose[count] = closePrice;
+         brickDirection[count] = newDirection;
+         count++;
+
+         lastClose = closePrice;
+         direction = newDirection;
+        }
+     }
+
+   STB_RenkoClear();
+   int objectsCreated = 0;
+
+   for(int j = 0; j < count; j++)
+     {
+      string name = g_stbRenkoPrefix + "B" + IntegerToString(j);
+      datetime endTime = brickTime[j] +
+                         (datetime)MathMax(60, PeriodSeconds((ENUM_TIMEFRAMES)_Period));
+
+      double highPrice = MathMax(brickOpen[j], brickClose[j]);
+      double lowPrice = MathMin(brickOpen[j], brickClose[j]);
+
+      if(ObjectCreate(0, name, OBJ_RECTANGLE, 0,
+                      brickTime[j], highPrice, endTime, lowPrice))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR,
+                          brickDirection[j] > 0 ? clrDodgerBlue : clrTomato);
+         ObjectSetInteger(0, name, OBJPROP_FILL, true);
+         ObjectSetInteger(0, name, OBJPROP_BACK, false);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+         objectsCreated++;
+        }
+      else
+         Print("STB RENKO OBJECT CREATE FAILED name=",name,
+               " error=",IntegerToString(GetLastError()));
+     }
+
+   // Draw automatic resistance/support trendlines using the last two
+   // confirmed Renko reversal pivots. User-created chart trendlines are untouched.
+   int high1 = -1;
+   int high2 = -1;
+   int low1  = -1;
+   int low2  = -1;
+
+   // Scan newest-to-oldest. A single source candle can generate several
+   // Renko bricks, so adjacent reversal pivots may share the same timestamp.
+   // Keep the newest pivot, then select the newest older pivot with a
+   // strictly earlier timestamp; otherwise MT5 cannot form a valid trendline.
+   for(int j = count - 1; j >= 1; j--)
+     {
+      if(brickDirection[j - 1] > 0 && brickDirection[j] < 0)
+        {
+         int pivot = j - 1;
+         if(high1 < 0)
+            high1 = pivot;
+         else
+            if(brickTime[pivot] < brickTime[high1])
+              {
+               high2 = pivot;
+               break;
+              }
+        }
+     }
+
+   for(int j = count - 1; j >= 1; j--)
+     {
+      if(brickDirection[j - 1] < 0 && brickDirection[j] > 0)
+        {
+         int pivot = j - 1;
+         if(low1 < 0)
+            low1 = pivot;
+         else
+            if(brickTime[pivot] < brickTime[low1])
+              {
+               low2 = pivot;
+               break;
+              }
+        }
+     }
+
+   if(high1 >= 0 && high2 >= 0 && brickTime[high2] < brickTime[high1])
+     {
+      string name = g_stbRenkoPrefix + "HIGH";
+      if(ObjectCreate(0, name, OBJ_TREND, 0,
+                      brickTime[high2], brickClose[high2],
+                      brickTime[high1], brickClose[high1]))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrangeRed);
+         ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+         ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        }
+     }
+
+   if(low1 >= 0 && low2 >= 0 && brickTime[low2] < brickTime[low1])
+     {
+      string name = g_stbRenkoPrefix + "LOW";
+      if(ObjectCreate(0, name, OBJ_TREND, 0,
+                      brickTime[low2], brickClose[low2],
+                      brickTime[low1], brickClose[low1]))
+        {
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrDeepSkyBlue);
+         ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+         ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+        }
+     }
+
+   ChartRedraw(0);
+   g_stbRenkoLastBar = currentBar;
+   Print("STB RENKO RENDER symbol=",_Symbol,
+         " timeframe=",EnumToString((ENUM_TIMEFRAMES)_Period),
+         " rates=",IntegerToString(copied),
+         " bricks=",IntegerToString(count),
+         " brickObjects=",IntegerToString(objectsCreated),
+         " stepPoints=",DoubleToString(brickPoints,1),
+         " enabled=ON");
+  }
+
+void STB_RenkoSetEnabled(const bool enabled)
+  {
+   g_stbRenkoViewEnabled = enabled;
+   g_stbRenkoLastBar = 0;
+   g_stbRenkoLastWaitLogBar = 0;
+
+   if(!enabled)
+      STB_RenkoClear();
+   else
+      STB_RenkoRender();
+  }
+
+void STB_RenkoInit()
+  {
+   g_stbRenkoPrefix = g_prefix + "RENKO_";
+   g_stbRenkoViewEnabled = InpShowRenkoTrendView;
+   g_stbRenkoLastBar = 0;
+   g_stbRenkoLastWaitLogBar = 0;
+
+   Print("STB RENKO INIT symbol=",_Symbol,
+         " timeframe=",EnumToString((ENUM_TIMEFRAMES)_Period),
+         " enabled=",g_stbRenkoViewEnabled ? "ON":"OFF",
+         " prefix=",g_stbRenkoPrefix,
+         " point=",DoubleToString(_Point,_Digits),
+         " brickPoints=",DoubleToString(InpRenkoBrickSizePoints,1),
+         " barsToDraw=",IntegerToString(InpRenkoBarsToDraw));
+
+   if(g_stbRenkoViewEnabled)
+      STB_RenkoRender();
+   else
+      STB_RenkoClear();
+  }
+
+#endif // STB_RENKO_TREND_VIEW_MQH
