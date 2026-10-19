@@ -7369,7 +7369,7 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      c.rejectReason="REJECT_SPREAD";
+      c.rejectReason="REJECT_MARKET_QUALITY";
       return false;
      }
 
@@ -7912,7 +7912,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      q.reason="REJECT_SPREAD";
+      q.reason="REJECT_MARKET_QUALITY";
       return false;
      }
 
