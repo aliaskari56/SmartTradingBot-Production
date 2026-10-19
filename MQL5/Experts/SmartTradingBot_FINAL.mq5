@@ -11228,8 +11228,14 @@ bool STB_ResolvePendingDistance(const string symbol,
    //--- forced on the broker: the clamped geometry is still re-validated below.
    if(isStop)
      {
-      double stopFloor=(isBuy ? tick.ask+bl.minDistance+bl.point
-                              : tick.bid-bl.minDistance-bl.point);
+      // Quotes may move between resolution, OrderCheck and server execution.
+      // Keep a bounded safety margin beyond the broker's hard minimum so the
+      // most common short quote moves do not invalidate a just-built STOP.
+      double safetyStep=(bl.tickSize>0.0 ? bl.tickSize : bl.point);
+      double entrySafetyBuffer=MathMax(bl.point*10.0,
+                                        MathMax(safetyStep*5.0,spread*0.5));
+      double stopFloor=(isBuy ? tick.ask+bl.minDistance+bl.point+entrySafetyBuffer
+                              : tick.bid-bl.minDistance-bl.point-entrySafetyBuffer);
 
       if(isBuy)
         {
@@ -12089,9 +12095,19 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // SELL STOP moves only after a bullish M5 candle and anchors to its high.
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
+   datetime closedBar=0;
    if(candleStop)
      {
-      datetime closedBar=iTime(symbol,PERIOD_M5,1);
+      // A failed resolve/write must be retried from a fresh quote, not lost
+      // because this same M5 candle was prematurely marked as consumed.
+      if(g_stbPendingTrail[idx].nextRetryTime>0 &&
+         TimeCurrent()<g_stbPendingTrail[idx].nextRetryTime)
+        {
+         STB_PendingTrailLogSkip(ticket,symbol,"THROTTLE_BACKOFF");
+         return true;
+        }
+
+      closedBar=iTime(symbol,PERIOD_M5,1);
       if(closedBar<=0 || closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          STB_PendingTrailLogSkip(ticket,symbol,
                                  closedBar<=0 ? "NO_M5_HISTORY"
@@ -12111,20 +12127,24 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
          return true;
 
-      // Consume the closed bar only after its OHLC data passed validation.
-      // If history is temporarily unavailable, the same bar can be retried.
-      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-
+      // Consume a candle only when it is a deliberate no-op or processing
+      // completes. Leave it retryable if the broker rejects the proposal.
       if(orderType==(long)ORDER_TYPE_BUY_STOP)
         {
          if(barClose>=barOpen)
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
             return true; // only a completed bearish candle may move BUY STOP down
+           }
          extreme=barLow;
         }
       else
         {
          if(barClose<=barOpen)
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
             return true; // only a completed bullish candle may move SELL STOP up
+           }
          extreme=barHigh;
         }
      }
@@ -12155,6 +12175,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(!isNewExtreme)
    {
+      // No new extreme is a completed decision for this candle; consume it.
+      if(candleStop)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+
       // 2) No new extreme -> NO MODIFY (rate-limited).
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
@@ -12190,6 +12214,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                " reason=",res.reason);
       }
 
+      // Resolution failures (including temporary broker-zone failures) get
+      // bounded backoff, but do NOT consume the closed M5 candle. Re-resolve
+      // after the delay with a fresh market quote.
+      g_stbPendingTrail[idx].failureCount++;
+      int resolveFc=g_stbPendingTrail[idx].failureCount;
+      int resolveBackoffSec=(resolveFc<=1 ? STB_PEND_BACKOFF_1_SEC
+                                          : (resolveFc==2 ? STB_PEND_BACKOFF_2_SEC
+                                                          : STB_PEND_BACKOFF_3_SEC));
+      g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+resolveBackoffSec;
+
       // State NOT committed as success.
       return true;
    }
@@ -12215,6 +12249,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(committed)
    {
+      // The candle is consumed only after a successful writer confirmation.
+      if(candleStop)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+
       // P4: trackedExtreme advances only in the favorable direction.
       if(direction>0)
          g_stbPendingTrail[idx].trackedExtreme=
@@ -12230,6 +12268,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
             " sl=",DoubleToString(prop.sl,digits),
             " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,digits));
    }
+   else if(candleStop &&
+           g_stbPendingTrail[idx].nextRetryTime<=TimeCurrent())
+     {
+      // A non-retryable skip (e.g. STEP_FILTER) completes this candle. Writer
+      // failures set nextRetryTime in the future, leaving the candle retryable.
+      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+     }
 
    return true;
 }
