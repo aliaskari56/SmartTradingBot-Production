@@ -2,6 +2,7 @@ name: MetaEditor compile (Windows)
 on:
   push:
     branches:
+      - main
       - 'fix/**'
   pull_request:
     branches:
