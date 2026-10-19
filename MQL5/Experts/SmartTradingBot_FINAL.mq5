@@ -46,6 +46,7 @@ input double  InpCCISellLevel               = -50.0;
 input double  InpRSIWeight                  = 7.0;
 input double  InpCCIWeight                  = 8.0;
 input bool    InpOscillatorHardFilter       = false;
+input bool    InpDrawOscillatorPanel        = true;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
@@ -82,7 +83,7 @@ input double  InpBaseLots               = 0.01;
 input double  InpTrendLotMultiplier     = 2.0;
 input double  InpUniversalLotMultiplier = 1.0;
 input double  InpEntryBufferPips        = 1.0;
-input double  InpPendingTrailMaxRiskExpansion = 1.0;  // Pending-trail risk ratio; hard-capped at 1.0 (no risk expansion)
+input double  InpPendingTrailMaxRiskExpansion = 1.25; // Maximum pending-trail risk expansion; <=0 disables
 input double  InpPipPointsOverride      = 0.0;  // 0 = automatic; >0 = points per pip
 input double  InpSLBufferPips           = 1.0;
 input double  InpInitialSLBufferPips    = 2.0;  // automatic SL: distance beyond nearest confirmed swing
@@ -97,6 +98,8 @@ input bool    InpStrictPatternFilters   = false; // true = FVG/OB mandatory; fal
 input int     InpPatternWindowBars      = 12;
 
 input group "=== PROFIT PROTECTION ==="
+input double  InpAutoTriggerPips        = 50.0;
+input double  InpAutoLockPips           = 20.0;  // UNIVERSAL POLICY: lock +20 pip at/after +50 pip (all managed positions)
 input double  InpManualSaveStepPips     = 20.0;
 
 input group "=== TRADE MANAGEMENT ==="
@@ -108,11 +111,17 @@ input group "=== TRADE MANAGEMENT ==="
 input bool    InpAllowOneClickHedge      = true;
 
 input group "=== TRENDLINE ==="
+input color   InpBullTrendlineColor     = clrLimeGreen;
+input color   InpBearTrendlineColor     = clrTomato;
+input int     InpTrendlineWidth         = 2;
+input ENUM_LINE_STYLE InpTrendlineStyle = STYLE_SOLID;
 input double  InpTrendlineTolerancePips = 10.0;
 
 input group "=== TRAILING ==="
 input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
 input double  InpTrailStartPips         = 150.0;
+input int     InpTrailCandleShift       = 5;
+input double  InpTrailBufferPips        = 1.0;
 input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance after +InpTrailStartPips, manual + EA
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
@@ -285,6 +294,46 @@ double             g_panelChartSellScore=0.0;
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+double STB_VizATR(MqlRates &r[],
+                  const int shift,
+                  const int period)
+  {
+   int total=ArraySize(r);
+
+   if(total<=shift+period)
+      return 0.0;
+
+   double sum=0.0;
+   int count=0;
+
+   int endShift=shift+period-1;
+
+   for(int i=shift;i<=endShift;i++)
+     {
+      double tr1=r[i].high-r[i].low;
+      double tr2=MathAbs(r[i].high-r[i+1].close);
+      double tr3=MathAbs(r[i].low-r[i+1].close);
+
+      double tr=MathMax(
+                   tr1,
+                   MathMax(tr2,tr3)
+                );
+
+      if(tr>0.0)
+        {
+         sum+=tr;
+         count++;
+        }
+     }
+
+   if(count<=0)
+      return 0.0;
+
+   return sum/count;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 ulong STB_AP_Hash(const string raw)
   {
    ulong h=1469598103934665603ULL;
@@ -310,10 +359,6 @@ string STB_AP_Key(const string symbol,
               (string)InpMagic+"|AP2|"+symbol+"|"+
               (direction>0 ? "B":"S")+"|"+
               scope+"|"+(string)profile;
-
-   // Do not read or mutate live adaptive statistics from Strategy Tester.
-   if(MQLInfoInteger(MQL_TESTER))
-      raw+="|TESTER";
 
    return "STB_AP2_"+(string)STB_AP_Hash(raw);
   }
@@ -1435,16 +1480,90 @@ bool   g_autoTrading = false;
 datetime g_lastM15Bar = 0;
 STBIndicatorCache g_indicatorCache[];
 datetime g_lastChartBar = 0;
-bool g_stbManagementCycleActive = false;
-bool g_stbManagementCyclePending = false;
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_ConfigureMarketFilling(const string symbol)
+  {
+   int filling=(int)SymbolInfoInteger(symbol,SYMBOL_FILLING_MODE);
+
+   if((filling & SYMBOL_FILLING_FOK)==SYMBOL_FILLING_FOK)
+     {
+      trade.SetTypeFilling(ORDER_FILLING_FOK);
+      return true;
+     }
+
+   if((filling & SYMBOL_FILLING_IOC)==SYMBOL_FILLING_IOC)
+     {
+      trade.SetTypeFilling(ORDER_FILLING_IOC);
+      return true;
+     }
+
+   long execution=SymbolInfoInteger(symbol,SYMBOL_TRADE_EXEMODE);
+   if(execution!=SYMBOL_TRADE_EXECUTION_MARKET)
+     {
+      trade.SetTypeFilling(ORDER_FILLING_RETURN);
+      return true;
+     }
+
+   Print("STB filling rejected: no broker-supported FOK/IOC for market execution symbol=",symbol);
+   return false;
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+int TrendlineLookback(const ENUM_TIMEFRAMES tf)
+  {
+   switch(tf)
+     {
+      case PERIOD_M1:
+         return 800;
+      case PERIOD_M2:
+         return 700;
+      case PERIOD_M3:
+         return 650;
+      case PERIOD_M4:
+         return 600;
+      case PERIOD_M5:
+         return 600;
+      case PERIOD_M6:
+         return 550;
+      case PERIOD_M10:
+         return 500;
+      case PERIOD_M12:
+         return 450;
+      case PERIOD_M15:
+         return 400;
+      case PERIOD_M20:
+         return 350;
+      case PERIOD_M30:
+         return 300;
+      case PERIOD_H1:
+         return 240;
+      case PERIOD_H2:
+         return 220;
+      case PERIOD_H3:
+         return 200;
+      case PERIOD_H4:
+         return InpLookbackH4;
+      case PERIOD_H6:
+         return 160;
+      case PERIOD_H8:
+         return 150;
+      case PERIOD_H12:
+         return 140;
+      case PERIOD_D1:
+         return 120;
+      case PERIOD_W1:
+         return 100;
+      case PERIOD_MN1:
+         return 80;
+      default:
+         return InpLookbackM15;
+     }
+  }
 
 //==================================================================
 // GENERAL UTILITY
@@ -1515,35 +1634,26 @@ double NormalizeVolume(const string symbol,double volume)
    double maxLot = SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX);
    double step   = SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
 
-   // Never turn a disabled/zero-volume request or an undersized request into
-   // the broker minimum. That can silently turn a 0x multiplier into a trade
-   // or increase the exposure beyond the configured fixed/risk volume.
-   if(!MathIsValidNumber(volume) || volume<=0.0 ||
-      minLot<=0.0 || maxLot<minLot || step<=0.0)
+   if(step <= 0.0)
       return 0.0;
 
-   if(volume+1e-9<minLot)
-      return 0.0;
+   volume = MathMax(minLot,MathMin(maxLot,volume));
+   volume = MathFloor(volume / step + 1e-9) * step;
 
-   volume=MathMin(maxLot,volume);
-   volume=MathFloor(volume/step+1e-9)*step;
+// Flooring can push a value below the broker minimum when
+// minLot is not an exact multiple of step. Clamp again.
+   if(volume < minLot)
+      volume = minLot;
 
-   // Floating point flooring can dip just below a valid minimum. Use the
-   // broker minimum only when the original request already met that minimum.
-   if(volume<minLot)
-      volume=minLot;
+   int digits = 2;
 
-   int digits=2;
-   if(step<0.01)
-      digits=3;
-   if(step<0.001)
-      digits=4;
+   if(step < 0.01)
+      digits = 3;
 
-   double normalized=NormalizeDouble(volume,digits);
-   if(normalized<minLot-1e-9 || normalized>maxLot+1e-9)
-      return 0.0;
+   if(step < 0.001)
+      digits = 4;
 
-   return normalized;
+   return NormalizeDouble(volume,digits);
   }
 
 //+------------------------------------------------------------------+
@@ -1818,6 +1928,39 @@ bool STB_ValidatePendingGeometry(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+double STB_RecalculatePendingTP(const string symbol,
+                                const int direction,
+                                const double oldEntry,
+                                const double oldSL,
+                                const double oldTP,
+                                const double newEntry,
+                                const double newSL,
+                                const double minimumRR)
+  {
+   if(oldTP<=0.0 || oldEntry<=0.0 || oldSL<=0.0 ||
+      newEntry<=0.0 || newSL<=0.0)
+      return 0.0;
+
+   double oldRisk=MathAbs(oldEntry-oldSL);
+   double oldReward=MathAbs(oldTP-oldEntry);
+
+   if(oldRisk<=0.0 || oldReward<=0.0)
+      return 0.0;
+
+   double oldRR=oldReward/oldRisk;
+   double targetRR=MathMax(oldRR,MathMax(0.0,minimumRR));
+   double newRisk=MathAbs(newEntry-newSL);
+
+   if(newRisk<=0.0)
+      return 0.0;
+
+   double newReward=newRisk*targetRR;
+
+   return NormalizePrice(symbol,
+                         direction>0
+                         ? newEntry+newReward
+                         : newEntry-newReward);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -1867,6 +2010,112 @@ bool STB_PendingRiskFloorOK(const long orderType,const double curEntry,
    return (newRisk<=origRisk*cap);
   }
 
+//==================================================================
+// PENDING WRITER DIAGNOSTICS (diagnostic only, never changes a decision)
+//==================================================================
+// Before this block every early "return false" of the pending geometry
+// writer was silent: a trail blocked by the manual override, by the symbol
+// management lease, by a geometry guard, by OrderCheck or by the server
+// retcode left no trace in the journal. STB_LogPendingWriterState() prints one
+// structured, rate-limited (per ticket + stage + reason + M15 bar) snapshot
+// with the exact data required to reproduce a rejection.
+//   PENDING_WRITER BLOCKED            MANUAL_OVERRIDE|NO_MGMT_LEASE|
+//                                     INVALID_SL|ENTRY_DIRECTION|RISK_FLOOR|
+//                                     ENTRY_INVALID|POINT_INVALID
+//   PENDING_WRITER ORDERCHECK_FAILED / ORDERCHECK_REJECT
+//   PENDING_WRITER STALE_SNAPSHOT     order changed between check and request
+//   PENDING_WRITER REQUEST            broker request about to be sent
+//   PENDING_WRITER REJECTED           OrderModify / retcode rejected
+//   PENDING_WRITER CONFIRM_UNREADABLE / CONFIRM_MISMATCH / CONFIRMED
+#define STB_PENDW_LOG_RING 32
+
+ulong    g_stbPendwLogTicket[STB_PENDW_LOG_RING];
+string   g_stbPendwLogKey[STB_PENDW_LOG_RING];
+datetime g_stbPendwLogBar[STB_PENDW_LOG_RING];
+int      g_stbPendwLogNext=0;
+
+bool STB_PendingWriterLogGate(const ulong ticket,const string key,
+                              const string symbol)
+  {
+   if(ticket==0 || key=="")
+      return false;
+
+   datetime bar=0;
+
+   if(symbol!="")
+      bar=iTime(symbol,PERIOD_M15,1);
+
+   if(bar<=0)
+      bar=TimeCurrent();
+
+   for(int i=0;i<STB_PENDW_LOG_RING;i++)
+      if(g_stbPendwLogTicket[i]==ticket && g_stbPendwLogKey[i]==key)
+        {
+         if(g_stbPendwLogBar[i]==bar)
+            return false;
+
+         g_stbPendwLogBar[i]=bar;
+         return true;
+        }
+
+   int slot=g_stbPendwLogNext%STB_PENDW_LOG_RING;
+   g_stbPendwLogNext++;
+   g_stbPendwLogTicket[slot]=ticket;
+   g_stbPendwLogKey[slot]=key;
+   g_stbPendwLogBar[slot]=bar;
+
+   return true;
+  }
+
+void STB_LogPendingWriterState(const string stage,const ulong ticket,
+                               const double propEntry,const double propSL,
+                               const double propTP,const string reason)
+  {
+   if(ticket==0 || !OrderSelect(ticket))
+      return;
+
+   string symbol=OrderGetString(ORDER_SYMBOL);
+
+   if(!STB_PendingWriterLogGate(ticket,stage+":"+reason,symbol))
+      return;
+
+   MqlTick tick={};
+   SymbolInfoTick(symbol,tick);
+
+   int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+   long levelStops=SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   long levelFreeze=SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
+
+   Print("PENDING_WRITER ",stage,
+         " ticket=",IntegerToString((int)ticket),
+         " symbol=",symbol,
+         " type=",STB_PendingTrailTypeName(OrderGetInteger(ORDER_TYPE)),
+         " curEntry=",DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN),digits),
+         " curSL=",DoubleToString(OrderGetDouble(ORDER_SL),digits),
+         " curTP=",DoubleToString(OrderGetDouble(ORDER_TP),digits),
+         " propEntry=",DoubleToString(propEntry,digits),
+         " propSL=",DoubleToString(propSL,digits),
+         " propTP=",DoubleToString(propTP,digits),
+         " bid=",DoubleToString(tick.bid,digits),
+         " ask=",DoubleToString(tick.ask,digits),
+         " point=",DoubleToString(SymbolInfoDouble(symbol,SYMBOL_POINT),digits),
+         " tickSize=",DoubleToString(SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE),digits),
+         " stopsLevel=",IntegerToString((int)levelStops),
+         " freezeLevel=",IntegerToString((int)levelFreeze),
+         " pip=",DoubleToString(PipSize(symbol),digits),
+         " reason=",reason);
+  }
+
+// Diagnostic that never changes the condition it is embedded in: it reports
+// the rejection snapshot and always returns 0.
+int STB_PendingWriterNote(const string stage,const ulong ticket,
+                          const double propEntry,const double propSL,
+                          const double propTP,const string reason)
+  {
+   STB_LogPendingWriterState(stage,ticket,propEntry,propSL,propTP,reason);
+   return 0;
+  }
+
 bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const double newEntry,
                                     const double newSL,
@@ -1877,28 +2126,60 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
-   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
+   // BUY STOP / SELL STOP keep their automatic M5 candle-follow even when the
+   // ticket carries MANUAL_OVERRIDE: the pending-trail module exempts exactly
+   // these two types in STB_PendingTrailManageOne() and in
+   // STB_SubmitPendingTrailGeometry(). LIMIT and STOP-LIMIT keep the pause,
+   // and every other writer path stays unchanged.
+   long stbWriteType=OrderGetInteger(ORDER_TYPE);
+   bool stbCandleStop=(stbWriteType==(long)ORDER_TYPE_BUY_STOP ||
+                       stbWriteType==(long)ORDER_TYPE_SELL_STOP);
+
+   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
+     {
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "MANUAL_OVERRIDE");
+      return false; // MANUAL_OVERRIDE: auto modify blocked
+     }
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "NO_MGMT_LEASE");
+      return false; // P6/P10 cross-instance single pending writer
+     }
 
    //--- P4 central writer: verify symbol, re-read geometry, validate
    //--- broker constraints, monotonic entry direction and risk floor.
    long stbOt=OrderGetInteger(ORDER_TYPE);
-   bool stbCandleStop=(stbOt==ORDER_TYPE_BUY_STOP || stbOt==ORDER_TYPE_SELL_STOP);
-   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
-      return false; // M5 candle-follow owns BUY STOP / SELL STOP pre-trigger geometry
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
-   double stbCurTP=OrderGetDouble(ORDER_TP);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
+
+   if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "INVALID_SL");
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
       return false;
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "ENTRY_DIRECTION");
+
+   if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
       return false;
+
+   if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "RISK_FLOOR");
 
    if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
       return false;
 
+
+   if(newEntry<=0.0)
+      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
+                                "ENTRY_INVALID");
 
    if(newEntry<=0.0)
       return false;
@@ -1907,39 +2188,6 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
    datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
    double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
-
-   // Keep a Stop-Limit's trigger-to-limit offset when trailing its trigger.
-   // Leaving stoplimit unchanged would detach the child limit price from the
-   // moved stop price and can make a valid order invalid or behave differently.
-   if(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
-      stbOt==ORDER_TYPE_SELL_STOP_LIMIT)
-     {
-      if(stbCurEntry<=0.0 || stopLimit<=0.0)
-         return false;
-
-      double stopLimitOffset=stopLimit-stbCurEntry;
-      stopLimit=NormalizePrice(symbol,newEntry+stopLimitOffset);
-
-      bool offsetValid=(stopLimit>0.0 &&
-                        ((stbOt==ORDER_TYPE_BUY_STOP_LIMIT && stopLimit<newEntry) ||
-                         (stbOt==ORDER_TYPE_SELL_STOP_LIMIT && stopLimit>newEntry)));
-
-      if(!offsetValid)
-        {
-         Print("STB STOP-LIMIT MODIFY REJECT ticket=",ticket,
-               " symbol=",symbol,
-               " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-               " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-               " newStopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-         return false;
-        }
-     }
-
-   // One broker geometry write per ticket per management cycle. This also
-   // prevents ManagePendingOrders' initial-SL repair and the trailing engine
-   // from both modifying the same pending ticket in one cycle.
-   if(STB_CycleWriteAlreadyDone(ticket))
-      return false;
 
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
@@ -1956,12 +2204,17 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
    ResetLastError();
 
-   if(!OrderCheck(req,check))
+   if(!OrderCheck(req,check) &&
+      STB_PendingWriterNote("ORDERCHECK_FAILED",ticket,newEntry,newSL,newTP,
+                            "err="+IntegerToString(GetLastError()))==0)
       return false;
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
      {
+      STB_LogPendingWriterState("ORDERCHECK_REJECT",ticket,newEntry,newSL,newTP,
+                                "ret="+IntegerToString((int)check.retcode)+
+                                " comment="+check.comment);
       Print("STB PENDING MODIFY ORDERCHECK REJECT ticket=",ticket,
             " symbol=",symbol,
             " ret=",IntegerToString((int)check.retcode),
@@ -1969,60 +2222,44 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
      }
 
-   // OrderCheck can take time. Re-read the ticket and verify that both the
-   // symbol-writer lease and the geometry snapshot are still ours to modify.
-   if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
-      return false;
-   if(OrderGetString(ORDER_SYMBOL)!=symbol ||
-      OrderGetInteger(ORDER_TYPE)!=stbOt)
-      return false;
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
-      return false;
-
-   double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
-   double latestSL=OrderGetDouble(ORDER_SL);
-   double latestTP=OrderGetDouble(ORDER_TP);
-   double latestPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
-   double latestTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   double latestTolerance=MathMax(latestPoint*0.5,
-                                  latestTickSize>0.0 ? latestTickSize*0.5:latestPoint*0.5);
-   if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
-      MathAbs(latestSL-stbCurSL)>latestTolerance ||
-      MathAbs(latestTP-stbCurTP)>latestTolerance)
-      return false;
-
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
-      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
-      !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
-      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
-      return false;
-
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
+   // OrderCheck -> OrderModify race guard: the order may have been modified,
+   // converted or removed between the check and the request, so the checked
+   // snapshot is re-read and re-validated before the broker request is sent.
+   if(!OrderSelect(ticket) ||
+      OrderGetInteger(ORDER_TYPE)!=stbOt ||
+      OrderGetString(ORDER_SYMBOL)!=symbol ||
+      MathAbs(OrderGetDouble(ORDER_PRICE_OPEN)-stbCurEntry)>stbPoint*0.5 ||
+      MathAbs(OrderGetDouble(ORDER_SL)-stbCurSL)>stbPoint*0.5)
+     {
+      STB_LogPendingWriterState("STALE_SNAPSHOT",ticket,newEntry,newSL,newTP,
+                                "checked_snapshot_changed");
+      return false;
+     }
+
+   STB_LogPendingWriterState("REQUEST",ticket,newEntry,newSL,newTP,"OrderModify");
+
+   STB_GeomStore(ticket,false,newEntry,newSL,newTP); // MANUAL_OVERRIDE: remember own write
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
-                         typeTime,expiration,stopLimit))
-     {
-      if(OrderSelect(ticket))
-         STB_GeomStore(ticket,false,
-                       OrderGetDouble(ORDER_PRICE_OPEN),
-                       OrderGetDouble(ORDER_SL),
-                       OrderGetDouble(ORDER_TP));
+                         typeTime,expiration,stopLimit) &&
+      STB_PendingWriterNote("REJECTED",ticket,newEntry,newSL,newTP,
+                            "err="+IntegerToString(GetLastError())+
+                            " ret="+IntegerToString((int)trade.ResultRetcode())+
+                            " comment="+trade.ResultRetcodeDescription())==0)
       return false;
-     }
 
-   if(!TradeRetcodeModifySucceeded())
-     {
-      if(OrderSelect(ticket))
-         STB_GeomStore(ticket,false,
-                       OrderGetDouble(ORDER_PRICE_OPEN),
-                       OrderGetDouble(ORDER_SL),
-                       OrderGetDouble(ORDER_TP));
+   if(!TradeRetcodeModifySucceeded() &&
+      STB_PendingWriterNote("REJECTED",ticket,newEntry,newSL,newTP,
+                            "ret="+IntegerToString((int)trade.ResultRetcode())+
+                            " comment="+trade.ResultRetcodeDescription())==0)
       return false;
-     }
 
-   if(!OrderSelect(ticket))
+   if(!OrderSelect(ticket) &&
+      STB_PendingWriterNote("CONFIRM_UNREADABLE",ticket,newEntry,newSL,newTP,
+                            "order_not_selectable_after_modify")==0)
       return false;
 
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
@@ -2030,37 +2267,23 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double tolerance=MathMax(point*0.5,
                             tickSize>0.0 ? tickSize*0.5:point*0.5);
 
-   long verifiedType=OrderGetInteger(ORDER_TYPE);
    double ve=OrderGetDouble(ORDER_PRICE_OPEN);
    double vs=OrderGetDouble(ORDER_SL);
    double vt=OrderGetDouble(ORDER_TP);
-   double verifiedStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
-   bool isStopLimit=(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
-                     stbOt==ORDER_TYPE_SELL_STOP_LIMIT);
 
-   if(verifiedType!=stbOt ||
-      MathAbs(ve-newEntry)>tolerance ||
+   if(MathAbs(ve-newEntry)<=tolerance &&
+      MathAbs(vs-newSL)<=tolerance &&
+      MathAbs(vt-newTP)<=tolerance)
+      STB_LogPendingWriterState("CONFIRMED",ticket,newEntry,newSL,newTP,"ok");
+
+   if(MathAbs(ve-newEntry)>tolerance ||
       MathAbs(vs-newSL)>tolerance ||
-      MathAbs(vt-newTP)>tolerance ||
-      (isStopLimit && MathAbs(verifiedStopLimit-stopLimit)>tolerance))
+      MathAbs(vt-newTP)>tolerance)
      {
-      // Cache the actual server geometry, never an unconfirmed proposal.
-      // Stop-limit tickets also verify the child limit price, not just the
-      // trigger Entry/SL/TP. A broker-side mismatch is not a committed trail.
-      STB_GeomStore(ticket,false,ve,vs,vt);
-      Print("STB PENDING MODIFY POSTCHECK FAILED ticket=",ticket,
-            " symbol=",symbol,
-            " expectedType=",EnumToString((ENUM_ORDER_TYPE)stbOt),
-            " actualType=",EnumToString((ENUM_ORDER_TYPE)verifiedType),
-            " entryExpected=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " entryActual=",DoubleToString(ve,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " stopLimitExpected=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " stopLimitActual=",DoubleToString(verifiedStopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      STB_PendingWriterNote("CONFIRM_MISMATCH",ticket,newEntry,newSL,newTP,"server_geometry_differs");
       return false;
      }
 
-   STB_GeomStore(ticket,false,ve,vs,vt); // MANUAL_OVERRIDE: verified own write only
-   STB_CycleMarkWritten(ticket); // one pending geometry write per cycle
    return true;
   }
 
@@ -2090,18 +2313,6 @@ bool PreparePendingSetup(Setup &s)
 
    if(s.direction>0)
      {
-      // A BUY STOP whose planned trigger is already at/below the live Ask
-      // is stale, not merely too close to the broker's stop distance. Reject
-      // it instead of chasing price upward and manufacturing a late entry.
-      if(s.entry<=tick.ask)
-        {
-         Print("STB setup rejected: BUY STOP trigger already crossed symbol=",
-               s.symbol,
-               " planned=",DoubleToString(s.entry,digits),
-               " ask=",DoubleToString(tick.ask,digits));
-         return false;
-        }
-
       double minEntry=tick.ask+minDist;
       if(s.entry<minEntry)
          s.entry=minEntry;
@@ -2109,10 +2320,12 @@ bool PreparePendingSetup(Setup &s)
       double maxSL=tick.bid-minDist;
       double entrySL=s.entry-minDist;
 
-      // If the pattern-derived SL is too close to the live market, do not
-      // replace it with a broker-minimum-distance stop. Rebuild from confirmed
-      // structure; reject the setup if no valid structural stop exists.
       if(s.sl>maxSL)
+         s.sl=maxSL;
+
+      // Do not turn the broker minimum into the strategy SL.
+      // Recover with the same structural protection used by positions.
+      if(s.sl>=entrySL)
         {
          double structuralSL=0.0;
 
@@ -2120,7 +2333,6 @@ bool PreparePendingSetup(Setup &s)
                                            POSITION_TYPE_BUY,
                                            s.entry,
                                            structuralSL) ||
-            structuralSL>maxSL ||
             structuralSL>=entrySL)
            {
             Print("STB setup rejected: BUY structural SL unresolved symbol=",s.symbol);
@@ -2170,18 +2382,6 @@ bool PreparePendingSetup(Setup &s)
      }
    else
      {
-      // A SELL STOP whose planned trigger is already at/above the live Bid
-      // has already been crossed. Reject rather than pushing it lower and
-      // entering after the original breakdown level has passed.
-      if(s.entry>=tick.bid)
-        {
-         Print("STB setup rejected: SELL STOP trigger already crossed symbol=",
-               s.symbol,
-               " planned=",DoubleToString(s.entry,digits),
-               " bid=",DoubleToString(tick.bid,digits));
-         return false;
-        }
-
       double maxEntry=tick.bid-minDist;
       if(s.entry>maxEntry)
          s.entry=maxEntry;
@@ -2189,10 +2389,12 @@ bool PreparePendingSetup(Setup &s)
       double minSL=tick.ask+minDist;
       double entrySL=s.entry+minDist;
 
-      // If the pattern-derived SL is too close to the live market, do not
-      // replace it with a broker-minimum-distance stop. Rebuild from confirmed
-      // structure; reject the setup if no valid structural stop exists.
       if(s.sl<minSL)
+         s.sl=minSL;
+
+      // Do not turn the broker minimum into the strategy SL.
+      // Recover with the same structural protection used by positions.
+      if(s.sl<=entrySL)
         {
          double structuralSL=0.0;
 
@@ -2200,7 +2402,6 @@ bool PreparePendingSetup(Setup &s)
                                            POSITION_TYPE_SELL,
                                            s.entry,
                                            structuralSL) ||
-            structuralSL<minSL ||
             structuralSL<=entrySL)
            {
             Print("STB setup rejected: SELL structural SL unresolved symbol=",s.symbol);
@@ -2258,16 +2459,6 @@ bool PreparePendingSetup(Setup &s)
 
    if(risk<=0.0 || reward<=0.0)
       return false;
-
-   if(InpMaxInitialSLPips>0.0 &&
-      risk>InpMaxInitialSLPips*PipSize(s.symbol))
-     {
-      Print("STB setup rejected: structural risk exceeds InpMaxInitialSLPips symbol=",
-            s.symbol,
-            " riskPips=",DoubleToString(risk/PipSize(s.symbol),1),
-            " capPips=",DoubleToString(InpMaxInitialSLPips,1));
-      return false;
-     }
 
    s.rr=reward/risk;
 
@@ -2492,10 +2683,56 @@ void ReleaseIndicatorHandles()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawOscillatorPanel(const OscillatorState &o)
+  {
+// Oscillator information is rendered inside the advanced dashboard.
+// The legacy standalone label is removed so the chart keeps one
+// coherent control surface.
+   ObjectDelete(0,g_prefix+"OSC_PANEL");
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawOscillatorSignal(const Setup &s,const OscillatorState &o)
+  {
+   if(!InpDrawOscillatorPanel || !s.valid || s.symbol!=_Symbol)
+      return;
+
+   string name=g_prefix+"OSC_SIG_"+(s.direction>0 ? "B":"S");
+   ObjectDelete(0,name);
+
+   datetime t=iTime(s.symbol,PERIOD_M15,1);
+   if(t<=0)
+      return;
+
+   double price=(s.direction>0 ?
+                 iLow(s.symbol,PERIOD_M15,1):
+                 iHigh(s.symbol,PERIOD_M15,1));
+   double pip=PipSize(s.symbol);
+
+   if(price<=0.0 || pip<=0.0)
+      return;
+
+   price += (s.direction>0 ? -4.0*pip : 4.0*pip);
+
+   ENUM_OBJECT obj=(s.direction>0 ? OBJ_ARROW_BUY:OBJ_ARROW_SELL);
+
+   if(!ObjectCreate(0,name,obj,0,t,price))
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,
+                    s.direction>0 ? clrLimeGreen:clrTomato);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,2);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+
+   Print("STB OSC SIGNAL symbol=",s.symbol,
+         " dir=",(s.direction>0 ? "BUY":"SELL"),
+         " RSI=",DoubleToString(o.rsi1,2),
+         " CCI=",DoubleToString(o.cci1,2),
+         " score=",DoubleToString(s.score,1));
+  }
 
 //==================================================================
 // SWING ENGINE
@@ -2621,17 +2858,8 @@ TrendInfo GetH4Trend(const string symbol)
       lows[nl-1].price  < lows[nl-2].price;
 
    double lastClose=iClose(symbol,PERIOD_H4,1);
-   datetime lastClosedBar=iTime(symbol,PERIOD_H4,1);
-   if(lastClose<=0.0 || lastClosedBar<=0)
+   if(lastClose<=0.0)
       return result;
-
-   // Compare the last closed candle with the trendline at that candle's
-   // close time. TimeCurrent() projects the line beyond the candle being
-   // tested and can create a time mismatch late in the next H4 bar.
-   int h4Seconds=PeriodSeconds(PERIOD_H4);
-   if(h4Seconds<=0)
-      return result;
-   datetime evaluationTime=lastClosedBar+h4Seconds;
 
    double pip=PipSize(symbol);
    double tolerance=(pip>0.0 ? InpTrendlineTolerancePips*pip : 0.0);
@@ -2676,9 +2904,7 @@ TrendInfo GetH4Trend(const string symbol)
         {
          SwingPoint c=lows[nl-3];
 
-         // c is the older confirmed pivot before anchor a. Test it against
-         // the backward extension of the same line to count a third touch.
-         if(c.time<a.time)
+         if(c.time>a.time)
            {
             double lineAtC=a.price+slope*(double)(c.time-a.time);
 
@@ -2687,7 +2913,7 @@ TrendInfo GetH4Trend(const string symbol)
            }
         }
 
-      double lineNow=b.price+slope*(double)(evaluationTime-b.time);
+      double lineNow=b.price+slope*(double)(TimeCurrent()-b.time);
 
       // The line is structurally valid when price has not decisively
       // broken below it. This check affects trading validity only.
@@ -2733,9 +2959,7 @@ TrendInfo GetH4Trend(const string symbol)
         {
          SwingPoint c=highs[nh-3];
 
-         // c is the older confirmed pivot before anchor a. Test it against
-         // the backward extension of the same line to count a third touch.
-         if(c.time<a.time)
+         if(c.time>a.time)
            {
             double lineAtC=a.price+slope*(double)(c.time-a.time);
 
@@ -2744,7 +2968,7 @@ TrendInfo GetH4Trend(const string symbol)
            }
         }
 
-      double lineNow=b.price+slope*(double)(evaluationTime-b.time);
+      double lineNow=b.price+slope*(double)(TimeCurrent()-b.time);
 
       // This affects trading validity only; the drawing still shows
       // the confirmed structural line.
@@ -2761,12 +2985,938 @@ TrendInfo GetH4Trend(const string symbol)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-
+void DrawSupportResistance()
+  {
+// Support/resistance is rendered by DrawStructureVisuals() as
+// confirmed ZigZag levels with a finite 30-candle extension.
+   ObjectDelete(0,g_prefix+"VIS_RESISTANCE");
+   ObjectDelete(0,g_prefix+"VIS_SUPPORT");
+  }
 
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void BuildZigZagPoints(const string symbol,
+                       const ENUM_TIMEFRAMES tf,
+                       const int lookback,
+                       SwingPoint &points[])
+  {
+   ArrayResize(points,0);
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+
+   if(CollectSwings(symbol,tf,lookback,highs,lows)<=0)
+      return;
+
+   int nh=ArraySize(highs);
+   int nl=ArraySize(lows);
+   int total=nh+nl;
+
+   if(total<2)
+      return;
+
+   SwingPoint raw[];
+   ArrayResize(raw,total);
+
+   int n=0;
+   for(int i=0;i<nh;i++)
+      raw[n++]=highs[i];
+
+   for(int i=0;i<nl;i++)
+      raw[n++]=lows[i];
+
+   SortSwingsByTime(raw);
+
+// The trendline must use exactly the same confirmed ZigZag pivots
+// that are visible on the chart. Consecutive pivots of the same type
+// are compressed to the more extreme pivot.
+   for(int i=0;i<n;i++)
+     {
+      int m=ArraySize(points);
+
+      if(m==0)
+        {
+         ArrayResize(points,1);
+         points[0]=raw[i];
+         continue;
+        }
+
+      if(points[m-1].isHigh==raw[i].isHigh)
+        {
+         bool replace=
+            (raw[i].isHigh && raw[i].price>points[m-1].price) ||
+            (!raw[i].isHigh && raw[i].price<points[m-1].price);
+
+         if(replace)
+            points[m-1]=raw[i];
+        }
+      else
+        {
+         ArrayResize(points,m+1);
+         points[m]=raw[i];
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawH4Trendline()
+  {
+// =============================================================
+// PROFESSIONAL TRENDLINE ENGINE
+// =============================================================
+// Each chart timeframe is calculated independently.
+// The active timeframe supplies:
+//   1) its own market data
+//   2) its own swing structure
+//   3) its own lookback
+//   4) its own trendline anchors
+//
+// The active structural leg begins at the earliest confirmed
+// pivot in the current monotonic pivot sequence.
+//
+// Visual behavior:
+//   SOLID  = structural trendline before first valid touch
+//   DOTTED = continuation after first valid touch
+//   BREAK  = closed candle beyond line + tolerance
+//
+// No order, position, scanner, risk or strategy state is changed.
+// =============================================================
+
+   string highBase=g_prefix+"TF_TREND_HIGH";
+   string highExt =g_prefix+"TF_TREND_HIGH_EXT";
+   string lowBase =g_prefix+"TF_TREND_LOW";
+   string lowExt  =g_prefix+"TF_TREND_LOW_EXT";
+
+   ObjectDelete(0,highBase);
+   ObjectDelete(0,highExt);
+   ObjectDelete(0,lowBase);
+   ObjectDelete(0,lowExt);
+
+   ENUM_TIMEFRAMES tf=(ENUM_TIMEFRAMES)_Period;
+
+// --------------------------------------------------------------
+// Independent lookback for every timeframe.
+// --------------------------------------------------------------
+   int lookback=600;
+
+   switch(tf)
+     {
+      case PERIOD_M1:
+         lookback=1500;
+         break;
+
+      case PERIOD_M2:
+      case PERIOD_M3:
+      case PERIOD_M4:
+         lookback=1400;
+         break;
+
+      case PERIOD_M5:
+      case PERIOD_M6:
+         lookback=1300;
+         break;
+
+      case PERIOD_M10:
+      case PERIOD_M12:
+         lookback=1200;
+         break;
+
+      case PERIOD_M15:
+         lookback=1100;
+         break;
+
+      case PERIOD_M20:
+         lookback=1000;
+         break;
+
+      case PERIOD_M30:
+         lookback=900;
+         break;
+
+      case PERIOD_H1:
+         lookback=800;
+         break;
+
+      case PERIOD_H2:
+         lookback=700;
+         break;
+
+      case PERIOD_H3:
+         lookback=650;
+         break;
+
+      case PERIOD_H4:
+         lookback=600;
+         break;
+
+      case PERIOD_H6:
+         lookback=550;
+         break;
+
+      case PERIOD_H8:
+         lookback=500;
+         break;
+
+      case PERIOD_H12:
+         lookback=450;
+         break;
+
+      case PERIOD_D1:
+         lookback=400;
+         break;
+
+      case PERIOD_W1:
+         lookback=250;
+         break;
+
+      case PERIOD_MN1:
+         lookback=180;
+         break;
+
+      default:
+         lookback=600;
+         break;
+     }
+
+   int minimumLookback=
+      InpSwingLeft+
+      InpSwingRight+
+      40;
+
+   if(lookback<minimumLookback)
+      lookback=minimumLookback;
+
+   int availableBars=Bars(_Symbol,tf);
+
+   if(availableBars<minimumLookback+10)
+      return;
+
+   if(lookback>availableBars-5)
+      lookback=availableBars-5;
+
+   SwingPoint zz[];
+
+   BuildZigZagPoints(
+      _Symbol,
+      tf,
+      lookback,
+      zz);
+
+   int n=ArraySize(zz);
+
+   if(n<4)
+      return;
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+
+// Build arrays oldest -> newest from confirmed structural pivots.
+   for(int i=0;i<n;i++)
+     {
+      if(zz[i].isHigh)
+        {
+         int h=ArraySize(highs);
+         ArrayResize(highs,h+1);
+         highs[h]=zz[i];
+        }
+      else
+        {
+         int l=ArraySize(lows);
+         ArrayResize(lows,l+1);
+         lows[l]=zz[i];
+        }
+     }
+
+   if(ArraySize(highs)<2 || ArraySize(lows)<2)
+      return;
+
+   MqlRates rates[];
+
+   if(!GetRates(
+         _Symbol,
+         tf,
+         lookback,
+         rates))
+      return;
+
+   double pip=PipSize(_Symbol);
+
+   double tolerance=
+      pip>0.0 ?
+      MathMax(0.0,InpTrendlineTolerancePips)*pip :
+      0.0;
+
+   int lineWidth=MathMax(2,InpTrendlineWidth);
+
+// =============================================================
+// UPPER STRUCTURAL TRENDLINE
+// =============================================================
+
+   int hCount=ArraySize(highs);
+
+   int hStart=hCount-2;
+
+   if(hCount>=3)
+     {
+      double lastDelta=
+         highs[hCount-1].price-
+         highs[hCount-2].price;
+
+      if(MathAbs(lastDelta)>0.0)
+        {
+         bool rising=(lastDelta>0.0);
+
+         while(hStart>0)
+           {
+            double prevDelta=
+               highs[hStart].price-
+               highs[hStart-1].price;
+
+            if(prevDelta==0.0)
+               break;
+
+            if((prevDelta>0.0)!=rising)
+               break;
+
+            hStart--;
+           }
+        }
+     }
+
+   SwingPoint hOld=highs[hStart];
+   SwingPoint hNew=highs[hCount-1];
+
+   if(hOld.time>0 &&
+      hNew.time>hOld.time &&
+      hOld.price>0.0 &&
+      hNew.price>0.0 &&
+      hOld.shift>hNew.shift)
+     {
+      double slope=
+         (hNew.price-hOld.price)/
+         (double)(hNew.time-hOld.time);
+
+      int touchShift=-1;
+      int breakShift=-1;
+
+      // Current pivot -> present, newest closed candle first.
+      for(int sh=hNew.shift-1;sh>=1;sh--)
+        {
+         double line=
+            hNew.price+
+            slope*(double)(
+               rates[sh].time-hNew.time);
+
+         // Confirmed structural break = candle CLOSE beyond line.
+         if(rates[sh].close>line+tolerance)
+           {
+            breakShift=sh;
+            break;
+           }
+
+         // First touch before break.
+         if(touchShift<0 &&
+            rates[sh].high>=line-tolerance)
+           {
+            touchShift=sh;
+           }
+        }
+
+      // -----------------------------------------------------------
+      // Before first touch: solid structural trendline.
+      // -----------------------------------------------------------
+
+      if(touchShift<0)
+        {
+         datetime endTime=hNew.time;
+         double endPrice=hNew.price;
+
+         if(breakShift>0)
+           {
+            endTime=rates[breakShift].time;
+
+            endPrice=
+               hNew.price+
+               slope*(double)(
+                  endTime-hNew.time);
+           }
+
+         if(ObjectCreate(
+               0,
+               highBase,
+               OBJ_TREND,
+               0,
+               hOld.time,
+               hOld.price,
+               endTime,
+               endPrice))
+           {
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_COLOR,
+               InpBearTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_STYLE,
+               STYLE_SOLID);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_RAY_RIGHT,
+               breakShift>0 ? false:true);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_HIDDEN,
+               false);
+           }
+        }
+      else
+        {
+         // --------------------------------------------------------
+         // Solid: beginning of trend -> first touch.
+         // --------------------------------------------------------
+
+         datetime touchTime=
+            rates[touchShift].time;
+
+         double touchPrice=
+            hNew.price+
+            slope*(double)(
+               touchTime-hNew.time);
+
+         if(ObjectCreate(
+               0,
+               highBase,
+               OBJ_TREND,
+               0,
+               hOld.time,
+               hOld.price,
+               touchTime,
+               touchPrice))
+           {
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_COLOR,
+               InpBearTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_STYLE,
+               STYLE_SOLID);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_RAY_RIGHT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highBase,
+               OBJPROP_HIDDEN,
+               false);
+           }
+
+         // --------------------------------------------------------
+         // Dotted: first touch -> break OR current present.
+         // --------------------------------------------------------
+
+         datetime dottedEndTime;
+         double dottedEndPrice;
+
+         if(breakShift>0)
+           {
+            dottedEndTime=
+               rates[breakShift].time;
+
+            dottedEndPrice=
+               hNew.price+
+               slope*(double)(
+                  dottedEndTime-hNew.time);
+           }
+         else
+           {
+            dottedEndTime=rates[1].time;
+
+            dottedEndPrice=
+               hNew.price+
+               slope*(double)(
+                  dottedEndTime-hNew.time);
+           }
+
+         if(dottedEndTime>touchTime &&
+            ObjectCreate(
+               0,
+               highExt,
+               OBJ_TREND,
+               0,
+               touchTime,
+               touchPrice,
+               dottedEndTime,
+               dottedEndPrice))
+           {
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_COLOR,
+               InpBearTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_STYLE,
+               STYLE_DOT);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_RAY_RIGHT,
+               breakShift>0 ? false:true);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               highExt,
+               OBJPROP_HIDDEN,
+               false);
+           }
+        }
+     }
+
+// =============================================================
+// LOWER STRUCTURAL TRENDLINE
+// =============================================================
+
+   int lCount=ArraySize(lows);
+
+   int lStart=lCount-2;
+
+   if(lCount>=3)
+     {
+      double lastDelta=
+         lows[lCount-1].price-
+         lows[lCount-2].price;
+
+      if(MathAbs(lastDelta)>0.0)
+        {
+         bool rising=(lastDelta>0.0);
+
+         while(lStart>0)
+           {
+            double prevDelta=
+               lows[lStart].price-
+               lows[lStart-1].price;
+
+            if(prevDelta==0.0)
+               break;
+
+            if((prevDelta>0.0)!=rising)
+               break;
+
+            lStart--;
+           }
+        }
+     }
+
+   SwingPoint lOld=lows[lStart];
+   SwingPoint lNew=lows[lCount-1];
+
+   if(lOld.time>0 &&
+      lNew.time>lOld.time &&
+      lOld.price>0.0 &&
+      lNew.price>0.0 &&
+      lOld.shift>lNew.shift)
+     {
+      double slope=
+         (lNew.price-lOld.price)/
+         (double)(lNew.time-lOld.time);
+
+      int touchShift=-1;
+      int breakShift=-1;
+
+      for(int sh=lNew.shift-1;sh>=1;sh--)
+        {
+         double line=
+            lNew.price+
+            slope*(double)(
+               rates[sh].time-lNew.time);
+
+         // Confirmed structural break = candle CLOSE below line.
+         if(rates[sh].close<line-tolerance)
+           {
+            breakShift=sh;
+            break;
+           }
+
+         // First touch before break.
+         if(touchShift<0 &&
+            rates[sh].low<=line+tolerance)
+           {
+            touchShift=sh;
+           }
+        }
+
+      // -----------------------------------------------------------
+      // Before first touch: solid structural trendline.
+      // -----------------------------------------------------------
+
+      if(touchShift<0)
+        {
+         datetime endTime=lNew.time;
+         double endPrice=lNew.price;
+
+         if(breakShift>0)
+           {
+            endTime=rates[breakShift].time;
+
+            endPrice=
+               lNew.price+
+               slope*(double)(
+                  endTime-lNew.time);
+           }
+
+         if(ObjectCreate(
+               0,
+               lowBase,
+               OBJ_TREND,
+               0,
+               lOld.time,
+               lOld.price,
+               endTime,
+               endPrice))
+           {
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_COLOR,
+               InpBullTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_STYLE,
+               STYLE_SOLID);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_RAY_RIGHT,
+               breakShift>0 ? false:true);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_HIDDEN,
+               false);
+           }
+        }
+      else
+        {
+         // --------------------------------------------------------
+         // Solid: beginning of trend -> first touch.
+         // --------------------------------------------------------
+
+         datetime touchTime=
+            rates[touchShift].time;
+
+         double touchPrice=
+            lNew.price+
+            slope*(double)(
+               touchTime-lNew.time);
+
+         if(ObjectCreate(
+               0,
+               lowBase,
+               OBJ_TREND,
+               0,
+               lOld.time,
+               lOld.price,
+               touchTime,
+               touchPrice))
+           {
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_COLOR,
+               InpBullTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_STYLE,
+               STYLE_SOLID);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_RAY_RIGHT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowBase,
+               OBJPROP_HIDDEN,
+               false);
+           }
+
+         // --------------------------------------------------------
+         // Dotted: first touch -> break OR current present.
+         // --------------------------------------------------------
+
+         datetime dottedEndTime;
+         double dottedEndPrice;
+
+         if(breakShift>0)
+           {
+            dottedEndTime=
+               rates[breakShift].time;
+
+            dottedEndPrice=
+               lNew.price+
+               slope*(double)(
+                  dottedEndTime-lNew.time);
+           }
+         else
+           {
+            dottedEndTime=rates[1].time;
+
+            dottedEndPrice=
+               lNew.price+
+               slope*(double)(
+                  dottedEndTime-lNew.time);
+           }
+
+         if(dottedEndTime>touchTime &&
+            ObjectCreate(
+               0,
+               lowExt,
+               OBJ_TREND,
+               0,
+               touchTime,
+               touchPrice,
+               dottedEndTime,
+               dottedEndPrice))
+           {
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_COLOR,
+               InpBullTrendlineColor);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_WIDTH,
+               lineWidth);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_STYLE,
+               STYLE_DOT);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_RAY_LEFT,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_RAY_RIGHT,
+               breakShift>0 ? false:true);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_TIMEFRAMES,
+               OBJ_ALL_PERIODS);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_BACK,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_SELECTABLE,
+               false);
+
+            ObjectSetInteger(
+               0,
+               lowExt,
+               OBJPROP_HIDDEN,
+               false);
+           }
+        }
+     }
+
+   ChartRedraw(0);
+  }
 //==================================================================
 // M15 CHoCH + BOS
 //==================================================================
@@ -2774,6 +3924,143 @@ TrendInfo GetH4Trend(const string symbol)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_LogStructureDebug(const string symbol,
+                           const int direction,
+                           const SwingPoint &latestHigh,
+                           const SwingPoint &latestLow,
+                           const SwingPoint &highs[],
+                           const SwingPoint &lows[],
+                           const MqlRates &rates[])
+  {
+// Diagnostic-only instrumentation. It does not change signal eligibility.
+   if(symbol!=_Symbol)
+      return;
+
+   static datetime lastBuyBar=0;
+   static datetime lastSellBar=0;
+
+   datetime currentBar=iTime(symbol,PERIOD_M15,0);
+   if(currentBar<=0)
+      return;
+
+   if(direction>0)
+     {
+      if(currentBar==lastBuyBar)
+         return;
+      lastBuyBar=currentBar;
+     }
+   else
+     {
+      if(currentBar==lastSellBar)
+         return;
+      lastSellBar=currentBar;
+     }
+
+   const int window=MathMax(5,InpStructureWindowBars);
+   const int rightBars=MathMax(1,STB_EffectiveSwingRight(PERIOD_M15));
+   const int size=ArraySize(rates);
+
+   double bestDelta=-DBL_MAX;
+   int bestPivotShift=-1;
+   int bestBreakShift=-1;
+   double bestPivotPrice=0.0;
+   int candidateCount=0;
+
+   if(direction>0)
+     {
+      for(int s=1;s<=window && s<size;s++)
+        {
+         for(int i=ArraySize(highs)-1;i>=0;i--)
+           {
+            int pivotShift=highs[i].shift;
+
+            if(pivotShift<=s)
+               continue;
+
+            if(pivotShift<rightBars)
+               continue;
+
+            if(pivotShift-s>window)
+               continue;
+
+            double delta=rates[s].close-highs[i].price;
+
+            if(delta>bestDelta)
+              {
+               bestDelta=delta;
+               bestPivotShift=pivotShift;
+               bestBreakShift=s;
+               bestPivotPrice=highs[i].price;
+              }
+
+            candidateCount++;
+           }
+        }
+
+      int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+
+      Print("STB STRUCTURE DEBUG symbol=",symbol,
+            " dir=BUY",
+            " window=",window,
+            " latestHighShift=",latestHigh.shift,
+            " latestHigh=",DoubleToString(latestHigh.price,digits),
+            " candidates=",candidateCount,
+            " bestPivotShift=",bestPivotShift,
+            " bestBreakShift=",bestBreakShift,
+            " bestPivot=",DoubleToString(bestPivotPrice,digits),
+            " bestClose=",DoubleToString(
+               bestBreakShift>0 ? rates[bestBreakShift].close:0.0,digits),
+            " closeMinusPivot=",DoubleToString(
+               bestDelta>-DBL_MAX/2.0 ? bestDelta:0.0,digits));
+     }
+   else
+     {
+      for(int s=1;s<=window && s<size;s++)
+        {
+         for(int i=ArraySize(lows)-1;i>=0;i--)
+           {
+            int pivotShift=lows[i].shift;
+
+            if(pivotShift<=s)
+               continue;
+
+            if(pivotShift<rightBars)
+               continue;
+
+            if(pivotShift-s>window)
+               continue;
+
+            double delta=lows[i].price-rates[s].close;
+
+            if(delta>bestDelta)
+              {
+               bestDelta=delta;
+               bestPivotShift=pivotShift;
+               bestBreakShift=s;
+               bestPivotPrice=lows[i].price;
+              }
+
+            candidateCount++;
+           }
+        }
+
+      int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+
+      Print("STB STRUCTURE DEBUG symbol=",symbol,
+            " dir=SELL",
+            " window=",window,
+            " latestLowShift=",latestLow.shift,
+            " latestLow=",DoubleToString(latestLow.price,digits),
+            " candidates=",candidateCount,
+            " bestPivotShift=",bestPivotShift,
+            " bestBreakShift=",bestBreakShift,
+            " bestPivot=",DoubleToString(bestPivotPrice,digits),
+            " bestClose=",DoubleToString(
+               bestBreakShift>0 ? rates[bestBreakShift].close:0.0,digits),
+            " pivotMinusClose=",DoubleToString(
+               bestDelta>-DBL_MAX/2.0 ? bestDelta:0.0,digits));
+     }
+  }
 
 
 //+------------------------------------------------------------------+
@@ -3063,60 +4350,9 @@ bool FindOriginCandle(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-// Find the nearest already-confirmed opposite-side swing that predates the
-// structure-break candle. This is the fallback stop anchor when no valid OB
-// exists; the broken pivot itself is an entry trigger, not a protective stop.
-bool FindStructuralStopAnchor(const string symbol,
-                              const int direction,
-                              const int bosShift,
-                              double &anchorPrice)
-  {
-   anchorPrice=0.0;
-
-   SwingPoint highs[];
-   SwingPoint lows[];
-   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-      return false;
-
-   int bestShift=2147483647;
-
-   if(direction>0)
-     {
-      for(int i=0;i<ArraySize(lows);i++)
-        {
-         if(lows[i].shift<=bosShift || lows[i].price<=0.0)
-            continue;
-
-         if(lows[i].shift<bestShift)
-           {
-            bestShift=lows[i].shift;
-            anchorPrice=lows[i].price;
-           }
-        }
-     }
-   else
-     if(direction<0)
-       {
-        for(int i=0;i<ArraySize(highs);i++)
-          {
-           if(highs[i].shift<=bosShift || highs[i].price<=0.0)
-              continue;
-
-           if(highs[i].shift<bestShift)
-             {
-              bestShift=highs[i].shift;
-              anchorPrice=highs[i].price;
-             }
-          }
-       }
-
-   return (anchorPrice>0.0 && bestShift<2147483647);
-  }
-
 bool BuildSetup(const string symbol,
                 const int direction,
-                Setup &s,
-                const bool countAdaptiveAttempt)
+                Setup &s)
   {
    ZeroMemory(s);
 
@@ -3128,11 +4364,10 @@ bool BuildSetup(const string symbol,
    STB_AP_SelectActive(symbol,direction);
    s.adaptiveProfile=g_activeAdaptiveProfileId;
 
-// Count a strategy probe only during the scanner's first-pass discovery.
-// Candidate revalidation rebuilds the same setup several times; those checks
-// must not inflate adaptive sample counts or make profiles appear warmed up.
-   if(countAdaptiveAttempt)
-      STB_AP_RecordAttempt(symbol,direction,s.adaptiveProfile);
+// Count one probe for the selected profile even when this build later
+// rejects on structure/geometry/pattern conditions. Closed trade outcomes
+// remain the only signals that update wins/losses/R-multiple.
+   STB_AP_RecordAttempt(symbol,direction,s.adaptiveProfile);
 
    if(!IsDirectionTradable(symbol,direction))
      {
@@ -3219,9 +4454,7 @@ bool BuildSetup(const string symbol,
    if(InpStrictPatternFilters && InpRequireOB && !hasOB)
       return STB_BuildReject(symbol,direction,"OB_REQUIRED");
 
-   // If OB is optional and none is found, use the confirmed break swing as
-   // the structural fallback. The mandatory-OB case already rejected above.
-   if(!hasOB)
+   if(!hasOB && !InpStrictPatternFilters)
      {
       originShift=breakSwing.shift;
       originHigh=iHigh(symbol,PERIOD_M15,originShift);
@@ -3236,20 +4469,6 @@ bool BuildSetup(const string symbol,
    if(pip<=0.0)
       return STB_BuildReject(symbol,direction,"PIP_SIZE_INVALID");
 
-   // Risk belongs beyond the opposite side of the actual Order Block when
-   // one is found. If OB is optional and absent, use the nearest confirmed
-   // pre-BOS swing on the risk side. Do not place SL just beyond the broken
-   // swing that defines the entry trigger; that artificially compresses risk.
-   double stopAnchor=(direction>0 ? originLow:originHigh);
-   if(!hasOB &&
-      !FindStructuralStopAnchor(symbol,direction,bosShift,stopAnchor))
-      return STB_BuildReject(symbol,direction,"STRUCTURAL_STOP_ANCHOR_MISSING");
-
-   if(stopAnchor<=0.0 ||
-      (direction>0 && stopAnchor>=originHigh) ||
-      (direction<0 && stopAnchor<=originLow))
-      return STB_BuildReject(symbol,direction,"STRUCTURAL_STOP_ANCHOR_INVALID");
-
    double entryBuffer=STB_EffectiveEntryBuffer();
    s.entryBufferPips=MathMax(0.0,entryBuffer); // P4 EB contract source
    double slBuffer=STB_EffectiveSLBuffer();
@@ -3260,20 +4479,13 @@ bool BuildSetup(const string symbol,
    // in PreparePendingSetup().
    if(direction>0)
      {
-      // A BUY STOP is a breakout order, so its trigger must stay above the
-      // confirmed swing-high broken by BOS. The OB high can be below that
-      // swing; basing a STOP only on the OB may let it trigger prematurely.
-      double buyTriggerBase=MathMax(originHigh,breakSwing.price);
-      s.entry=NormalizePrice(symbol,buyTriggerBase + entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,stopAnchor - slBuffer*pip);
+      s.entry=NormalizePrice(symbol,originHigh + entryBuffer*pip);
+      s.sl=NormalizePrice(symbol,breakSwing.price - slBuffer*pip);
      }
    else
      {
-      // Symmetric rule for SELL STOP: trigger below both the OB low and the
-      // confirmed broken swing-low. If valid RR no longer exists, reject it.
-      double sellTriggerBase=MathMin(originLow,breakSwing.price);
-      s.entry=NormalizePrice(symbol,sellTriggerBase - entryBuffer*pip);
-      s.sl=NormalizePrice(symbol,stopAnchor + slBuffer*pip);
+      s.entry=NormalizePrice(symbol,originLow - entryBuffer*pip);
+      s.sl=NormalizePrice(symbol,breakSwing.price + slBuffer*pip);
      }
 
    if(!PreparePendingSetup(s))
@@ -3382,7 +4594,6 @@ bool BuildSetup(const string symbol,
 
    return true;
   }
-
 
 //==================================================================
 // GLOBAL VARIABLE IDENTIFIERS
@@ -3512,8 +4723,6 @@ string ScopedStateName(const string purpose)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
               (string)InpMagic+"|"+purpose;
-   if(MQLInfoInteger(MQL_TESTER))
-      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
@@ -3524,8 +4733,6 @@ string ScopedSymbolStateName(const string purpose,const string symbol)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
               (string)InpMagic+"|"+purpose+"|"+symbol;
-   if(MQLInfoInteger(MQL_TESTER))
-      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
@@ -3562,29 +4769,260 @@ void SetLastSetupTime(const string symbol,const int direction,const datetime t)
 // OWNERSHIP / ORIGIN + TRADE REGISTRY
 //==================================================================
 
+enum ENUM_STB_ORIGIN
+  {
+   STB_ORIGIN_AUTO=0,
+   STB_ORIGIN_MANUAL_CHART=1,
+   STB_ORIGIN_MANUAL_MOBILE=2,
+   STB_ORIGIN_HEDGE=3,
+   STB_ORIGIN_FOREIGN=4,
+   STB_ORIGIN_AMBIGUOUS=5
+  };
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+/* STB SIMPLIFICATION: legacy ORIGIN classification (OriginName, markers,
+   ClassifyOrigin / ClassifyPositionOrigin / ClassifyOrderOrigin /
+   ClassifyDealOrigin) and the write-only trade-origin registry
+   (STBOriginRecord, g_stbOriginRegistry, FindOriginRecord,
+   RegisterPosition/RegisterOrder) are removed. Ownership scope is the
+   allowed symbol only.
+string STB_OriginName(const ENUM_STB_ORIGIN origin)
+  {
+   switch(origin)
+     {
+      case STB_ORIGIN_AUTO:
+         return "AUTO";
+      case STB_ORIGIN_MANUAL_CHART:
+         return "MANUAL_CHART";
+      case STB_ORIGIN_MANUAL_MOBILE:
+         return "MANUAL_MOBILE";
+      case STB_ORIGIN_HEDGE:
+         return "HEDGE";
+      case STB_ORIGIN_FOREIGN:
+         return "FOREIGN";
+      case STB_ORIGIN_AMBIGUOUS:
+         return "AMBIGUOUS";
+
+     }
+   return "AMBIGUOUS";
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool STB_IsSTBAutoMarker(const string comment)
+  {
+   return StringFind(comment,"STB|B|")==0 ||
+          StringFind(comment,"STB|S|")==0;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool STB_IsSTBManualMarker(const string comment)
+  {
+   return StringFind(comment,"STB|M|")==0;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool STB_IsSTBHedgeMarker(const string comment)
+  {
+   return StringFind(comment,"STB|HEDGE|")==0;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+ENUM_STB_ORIGIN STB_ClassifyOrigin(const long magic,
+                                   const string comment,
+                                   const long reason)
+  {
+   const bool ownMagic=(magic==(long)InpMagic);
+   const bool noMagic=(magic==0);
+   const bool foreignMagic=(magic!=0 && !ownMagic);
+
+   if(foreignMagic)
+      return STB_ORIGIN_FOREIGN;
+
+   if(ownMagic && STB_IsSTBHedgeMarker(comment))
+      return STB_ORIGIN_HEDGE;
+
+   if((noMagic || ownMagic) &&
+      (reason==(long)POSITION_REASON_MOBILE ||
+       reason==(long)ORDER_REASON_MOBILE ||
+       reason==(long)DEAL_REASON_MOBILE))
+      return STB_ORIGIN_MANUAL_MOBILE;
+
+   if(noMagic || ownMagic)
+     {
+      if(STB_IsSTBManualMarker(comment))
+         return STB_ORIGIN_MANUAL_CHART;
+
+      if(ownMagic && STB_IsSTBAutoMarker(comment))
+         return STB_ORIGIN_AUTO;
+
+      if(reason==(long)POSITION_REASON_CLIENT ||
+         reason==(long)ORDER_REASON_CLIENT ||
+         reason==(long)DEAL_REASON_CLIENT)
+         return STB_ORIGIN_MANUAL_CHART;
+
+      if(ownMagic &&
+         (reason==(long)POSITION_REASON_EXPERT ||
+          reason==(long)ORDER_REASON_EXPERT ||
+          reason==(long)DEAL_REASON_EXPERT))
+         return STB_ORIGIN_AUTO;
+     }
+
+// WEB has no automatic ownership mapping by design.
+   return STB_ORIGIN_AMBIGUOUS;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+ENUM_STB_ORIGIN STB_ClassifyPositionOrigin(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return STB_ORIGIN_AMBIGUOUS;
+
+   return STB_ClassifyOrigin(
+             PositionGetInteger(POSITION_MAGIC),
+             PositionGetString(POSITION_COMMENT),
+             PositionGetInteger(POSITION_REASON));
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+ENUM_STB_ORIGIN STB_ClassifyOrderOrigin(const ulong ticket)
+  {
+   if(ticket==0 || !OrderSelect(ticket))
+      return STB_ORIGIN_AMBIGUOUS;
+
+   return STB_ClassifyOrigin(
+             OrderGetInteger(ORDER_MAGIC),
+             OrderGetString(ORDER_COMMENT),
+             OrderGetInteger(ORDER_REASON));
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+ENUM_STB_ORIGIN STB_ClassifyDealOrigin(const ulong ticket)
+  {
+   if(ticket==0 || !HistoryDealSelect(ticket))
+      return STB_ORIGIN_AMBIGUOUS;
+
+   return STB_ClassifyOrigin(
+             HistoryDealGetInteger(ticket,DEAL_MAGIC),
+             HistoryDealGetString(ticket,DEAL_COMMENT),
+             HistoryDealGetInteger(ticket,DEAL_REASON));
+  }
+
+struct STBOriginRecord
+  {
+   ulong             key;
+   bool              isPosition;
+   ENUM_STB_ORIGIN   origin;
+
+   datetime          lastSeen;
+  };
+
+STBOriginRecord g_stbOriginRegistry[];
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int STB_FindOriginRecord(const ulong key,const bool isPosition)
+  {
+   for(int i=0;i<ArraySize(g_stbOriginRegistry);i++)
+      if(g_stbOriginRegistry[i].key==key &&
+         g_stbOriginRegistry[i].isPosition==isPosition)
+         return i;
+
+   return -1;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void STB_RegisterPosition(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return;
+
+   ulong positionId=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   if(positionId==0)
+      return;
+
+   int idx=STB_FindOriginRecord(positionId,true);
+
+   if(idx<0)
+     {
+      idx=ArraySize(g_stbOriginRegistry);
+      ArrayResize(g_stbOriginRegistry,idx+1);
+      g_stbOriginRegistry[idx].key=positionId;
+      g_stbOriginRegistry[idx].isPosition=true;
+
+     }
+
+   g_stbOriginRegistry[idx].origin=STB_ClassifyPositionOrigin(ticket);
+   g_stbOriginRegistry[idx].lastSeen=TimeCurrent();
+
+   // P5 STB-011: inert registry flag removed (write-only, never read)
+
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void STB_RegisterOrder(const ulong ticket)
+  {
+   if(ticket==0 || !OrderSelect(ticket))
+      return;
+
+   int idx=STB_FindOriginRecord(ticket,false);
+
+   if(idx<0)
+     {
+      idx=ArraySize(g_stbOriginRegistry);
+      ArrayResize(g_stbOriginRegistry,idx+1);
+      g_stbOriginRegistry[idx].key=ticket;
+      g_stbOriginRegistry[idx].isPosition=false;
+
+     }
+
+   g_stbOriginRegistry[idx].origin=STB_ClassifyOrderOrigin(ticket);
+   g_stbOriginRegistry[idx].lastSeen=TimeCurrent();
+
+   // P5 STB-011: inert registry flag removed (write-only, never read)
+
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+*/
 void STB_ReconcileTradeRegistry()
   {
 
 
-   STB_GeomPrune(); STB_OverridePersistPrune(false); // MANUAL_OVERRIDE: drop geometry memory for closed tickets + purge persisted overrides for tickets that no longer exist
+   STB_GeomPrune(); // MANUAL_OVERRIDE: drop geometry memory for closed tickets
 
    for(int i=0;i<PositionsTotal();i++)
      {
       ulong ticket=PositionGetTicket(i);
       if(ticket==0 || !PositionSelectByTicket(ticket))
          continue;
-      if(!STB_IsProtectionPosition(ticket))
+      if(!IsManagedPosition(ticket))
          continue;
 
-      // Seed recovery state from the actual terminal geometry. Otherwise the
-      // registry's initial zero values can misclassify the next routine server
-      // POSITION update as an external/manual geometry edit.
-      STB_ExposureEnsure(ticket,true); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
-      STB_GeomStore(ticket,true,
-                    PositionGetDouble(POSITION_PRICE_OPEN),
-                    PositionGetDouble(POSITION_SL),
-                    PositionGetDouble(POSITION_TP));
+      // SIMPLIFIED: origin registry call removed.
+      // Blueprint 29: reconcile registers/syncs only; no broker write here.
      }
 
    for(int i=0;i<OrdersTotal();i++)
@@ -3595,13 +5033,15 @@ void STB_ReconcileTradeRegistry()
       if(!IsManagedOrder(ticket))
          continue;
 
-      // Seed recovery state from the actual pending-order geometry.
+      // SIMPLIFIED: origin registry call removed.
       STB_PendingTrailRegister(ticket,"RECONCILE");
-      STB_ExposureEnsure(ticket,false); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
-      STB_GeomStore(ticket,false,
-                    OrderGetDouble(ORDER_PRICE_OPEN),
-                    OrderGetDouble(ORDER_SL),
-                    OrderGetDouble(ORDER_TP));
+      // Blueprint 29: reconcile registers/syncs only; no broker write here.
+
+      ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+
+      if(orderType==ORDER_TYPE_BUY_STOP ||
+         STB_IsManagedPendingType((long)orderType))
+         STB_PendingTrailRegister(ticket,"RECONCILE");
      }
 
    // SIMPLIFIED: origin registry prune loop removed.
@@ -3621,19 +5061,18 @@ void STB_ReconcileTradeRegistry()
 //+------------------------------------------------------------------+
 void STB_ManagePositionImmediately(const ulong ticket)
   {
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
       return;
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   STB_ExposureEnsure(ticket,true);
-   STB_GeomStore(ticket,true,
-                 PositionGetDouble(POSITION_PRICE_OPEN),
-                 PositionGetDouble(POSITION_SL),
-                 PositionGetDouble(POSITION_TP));
+
+   // Blueprint 28: intake only (Discover/Sync/Register). Initial protection + management run in STB_RunManagementCycle().
+
+
+
+
+
    Print("STB POSITION HANDOFF ACTIVE ticket=",ticket,
-         " symbol=",symbol,
-         " side=",(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "BUY":"SELL"),
-         " action=IMMEDIATE_MANAGEMENT_CYCLE");
-   STB_RunManagementCycle();
+         " symbol=",PositionGetString(POSITION_SYMBOL),
+         " side=",(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY ? "BUY":"SELL"));
   }
 
 void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
@@ -3647,20 +5086,11 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
         {
          ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
 
-         // Capture terminal-confirmed geometry at first discovery. Without this
-         // baseline, an immediate manual entry/SL/TP edit on a newly created
-         // pending order could be mistaken for an unknown geometry snapshot.
-         if(IsManagedOrder(trans.order))
-           {
-            STB_ExposureEnsure(trans.order,false);
-            STB_GeomStore(trans.order,false,
-                          OrderGetDouble(ORDER_PRICE_OPEN),
-                          OrderGetDouble(ORDER_SL),
-                          OrderGetDouble(ORDER_TP));
+         // Blueprint 28: no write from transaction intake; initial SL is ensured in the cycle.
 
-            if(STB_IsManagedPendingType((long)orderType))
-               STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
-           }
+         if(orderType==ORDER_TYPE_BUY_STOP ||
+            STB_IsManagedPendingType((long)orderType))
+            STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION");
         }
 
       return;
@@ -3670,31 +5100,11 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
       trans.deal>0 &&
       HistoryDealSelect(trans.deal))
      {
-      // Pending-order override applies only while the order is pending.
-// The resulting open position always enters the protection manager.
       if(trans.order>0)
          STB_PendingTrailOnOrderFilled(trans.order);
 
       if(trans.position>0 && PositionSelectByTicket(trans.position))
         {
-         if(STB_IsProtectionPosition(trans.position))
-           {
-            string positionSymbol=PositionGetString(POSITION_SYMBOL);
-            double positionEntry=PositionGetDouble(POSITION_PRICE_OPEN);
-            double positionSL=PositionGetDouble(POSITION_SL);
-            double positionTP=PositionGetDouble(POSITION_TP);
-
-            STB_ExposureEnsure(trans.position,true);
-            STB_GeomStore(trans.position,true,
-                          positionEntry,positionSL,positionTP);
-
-            Print("STB POSITION PROTECTION ACTIVE after fill ticket=",
-                   IntegerToString((int)trans.position),
-                   " symbol=",positionSymbol,
-                   " SL=",DoubleToString(positionSL,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)),
-                   " TP=",DoubleToString(positionTP,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)));
-           }
-
          // SIMPLIFIED: origin registry call removed.
          STB_ManagePositionImmediately(trans.position);
         }
@@ -3708,54 +5118,7 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_IsSymbolAllowed(const string s)
-  {
-   if(s=="")
-      return false;
-
-   // Strategy Tester isolation is a hard scope boundary when enabled.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return s==_Symbol;
-
-   // The chart symbol remains manageable even when the scanner is configured
-   // to explore a different explicit symbol universe (manual controls operate
-   // on _Symbol). Additional symbols follow the configured universe.
-   if(s==_Symbol)
-      return true;
-
-   // An empty scanner list means other currently selected Market Watch symbols,
-   // not every symbol known to the broker.
-   if(StringLen(InpScannerSymbols)==0)
-      return (bool)SymbolInfoInteger(s,SYMBOL_SELECT);
-
-   string parts[];
-   string cfg=InpScannerSymbols;
-   StringReplace(cfg,";",",");
-   ushort sep=StringGetCharacter(",",0);
-   int n=StringSplit(cfg,sep,parts);
-
-   for(int i=0;i<n;i++)
-     {
-      string it=parts[i];
-      StringTrimLeft(it);
-      StringTrimRight(it);
-      if(it!="" && it==s)
-         return true;
-     }
-
-   return false;
-  } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
-  {
-   if(ticket==0 || !PositionSelectByTicket(ticket))
-      return false;
-   // Live protection covers all account positions regardless of origin/symbol.
-   // Respect the explicit chart-only isolation setting in Strategy Tester.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return PositionGetString(POSITION_SYMBOL)==_Symbol;
-   return true;
-  }
-
-bool IsManagedPosition(const ulong ticket)
+bool STB_IsSymbolAllowed(const string s){ if(s=="") return false; if(s==_Symbol) return true; if(StringLen(InpScannerSymbols)==0) return false; string parts[]; string cfg=InpScannerSymbols; StringReplace(cfg,";",","); ushort sep=StringGetCharacter(",",0); int n=StringSplit(cfg,sep,parts); for(int i=0;i<n;i++){ string it=parts[i]; StringTrimLeft(it); StringTrimRight(it); if(it!="" && it==s) return true; } return false; } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
    return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
@@ -3776,86 +5139,46 @@ bool IsManagedOrder(const ulong ticket)
 
   }
 
-// Exposure deduplication is scoped to this EA instance by Magic Number.
-// Keep these helpers separate from IsManagedPosition/IsManagedOrder because those
-// functions also define the broader scope used by management and trailing code.
-bool STB_IsOwnedPosition(const ulong ticket)
-  {
-   if(ticket==0 || !PositionSelectByTicket(ticket))
-      return false;
-   return (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic;
-  }
-
-bool STB_IsOwnedPendingOrder(const ulong ticket)
-  {
-   if(ticket==0 || !OrderSelect(ticket))
-      return false;
-   if(!STB_IsManagedPendingType(OrderGetInteger(ORDER_TYPE)))
-      return false;
-   return (ulong)OrderGetInteger(ORDER_MAGIC)==InpMagic;
-  }
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-// Entry-policy gate: only this EA's own exposure blocks a new setup.
 bool HasManagedExposure(const string symbol)
   {
-   if(!InpOneSetupPerSymbol || symbol=="")
-      return false;
-
-   for(int i=PositionsTotal()-1;i>=0;i--)
+   if(InpOneSetupPerSymbol)
      {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !PositionSelectByTicket(ticket))
-         continue;
-      if(PositionGetString(POSITION_SYMBOL)!=symbol)
-         continue;
-      if(STB_IsOwnedPosition(ticket))
-         return true;
-     }
+      for(int i=PositionsTotal()-1;i>=0;i--)
+        {
+         ulong ticket=PositionGetTicket(i);
 
-   for(int i=OrdersTotal()-1;i>=0;i--)
-     {
-      ulong ticket=OrderGetTicket(i);
-      if(ticket==0 || !OrderSelect(ticket))
-         continue;
-      if(OrderGetString(ORDER_SYMBOL)!=symbol)
-         continue;
-      if(STB_IsOwnedPendingOrder(ticket))
-         return true;
-     }
+         if(ticket==0)
+            continue;
 
-   return false;
-  }
+         if(!PositionSelectByTicket(ticket))
+            continue;
 
-// Lifecycle gate: preserve quote subscription while any exposure on this
-// symbol remains inside the EA's management scope, independent of entry policy.
-bool STB_HasSymbolExposureForManagement(const string symbol)
-  {
-   if(symbol=="")
-      return false;
+         if(PositionGetString(POSITION_SYMBOL)!=symbol)
+            continue;
 
-   for(int i=PositionsTotal()-1;i>=0;i--)
-     {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !PositionSelectByTicket(ticket))
-         continue;
-      if(PositionGetString(POSITION_SYMBOL)!=symbol)
-         continue;
-      if(IsManagedPosition(ticket))
-         return true;
-     }
+         if(IsManagedPosition(ticket))
+            return true;
+        }
 
-   for(int i=OrdersTotal()-1;i>=0;i--)
-     {
-      ulong ticket=OrderGetTicket(i);
-      if(ticket==0 || !OrderSelect(ticket))
-         continue;
-      if(OrderGetString(ORDER_SYMBOL)!=symbol)
-         continue;
-      if(IsManagedOrder(ticket))
-         return true;
+      for(int i=OrdersTotal()-1;i>=0;i--)
+        {
+         ulong ticket=OrderGetTicket(i);
+
+         if(ticket==0)
+            continue;
+
+         if(!OrderSelect(ticket))
+            continue;
+
+         if(OrderGetString(ORDER_SYMBOL)!=symbol)
+            continue;
+
+         if(IsManagedOrder(ticket))
+            return true;
+        }
      }
 
    return false;
@@ -3902,6 +5225,49 @@ bool HasManagedPositionDirection(const string symbol,const long positionType)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool CalculateHedgeSL(const string symbol,const long positionType,double &sl) // STB-DEADCODE: 0 callers. HEDGE uses the single SL engine CalculateInitialPendingProtectionSL(); do not call this legacy duplicate.
+  {
+   SwingPoint highs[];
+   SwingPoint lows[];
+
+   if(CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+      return false;
+
+   double pip=PipSize(symbol);
+   double minDist=TradeMinDistance(symbol);
+
+   if(pip<=0.0 || minDist<=0.0)
+      return false;
+
+   double buffer=InpSLBufferPips*pip;
+
+   if(positionType==POSITION_TYPE_BUY)
+     {
+      if(ArraySize(lows)<=0)
+         return false;
+
+      sl=lows[ArraySize(lows)-1].price-buffer;
+      sl=MathMin(sl,tick.bid-minDist);
+     }
+   else
+      if(positionType==POSITION_TYPE_SELL)
+        {
+         if(ArraySize(highs)<=0)
+            return false;
+
+         sl=highs[ArraySize(highs)-1].price+buffer;
+         sl=MathMax(sl,tick.ask+minDist);
+        }
+      else
+         return false;
+
+   sl=NormalizePrice(symbol,sl);
+   return IsValidSLForPosition(symbol,positionType,sl);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -3939,74 +5305,12 @@ bool STB_HasManagedPendingDirection(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_ResolveManualPendingEntry(const string symbol,
-                                     const ENUM_ORDER_TYPE orderType,
-                                     const double requestedEntry,
-                                     const MqlTick &tick,
-                                     double &entry)
-  {
-   entry=0.0;
-   if(symbol=="" || requestedEntry<=0.0 ||
-      tick.bid<=0.0 || tick.ask<=0.0)
-      return false;
-
-   double minDist=TradeMinDistance(symbol);
-   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   if(minDist<=0.0 || point<=0.0)
-      return false;
-
-   // Keep one full tradable price increment beyond the broker boundary so
-   // tick rounding cannot place the manual order exactly on the rejection edge.
-   double safety=MathMax(point,tickSize>0.0 ? tickSize:point);
-   double candidate=requestedEntry;
-
-   switch(orderType)
-     {
-      case ORDER_TYPE_BUY_STOP:
-         candidate=MathMax(candidate,tick.ask+minDist+safety);
-         break;
-      case ORDER_TYPE_SELL_STOP:
-         candidate=MathMin(candidate,tick.bid-minDist-safety);
-         break;
-      case ORDER_TYPE_BUY_LIMIT:
-         candidate=MathMin(candidate,tick.bid-minDist-safety);
-         break;
-      case ORDER_TYPE_SELL_LIMIT:
-         candidate=MathMax(candidate,tick.ask+minDist+safety);
-         break;
-      default:
-         return false;
-     }
-
-   entry=NormalizePrice(symbol,candidate);
-   if(entry<=0.0)
-      return false;
-
-   if(orderType==ORDER_TYPE_BUY_STOP)
-      return entry>tick.ask+minDist;
-   if(orderType==ORDER_TYPE_SELL_STOP)
-      return entry<tick.bid-minDist;
-   if(orderType==ORDER_TYPE_BUY_LIMIT)
-      return entry<tick.bid-minDist;
-   if(orderType==ORDER_TYPE_SELL_LIMIT)
-      return entry>tick.ask+minDist;
-
-   return false;
-  }
-
 bool OneClickHedge()
   {
-   if(!InpAllowOneClickHedge || !IsHedgingAccount() ||
-      !STB_TradeEnvironmentAllowed())
+   if(!InpAllowOneClickHedge || !IsHedgingAccount())
       return false;
 
    string symbol=_Symbol;
-   if(!STB_SymbolManagementOwnedVerified(symbol))
-     {
-      Print("STB HEDGE REJECTED: symbol writer lease not owned symbol=",symbol);
-      return false;
-     }
    ulong sourceTicket=0;
    long sourceType=-1;
    double sourceVolume=0.0;
@@ -4033,35 +5337,13 @@ bool OneClickHedge()
    long hedgeType=(sourceType==POSITION_TYPE_BUY) ? POSITION_TYPE_SELL
                                                   : POSITION_TYPE_BUY;
 
-   long tradeMode=SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE);
-   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
-      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
-      (hedgeType==POSITION_TYPE_BUY && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
-      (hedgeType==POSITION_TYPE_SELL && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
-      return false;
-
    if(HasManagedPositionDirection(symbol,hedgeType) ||
       STB_HasManagedPendingDirection(symbol,hedgeType))
       return false;
 
    double volume=NormalizeVolume(symbol,sourceVolume);
-   if(volume<=0.0 || volume+1e-9<sourceVolume)
-     {
-      // Do not silently label a max-volume-capped order as a full hedge.
-      // One click represents the entire source exposure; otherwise reject.
-      Print("STB HEDGE REJECTED: requested hedge exceeds one-order volume capacity",
-            " symbol=",symbol,
-            " sourceVolume=",DoubleToString(sourceVolume,4),
-            " allowedSingleOrderVolume=",DoubleToString(volume,4));
-      return false;
-     }
-
-   int hedgeDirection=(hedgeType==POSITION_TYPE_BUY ? 1:-1);
-   if(!STB_DirectionVolumeWithinLimit(symbol,hedgeDirection,volume,"OneClickHedge"))
-      return false;
-
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick))
+   if(volume<=0.0 || !SymbolInfoTick(symbol,tick))
       return false;
 
    double pip=PipSize(symbol);
@@ -4074,15 +5356,18 @@ bool OneClickHedge()
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
       return false;
 
+   double entry=(hedgeType==POSITION_TYPE_BUY)
+                ? tick.ask+InpManualPendingGapPips*pip
+                : tick.bid-InpManualPendingGapPips*pip;
+   entry=NormalizePrice(symbol,entry);
+
+   if((hedgeType==POSITION_TYPE_BUY && entry<=tick.ask+minDist) ||
+      (hedgeType==POSITION_TYPE_SELL && entry>=tick.bid-minDist))
+      return false;
+
    ENUM_ORDER_TYPE orderType=(hedgeType==POSITION_TYPE_BUY)
                               ? ORDER_TYPE_BUY_STOP
                               : ORDER_TYPE_SELL_STOP;
-   double requestedEntry=(hedgeType==POSITION_TYPE_BUY)
-                         ? tick.ask+InpManualPendingGapPips*pip
-                         : tick.bid-InpManualPendingGapPips*pip;
-   double entry=0.0;
-   if(!STB_ResolveManualPendingEntry(symbol,orderType,requestedEntry,tick,entry))
-      return false;
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(symbol,orderType,entry,sl))
@@ -4104,21 +5389,8 @@ bool OneClickHedge()
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   double hedgeEntryOffset=MathAbs(entry-(hedgeType==POSITION_TYPE_BUY
-                                          ? tick.bid:tick.ask))/pip;
    string comment="STB|HEDGE|"+
-                  (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+
-                  "|EB"+DoubleToString(hedgeEntryOffset,8);
-
-   // Recheck writer authority and exposure immediately before broker submission.
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
-      HasManagedPositionDirection(symbol,hedgeType) ||
-      STB_HasManagedPendingDirection(symbol,hedgeType))
-     {
-      Print("STB HEDGE REJECTED: writer/exposure changed before submit symbol=",symbol);
-      return false;
-     }
-
+                  (hedgeType==POSITION_TYPE_BUY ? "BUY":"SELL")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -4132,7 +5404,7 @@ bool OneClickHedge()
       Print("STB HEDGE REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
             symbol," order=",IntegerToString((int)hedgeOrder));
       if(hedgeOrder>0 && OrderSelect(hedgeOrder))
-         STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK,"OneClickHedge");
+         trade.OrderDelete(hedgeOrder);
       return false;
      }
 
@@ -4281,35 +5553,10 @@ double PositionCommissionMoney(const ulong ticket)
 
       long entryType=HistoryDealGetInteger(deal,DEAL_ENTRY);
       if(entryType==DEAL_ENTRY_IN)
-         commission+=HistoryDealGetDouble(deal,DEAL_COMMISSION)+
-                     HistoryDealGetDouble(deal,DEAL_FEE);
+         commission+=HistoryDealGetDouble(deal,DEAL_COMMISSION);
      }
 
    return commission;
-  }
-
-double STB_PositionPriceMovePips(const ulong ticket)
-  {
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
-      return 0.0;
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   long type=PositionGetInteger(POSITION_TYPE);
-   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-   double pip=PipSize(symbol);
-   if(entry<=0.0 || pip<=0.0)
-      return 0.0;
-   MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick))
-      return 0.0;
-   // Executable close-side quote: Bid for BUY, Ask for SELL.
-   double closePrice=(type==POSITION_TYPE_BUY ? tick.bid : tick.ask);
-   if(closePrice<=0.0)
-      return 0.0;
-   if(type==POSITION_TYPE_BUY)
-      return (closePrice-entry)/pip;
-   if(type==POSITION_TYPE_SELL)
-      return (entry-closePrice)/pip;
-   return 0.0;
   }
 
 double PositionNetProfitPips(const ulong ticket)
@@ -4323,21 +5570,14 @@ double PositionNetProfitPips(const ulong ticket)
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
 
    double pipValue=PositionPipValue(symbol,type,volume,entry);
-   // Fail closed if the cash value of one pip cannot be computed. Falling back
-   // to gross quote movement can trigger an automatic profit lock while the
-   // actual position is still net negative after commission/swap.
-   if(pipValue<=0.0 || !MathIsValidNumber(pipValue))
-      return 0.0;
+   if(pipValue<=0.0)
+      return PositionProfitPips(symbol,type,entry);
 
    double netMoney=PositionGetDouble(POSITION_PROFIT)+
                    PositionGetDouble(POSITION_SWAP)+
                    PositionCommissionMoney(ticket);
 
-   if(!MathIsValidNumber(netMoney))
-      return 0.0;
-
-   double netPips=netMoney/pipValue;
-   return MathIsValidNumber(netPips) ? netPips:0.0;
+   return netMoney/pipValue;
   }
 
 //==================================================================
@@ -4350,256 +5590,94 @@ double PositionNetProfitPips(const ulong ticket)
 //==================================================================
 // MANUAL_OVERRIDE (minimal per-ticket user authority)
 //==================================================================
-// Position protection remains active, including after manual SL/TP edits.
-// MANUAL_OVERRIDE is retained only for pending-order lifecycle/trailing behavior.
-// It never suppresses an open position's initial SL, profit lock, or live trail.
-// User-issued modify actions still pass through the same broker validation.
+// Rule: any user change to SL / TP / pending entry marks that ticket
+// MANUAL_OVERRIDE = ON. The auto engines (Profit Lock / Live Trail /
+// Pending Trail) must not modify it until the user presses AUTO.
+// The single position / pending writers skip the modify only for automatic
+// calls (manual user commands pass isUserAction=true).
+ulong g_manualOverrideTickets[];
 
-
-//==================================================================
-// UNIFIED EXPOSURE REGISTRY (MASTER BLUEPRINT 14) - ONE STATE PER TICKET
-//==================================================================
-// Single owner of per-ticket management state for BOTH positions and
-// pendings. Specialized modules (Pending Trail, Adaptive, Lease) keep their
-// own storage but never override this state and are keyed by the same ticket.
-// Blueprint 14/15: no ticket is controlled by two independent registries.
-struct STBExposureState
+int STB_ManualOverrideFind(const ulong ticket)
   {
-   ulong    ticket;
-   bool     isPosition;
-   double   entry;
-   double   sl;
-   double   tp;
-   bool     manualOverride;
-   string   symbol;
-   long     lastWriteCycle;
-   datetime lastSeen;
-  };
-
-STBExposureState g_stbExposure[];
-
-//--- persistent manual-override storage (Terminal Global Variables) -----
-// Storage backing ONLY. The single Runtime owner stays STBExposureState /
-// g_stbExposure; this is a key-value mirror of the manualOverride field.
-// Scope = EA magic + account + symbol + ticket (one key per ticket).
-string STB_ExposureSymbolOf(const ulong ticket)
-  {
-   if(PositionSelectByTicket(ticket))
-      return PositionGetString(POSITION_SYMBOL);
-   if(OrderSelect(ticket))
-      return OrderGetString(ORDER_SYMBOL);
-   return "";
-  }
-
-string STB_OverrideLegacyKey(const ulong ticket,const string symbol)
-  {
-   if(ticket==0 || symbol=="" || MQLInfoInteger(MQL_TESTER))
-      return "";
-   // Legacy key format retained only for safe migration from older builds.
-   return g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-          (string)InpMagic+"_"+symbol+"_"+IntegerToString((int)ticket);
-  }
-
-string STB_OverrideKey(const ulong ticket,const string symbol)
-  {
-   if(ticket==0 || symbol=="")
-      return "";
-
-   // Compact account+magic scope keeps the key safely under MT5's 63-char
-   // terminal-global-variable limit even with long broker symbols/tickets.
-   return ScopedStateName("OVR")+"_"+(string)ticket;
-  }
-
-void STB_OverridePersistSet(const ulong ticket,const string symbol)
-  {
-   string key=STB_OverrideKey(ticket,symbol);
-   if(key=="")
-      return;
-
-   if(GlobalVariableSet(key,1.0)!=0)
-     {
-      string legacy=STB_OverrideLegacyKey(ticket,symbol);
-      if(legacy!="")
-         GlobalVariableDel(legacy);
-     }
-  }
-
-void STB_OverridePersistDel(const ulong ticket,const string symbol)
-  {
-   string key=STB_OverrideKey(ticket,symbol);
-   if(key!="")
-      GlobalVariableDel(key);
-
-   string legacy=STB_OverrideLegacyKey(ticket,symbol);
-   if(legacy!="")
-      GlobalVariableDel(legacy);
-  }
-
-bool STB_OverridePersistOn(const ulong ticket,const string symbol)
-  {
-   string key=STB_OverrideKey(ticket,symbol);
-   if(key=="" )
-      return false;
-
-   if(GlobalVariableCheck(key))
-      return GlobalVariableGet(key)>0.5;
-
-   // Lazy migration keeps manual authority across an update/recompile.
-   string legacy=STB_OverrideLegacyKey(ticket,symbol);
-   if(legacy!="" && GlobalVariableCheck(legacy) &&
-      GlobalVariableGet(legacy)>0.5)
-     {
-      if(GlobalVariableSet(key,1.0)!=0)
-         GlobalVariableDel(legacy);
-      return true;
-     }
-
-   return false;
-  }
-
-// Keep an absent ticket's state briefly so a delayed DEAL_ADD transaction
-// can transfer manual authority from a filled pending ticket to its position.
-// Cancelled/orphaned tickets are still pruned once this bounded grace expires.
-#define STB_EXPOSURE_ORPHAN_GRACE_SEC 120
-bool STB_ExposureOrphanGraceActive(const ulong ticket,const datetime now)
-  {
-   for(int i=0;i<ArraySize(g_stbExposure);i++)
-     {
-      if(g_stbExposure[i].ticket!=ticket)
-         continue;
-
-      datetime seen=g_stbExposure[i].lastSeen;
-      if(seen<=0)
-         return false;
-
-      long age=(long)(now-seen);
-      return (age>=0 && age<STB_EXPOSURE_ORPHAN_GRACE_SEC);
-     }
-
-   return false;
-  }
-
-// Purge persisted overrides. all=true removes every stored key (AUTO clear);
-// all=false removes only tickets that no longer exist in the terminal.
-void STB_OverridePersistPrune(const bool all)
-  {
-   // Scope cleanup to this account + magic, covering the compact current key
-   // and the legacy human-readable key. Other EA-instance records are untouched.
-   string compactPref=ScopedStateName("OVR")+"_";
-   string legacyPref=g_prefix+"OVR_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-                     (string)InpMagic+"_";
-
-   for(int i=GlobalVariablesTotal()-1;i>=0;i--)
-     {
-      string name=GlobalVariableName(i);
-      bool compact=(StringFind(name,compactPref)==0);
-      // Tester may prune its scoped records but never LIVE legacy keys.
-      bool legacy=(!MQLInfoInteger(MQL_TESTER) &&
-                   StringFind(name,legacyPref)==0);
-      if(!compact && !legacy)
-         continue;
-
-      if(all)
-        {
-         GlobalVariableDel(name);
-         continue;
-        }
-
-      int p=-1;
-      for(int k=StringLen(name)-1;k>=0;k--)
-         if(StringGetCharacter(name,k)=='_')
-           {
-            p=k;
-            break;
-           }
-
-      if(p<0)
-         continue;
-
-      ulong ticket=(ulong)StringToInteger(StringSubstr(name,p+1));
-      if(ticket==0)
-         continue;
-
-      if(!PositionSelectByTicket(ticket) && !OrderSelect(ticket) &&
-         !STB_ExposureOrphanGraceActive(ticket,TimeCurrent()))
-         GlobalVariableDel(name);
-     }
-  }
-
-int STB_ExposureFind(const ulong ticket)
-  {
-   for(int i=0;i<ArraySize(g_stbExposure);i++)
-      if(g_stbExposure[i].ticket==ticket)
+   for(int i=0;i<ArraySize(g_manualOverrideTickets);i++)
+      if(g_manualOverrideTickets[i]==ticket)
          return i;
    return -1;
   }
 
-int STB_ExposureEnsure(const ulong ticket,const bool isPosition)
-  {
-   if(ticket==0)
-      return -1;
-   int idx=STB_ExposureFind(ticket);
-   if(idx<0)
-     {
-      idx=ArraySize(g_stbExposure);
-      ArrayResize(g_stbExposure,idx+1);
-      g_stbExposure[idx].ticket=ticket;
-      g_stbExposure[idx].manualOverride=false;
-      g_stbExposure[idx].lastWriteCycle=0;
-      g_stbExposure[idx].entry=0.0;
-      g_stbExposure[idx].sl=0.0;
-      g_stbExposure[idx].tp=0.0;
-      g_stbExposure[idx].symbol=STB_ExposureSymbolOf(ticket);
-      if(g_stbExposure[idx].symbol!="" &&
-         STB_OverridePersistOn(ticket,g_stbExposure[idx].symbol))
-        {
-         g_stbExposure[idx].manualOverride=true; // MANUAL_OVERRIDE: restored from persistent storage
-         Print("STB MANUAL_OVERRIDE RESTORED ticket=",IntegerToString((int)ticket));
-        }
-     }
-   g_stbExposure[idx].isPosition=isPosition;
-   g_stbExposure[idx].lastSeen=TimeCurrent();
-   return idx;
-  }
-
-//--- manual override (Blueprint 15) ---------------------------------
 bool STB_ManualOverrideIs(const ulong ticket)
   {
-   int idx=STB_ExposureFind(ticket);
-   if(idx>=0)
-      return g_stbExposure[idx].manualOverride;
-   // Persistent override is consulted by pending-order managers only;
-   // open-position protection deliberately ignores this flag.
-   return STB_OverridePersistOn(ticket,STB_ExposureSymbolOf(ticket));
+   if(ticket==0)
+      return false;
+   return (STB_ManualOverrideFind(ticket)>=0);
   }
 
 void STB_ManualOverrideSet(const ulong ticket)
   {
-   if(ticket==0)
+   if(ticket==0 || STB_ManualOverrideFind(ticket)>=0)
       return;
-   int idx=STB_ExposureFind(ticket);
-   if(idx<0)
-     {
-      bool isPos=PositionSelectByTicket(ticket);
-      idx=STB_ExposureEnsure(ticket,isPos);
-     }
-   if(idx<0 || g_stbExposure[idx].manualOverride)
-      return;
-   g_stbExposure[idx].manualOverride=true;
-   STB_OverridePersistSet(ticket,STB_ExposureSymbolOf(ticket)); // MANUAL_OVERRIDE persistence (storage only)
+   int n=ArraySize(g_manualOverrideTickets);
+   ArrayResize(g_manualOverrideTickets,n+1);
+   g_manualOverrideTickets[n]=ticket;
    Print("STB MANUAL_OVERRIDE ON ticket=",IntegerToString((int)ticket));
   }
 
+void STB_ManualOverrideClear(const ulong ticket)
+  {
+   int idx=STB_ManualOverrideFind(ticket);
+   if(idx<0)
+      return;
+   ArrayRemove(g_manualOverrideTickets,idx,1);
+  }
 
 void STB_ManualOverrideClearAll()
   {
-   for(int i=0;i<ArraySize(g_stbExposure);i++)
-      g_stbExposure[i].manualOverride=false;
-   STB_OverridePersistPrune(true); // MANUAL_OVERRIDE: AUTO clears the persistent mirror too
+   if(ArraySize(g_manualOverrideTickets)==0)
+      return;
+   ArrayResize(g_manualOverrideTickets,0);
    Print("STB MANUAL_OVERRIDE CLEARED (AUTO) - auto management re-enabled");
   }
 
-//--- geometry memory (owns-write baseline + intake baseline) --------
+//--- Geometry memory: last geometry known for a ticket. Refreshed by the
+//--- EA's own single writers, so an incoming transaction that differs from
+//--- it is a user change.
+struct STBGeomRecord
+  {
+   ulong  ticket;
+   bool   isPosition;
+   double entry;
+   double sl;
+   double tp;
+  };
+
+STBGeomRecord g_geomRecord[];
+
+int STB_GeomFind(const ulong ticket,const bool isPosition)
+  {
+   for(int i=0;i<ArraySize(g_geomRecord);i++)
+      if(g_geomRecord[i].ticket==ticket && g_geomRecord[i].isPosition==isPosition)
+         return i;
+   return -1;
+  }
+
+void STB_GeomStore(const ulong ticket,const bool isPosition,
+                   const double entry,const double sl,const double tp)
+  {
+   if(ticket==0)
+      return;
+   int idx=STB_GeomFind(ticket,isPosition);
+   if(idx<0)
+     {
+      idx=ArraySize(g_geomRecord);
+      ArrayResize(g_geomRecord,idx+1);
+      g_geomRecord[idx].ticket=ticket;
+      g_geomRecord[idx].isPosition=isPosition;
+     }
+   g_geomRecord[idx].entry=entry;
+   g_geomRecord[idx].sl=sl;
+   g_geomRecord[idx].tp=tp;
+  }
+
 double STB_GeomTolerance(const string symbol)
   {
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
@@ -4608,71 +5686,50 @@ double STB_GeomTolerance(const string symbol)
    return (t>0.0 ? t : point);
   }
 
-void STB_GeomStore(const ulong ticket,const bool isPosition,
-                   const double entry,const double sl,const double tp)
-  {
-   int idx=STB_ExposureEnsure(ticket,isPosition);
-   if(idx<0)
-      return;
-   g_stbExposure[idx].entry=entry;
-   g_stbExposure[idx].sl=sl;
-   g_stbExposure[idx].tp=tp;
-  }
-
+// Returns true when this geometry is already known for the ticket.
+// A first sight is stored as the baseline (not a manual change).
 bool STB_GeomIsKnown(const ulong ticket,const bool isPosition,
                      const double entry,const double sl,const double tp,
                      const string symbol)
   {
-   int idx=STB_ExposureFind(ticket);
+   int idx=STB_GeomFind(ticket,isPosition);
    if(idx<0)
      {
       STB_GeomStore(ticket,isPosition,entry,sl,tp);
       return true;
      }
    double tol=STB_GeomTolerance(symbol);
-   return (MathAbs(g_stbExposure[idx].entry-entry)<=tol &&
-           MathAbs(g_stbExposure[idx].sl-sl)<=tol &&
-           MathAbs(g_stbExposure[idx].tp-tp)<=tol);
+   return (MathAbs(g_geomRecord[idx].entry-entry)<=tol &&
+           MathAbs(g_geomRecord[idx].sl-sl)<=tol &&
+           MathAbs(g_geomRecord[idx].tp-tp)<=tol);
   }
 
 void STB_GeomPrune()
   {
-   for(int i=ArraySize(g_stbExposure)-1;i>=0;i--)
+   for(int i=ArraySize(g_geomRecord)-1;i>=0;i--)
      {
-      bool alive=(g_stbExposure[i].isPosition
-                  ? PositionSelectByTicket(g_stbExposure[i].ticket)
-                  : OrderSelect(g_stbExposure[i].ticket));
+      bool alive=(g_geomRecord[i].isPosition
+                  ? PositionSelectByTicket(g_geomRecord[i].ticket)
+                  : OrderSelect(g_geomRecord[i].ticket));
       if(!alive)
-        {
-         // A pending order may have filled just before its DEAL_ADD callback.
-         // Preserve its override record long enough for intake to transfer it.
-         if(STB_ExposureOrphanGraceActive(g_stbExposure[i].ticket,TimeCurrent()))
-            continue;
-
-         STB_OverridePersistDel(g_stbExposure[i].ticket,g_stbExposure[i].symbol);
-         ArrayRemove(g_stbExposure,i,1);
-        }
+         ArrayRemove(g_geomRecord,i,1);
      }
   }
 
-//--- transaction intake (Blueprint 10/28, H-11 safe direction) ------
+//--- Transaction intake: mark MANUAL_OVERRIDE for user changes only.
 void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
   {
    if(trans.type==TRADE_TRANSACTION_POSITION && trans.position>0)
      {
       ulong ticket=trans.position;
-      if( !STB_IsProtectionPosition(ticket))
+      if(!PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
          return;
       string symbol=PositionGetString(POSITION_SYMBOL);
       double e=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
       double tp=PositionGetDouble(POSITION_TP);
       if(!STB_GeomIsKnown(ticket,true,e,sl,tp,symbol))
-         Print("STB POSITION GEOMETRY UPDATED ticket=",ticket,
-               " symbol=",symbol,
-               " SL=",DoubleToString(sl,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-               " TP=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-               " automaticProtection=ACTIVE");
+         STB_ManualOverrideSet(ticket);
       STB_GeomStore(ticket,true,e,sl,tp);
       return;
      }
@@ -4686,356 +5743,25 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
       double e=OrderGetDouble(ORDER_PRICE_OPEN);
       double sl=OrderGetDouble(ORDER_SL);
       double tp=OrderGetDouble(ORDER_TP);
-
       if(!STB_GeomIsKnown(ticket,false,e,sl,tp,symbol))
-        {
          STB_ManualOverrideSet(ticket);
-
-         // A manual geometry edit becomes the new explicit trail baseline.
-         // Otherwise the old EB / SL distance could make the next user-issued
-         // PEND TRAIL snap this order back toward its pre-edit geometry.
-         long updatedType=OrderGetInteger(ORDER_TYPE);
-         if(STB_PendingTrailIsManagedType(updatedType))
-           {
-            int trailIdx=STB_PendingTrailFind(ticket);
-            if(trailIdx<0)
-              {
-               STB_PendingTrailRegister(ticket,"MANUAL_UPDATE");
-               trailIdx=STB_PendingTrailFind(ticket);
-              }
-
-            MqlTick updateTick;
-            double pip=PipSize(symbol);
-            if(trailIdx>=0 && pip>0.0 &&
-               SymbolInfoTick(symbol,updateTick))
-              {
-               int direction=STB_PendingTrailDirection(updatedType);
-               int offsetSign=STB_PendingEntryOffsetSign((ENUM_ORDER_TYPE)updatedType);
-               double anchor=(direction>0 ? updateTick.bid:updateTick.ask);
-
-               if(anchor>0.0 && offsetSign!=0)
-                 {
-                  g_stbPendingTrail[trailIdx].entryBufferPips=
-                     MathAbs(e-anchor)/pip;
-                  g_stbPendingTrail[trailIdx].trackedExtreme=
-                     e-offsetSign*g_stbPendingTrail[trailIdx].entryBufferPips*pip;
-                  g_stbPendingTrail[trailIdx].lastEntry=e;
-                  g_stbPendingTrail[trailIdx].lastSL=sl;
-
-                  if(sl>0.0)
-                     g_stbPendingTrail[trailIdx].slBufferPips=
-                        MathAbs(e-sl)/pip;
-
-                  g_stbPendingTrail[trailIdx].failureCount=0;
-                  g_stbPendingTrail[trailIdx].nextRetryTime=0;
-                  g_stbPendingTrail[trailIdx].lastModifyTime=TimeCurrent();
-                 }
-              }
-           }
-        }
-
       STB_GeomStore(ticket,false,e,sl,tp);
       return;
      }
   }
 
-//==================================================================
-// ONE MODIFY PER TICKET PER CYCLE + SAME-CYCLE SL ARBITRATION
-//==================================================================
-enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 };
-struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; };
-struct STBQueuedSLProposal
-  {
-   ulong ticket;
-   long cycle;
-   bool valid;
-   bool hasSL;
-   double sl;
-   int source;
-   string reason;
-  };
-STBQueuedSLProposal g_stbSLQueue[];
-bool g_stbCollectingSLProposals=false;
-// Any queue allocation failure makes the automatic SL batch incomplete.
-// Fail closed rather than silently resolving a subset of intended candidates.
-bool g_stbSLCollectionFaulted=false;
-long g_stbCycleId=0;
-
-void STB_BeginCycle()
-  {
-   g_stbCycleId++;
-   ArrayResize(g_stbSLQueue,0);
-   g_stbCollectingSLProposals=false;
-   g_stbSLCollectionFaulted=false;
-  }
-
-bool STB_QueuePositionSL(const ulong ticket,const double candidateSL,const int source,const string reason)
-  {
-   if(!g_stbCollectingSLProposals || ticket==0 || candidateSL<=0.0 ||
-       !STB_IsProtectionPosition(ticket))
-      return false;
-   int n=ArraySize(g_stbSLQueue);
-   if(ArrayResize(g_stbSLQueue,n+1)!=n+1)
-     {
-      g_stbSLCollectionFaulted=true;
-      Print("STB SL arbitration collection failure: queue allocation failed cycle=",
-            g_stbCycleId," ticket=",ticket," source=",source," reason=",reason);
-      return false;
-     }
-   g_stbSLQueue[n].ticket=ticket;
-   g_stbSLQueue[n].cycle=g_stbCycleId;
-   g_stbSLQueue[n].valid=true;
-   g_stbSLQueue[n].hasSL=true;
-   g_stbSLQueue[n].sl=candidateSL;
-   g_stbSLQueue[n].source=source;
-   g_stbSLQueue[n].reason=reason;
-   return true;
-  }
-
-bool STB_CycleWriteAlreadyDone(const ulong ticket)
-  {
-   if(g_stbCycleId==0)
-      return false;
-   int idx=STB_ExposureFind(ticket);
-   return (idx>=0 && g_stbExposure[idx].lastWriteCycle==g_stbCycleId);
-  }
-
-void STB_CycleMarkWritten(const ulong ticket)
-  {
-   int idx=STB_ExposureFind(ticket);
-   if(idx<0)
-      idx=STB_ExposureEnsure(ticket,false);
-   if(idx>=0)
-      g_stbExposure[idx].lastWriteCycle=g_stbCycleId;
-  }
-
-// Validate every proposal against one shared price/constraint snapshot.
-// IsValidSLForPosition() is still used on the chosen candidate and again by
-// the central modify bridge immediately before broker submission.
-bool STB_IsValidSLForDecisionSnapshot(const long side,
-                                      const double sl,
-                                      const MqlTick &tick,
-                                      const double point,
-                                      const long stopsLevel,
-                                      const long freezeLevel)
-  {
-   if(sl<=0.0 || point<=0.0 || tick.bid<=0.0 || tick.ask<=0.0)
-      return false;
-   double minimumDistance=(MathMax((double)stopsLevel,(double)freezeLevel)+1.0)*point;
-   if(minimumDistance<=0.0)
-      minimumDistance=point;
-   if(side==POSITION_TYPE_BUY)
-      return sl<tick.bid && (tick.bid-sl)>=minimumDistance;
-   if(side==POSITION_TYPE_SELL)
-      return sl>tick.ask && (sl-tick.ask)>=minimumDistance;
-   return false;
-  }
-
-bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource)
-  {
-   finalSL=0.0; finalSource=-1;
-   if(ticket==0 || count<=0 || !PositionSelectByTicket(ticket)) return false;
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   long side=PositionGetInteger(POSITION_TYPE);
-   double currentSL=PositionGetDouble(POSITION_SL);
-   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-
-   // If net profit has crossed the universal lock trigger, a competing
-   // automatic proposal may not replace the required lock with a weaker SL.
-   // When the existing position has no SL at all, retain the strongest valid
-   // non-profit-lock candidate as a last-resort protection fallback if broker
-   // geometry makes the profit-lock target impossible this cycle.
-   double decisionPriceMovePips=STB_PositionPriceMovePips(ticket);
-   double pip=PipSize(symbol);
-   bool enforceProfitLockFloor=
-      (decisionPriceMovePips>=STB_ProfitLockTriggerPips() && pip>0.0);
-   double profitLockTarget=0.0;
-   if(enforceProfitLockFloor)
-     {
-      profitLockTarget=NormalizePrice(symbol,
-         side==POSITION_TYPE_BUY
-         ? entry+STB_ProfitLockLockPips()*pip
-         : entry-STB_ProfitLockLockPips()*pip);
-      if(profitLockTarget<=0.0)
-         enforceProfitLockFloor=false;
-     }
-
-   // Use one tick and one broker-constraint snapshot for all proposals so
-   // array arrival order cannot change which candidates pass geometry checks.
-   MqlTick decisionTick;
-   if(!SymbolInfoTick(symbol,decisionTick)) return false;
-   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-   long stopsLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL);
-   long freezeLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
-   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
-   bool found=false;
-   bool unprotectedFallbackFound=false;
-   double unprotectedFallbackSL=0.0;
-   int unprotectedFallbackSource=-1;
-   for(int i=0;i<count;i++)
-     {
-      if(!props[i].valid || !props[i].hasSL || props[i].sl<=0.0) continue;
-      double c=NormalizePrice(symbol,props[i].sl);
-      if(c<=0.0 ||
-         !STB_IsValidSLForDecisionSnapshot(side,c,decisionTick,point,stopsLevel,freezeLevel))
-         continue;
-
-      if(side==POSITION_TYPE_BUY)
-        {
-         if(currentSL>0.0 && c<=currentSL) continue;
-        }
-      else if(side==POSITION_TYPE_SELL)
-        {
-         if(currentSL>0.0 && c>=currentSL) continue;
-        }
-      else
-         continue;
-
-      bool meetsProfitLockFloor=!enforceProfitLockFloor ||
-         (side==POSITION_TYPE_BUY ? c>=profitLockTarget:c<=profitLockTarget);
-      if(!meetsProfitLockFloor)
-        {
-         // Never downgrade an installed SL below the active lock target.
-         // Only a position with no existing SL may use the INITIAL candidate
-         // as a fail-safe stop while the broker rejects the requested lock.
-         if(currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION)
-           {
-            bool strongerFallback=!unprotectedFallbackFound;
-            if(unprotectedFallbackFound)
-              {
-               if(side==POSITION_TYPE_BUY && c>unprotectedFallbackSL)
-                  strongerFallback=true;
-               else if(side==POSITION_TYPE_SELL && c<unprotectedFallbackSL)
-                  strongerFallback=true;
-               else if(MathAbs(c-unprotectedFallbackSL)<=tieTolerance &&
-                       props[i].source<unprotectedFallbackSource)
-                  strongerFallback=true;
-              }
-            if(strongerFallback)
-              {
-               unprotectedFallbackSL=c;
-               unprotectedFallbackSource=props[i].source;
-               unprotectedFallbackFound=true;
-              }
-           }
-         continue;
-        }
-
-      if(side==POSITION_TYPE_BUY)
-        {
-         if(!found || c>finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
-           { finalSL=c; finalSource=props[i].source; found=true; }
-        }
-      else if(side==POSITION_TYPE_SELL)
-        {
-         if(!found || c<finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
-           { finalSL=c; finalSource=props[i].source; found=true; }
-        }
-     }
-
-   // With no installed SL, use the strongest valid non-lock stop if broker
-   // geometry prevents the minimum profit-lock target from being placed.
-   // This emergency fallback is never used to loosen an existing position.
-   if(!found && unprotectedFallbackFound)
-     {
-      finalSL=unprotectedFallbackSL;
-      finalSource=unprotectedFallbackSource;
-      found=true;
-     }
-
-   // The chosen candidate must still satisfy the live broker constraint check.
-   // If the market moved since the decision snapshot, fail closed this cycle.
-   if(!found || !IsValidSLForPosition(symbol,side,finalSL))
-      return false;
-   return true;
-  }
-
-bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false)
-  {
-   if(ticket==0 ||  !STB_IsProtectionPosition(ticket))
-      return false;
-
-   // Explicit user SAVE remains synchronous and isolated from automatic batches.
-   if(isUserAction)
-      return ModifyPositionSL(ticket,candidateSL,true);
-
-   if(g_stbCollectingSLProposals)
-      return STB_QueuePositionSL(ticket,candidateSL,source,reason);
-
-   // Lifecycle exception: a newly-created position may need its initial
-   // protective stop before the next scheduled management cycle. Do not let
-   // trailing/profit-protection silently bypass same-cycle arbitration.
-   if(source!=STB_SL_SRC_INITIAL)
-     {
-      Print("STB SL request blocked outside arbitration cycle ticket=",ticket,
-            " source=",source," reason=",reason);
-      return false;
-     }
-
-   return ModifyPositionSL(ticket,candidateSL,false);
-  }
-
-void STB_ProfitProtectionOne(const ulong ticket)
-  {
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
-      return;
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   long type=PositionGetInteger(POSITION_TYPE);
-   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-   double currentSL=PositionGetDouble(POSITION_SL);
-   double priceMovePips=STB_PositionPriceMovePips(ticket);
-   double locked=GetLockedPips(ticket);
-   double triggerPips=STB_ProfitLockTriggerPips();
-   double lockPips=STB_ProfitLockLockPips();
-   double pip=PipSize(symbol);
-
-   // Trigger from executable price movement, not cash PnL divided by pip value.
-   // Net pips are diagnostic because commission and swap can differ.
-   bool liveStopSatisfiesPolicy=false;
-   if(pip>0.0 && entry>0.0 && currentSL>0.0)
-     {
-      double policySL=NormalizePrice(symbol,
-         type==POSITION_TYPE_BUY ? entry+lockPips*pip : entry-lockPips*pip);
-      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-      double tolerance=MathMax(point*0.5,
-                               tickSize>0.0 ? tickSize*0.5:point*0.5);
-      if(type==POSITION_TYPE_BUY)
-         liveStopSatisfiesPolicy=(policySL>0.0 && currentSL+tolerance>=policySL);
-      else if(type==POSITION_TYPE_SELL)
-         liveStopSatisfiesPolicy=(policySL>0.0 && currentSL-tolerance<=policySL);
-     }
-   if(priceMovePips>=triggerPips && (locked<lockPips || !liveStopSatisfiesPolicy))
-     {
-      double netProfitPips=PositionNetProfitPips(ticket);
-      Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
-            " symbol=",symbol,
-            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-            " priceMovePips=",DoubleToString(priceMovePips,1),
-            " netProfitPips=",DoubleToString(netProfitPips,1),
-            " pipSize=",DoubleToString(pip,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " triggerPips=",DoubleToString(triggerPips,1),
-            " lockPips=",DoubleToString(lockPips,1),
-            " lockedPips=",DoubleToString(locked,1),
-            " liveSL=",DoubleToString(currentSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " liveStopSatisfiesPolicy=",liveStopSatisfiesPolicy);
-      ApplyProfitLock(ticket,lockPips);
-     }
-  }
-
-/* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
+enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 }; struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; }; bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource){ finalSL=0.0; finalSource=-1; if(ticket==0||!PositionSelectByTicket(ticket)) return false; long ptype=PositionGetInteger(POSITION_TYPE); double currentSL=PositionGetDouble(POSITION_SL); bool found=false; for(int i=0;i<count;i++){ if(!props[i].valid||!props[i].hasSL) continue; double c=props[i].sl; if(c<=0.0) continue; if(ptype==POSITION_TYPE_BUY){ if(currentSL>0.0 && c<=currentSL) continue; if(!found||c>finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } else if(ptype==POSITION_TYPE_SELL){ if(currentSL>0.0 && c>=currentSL) continue; if(!found||c<finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } } return found; } bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return false; STBSLProposal props[]; ArrayResize(props,1); props[0].valid=true; props[0].hasSL=(candidateSL>0.0); props[0].sl=candidateSL; props[0].source=source; props[0].reason=reason; double finalSL=0.0; int finalSource=-1; if(!STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)) return false; return ModifyPositionSL(ticket,finalSL,isUserAction); } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
+
+   if(!isUserAction && STB_ManualOverrideIs(ticket))
+      return false; // MANUAL_OVERRIDE: auto modify blocked
+
+   if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
-   string symbol=PositionGetString(POSITION_SYMBOL);
-   if(!STB_SymbolManagementOwnedVerified(symbol))
-     {
-      Print("STB MODIFY WAIT: symbol-management lease not owned ticket=",ticket,
-            " symbol=",symbol," chart=",ChartID());
-      return false;
-     }
+
+   string symbol=PositionGetString(POSITION_SYMBOL); if(!STB_IsSymbolAllowed(symbol)) return false; if(!IsManagedPosition(ticket)) return false; // P1 writer safety barrier
+   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single position writer
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
    double tp=PositionGetDouble(POSITION_TP);
@@ -5049,88 +5775,27 @@ void STB_ProfitProtectionOne(const ulong ticket)
      }
 
    if(!IsValidSLForPosition(symbol,type,newSL))
-     {
-      MqlTick invalidTick;
-      SymbolInfoTick(symbol,invalidTick);
-      Print("STB MODIFY WAIT: invalid SL geometry ticket=",ticket,
-            " symbol=",symbol,
-            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-            " candidateSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " bid=",DoubleToString(invalidTick.bid,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " ask=",DoubleToString(invalidTick.ask,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " stopsLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL),
-            " freezeLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL));
       return false;
-     }
-   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
-      !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
-      !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
-      !AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
-     {
-      Print("STB MODIFY BLOCKED: trading permissions unavailable ticket=",ticket,
-            " terminal=",TerminalInfoInteger(TERMINAL_TRADE_ALLOWED),
-            " expert=",MQLInfoInteger(MQL_TRADE_ALLOWED),
-            " account=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED),
-            " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT));
-      return false;
-     }
+
    string gv=ScopedStateName("MODFAIL_"+IntegerToString((long)ticket));
+    Print("[STB][P5A][MODFAIL][CHECK] ticket=",ticket,          " gv=",gv,          " exists=",GlobalVariableCheck(gv),          " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,          " tickms=",GetTickCount64());
    if(GlobalVariableCheck(gv))
      {
       double lastFail=GlobalVariableGet(gv);
-      if(lastFail>0.0 && (TimeCurrent()-lastFail)<2)
+      if(lastFail>0.0 && (TimeCurrent()-lastFail)<30)
          return false;
      }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
    trade.SetTypeFillingBySymbol(symbol);
-       if(STB_CycleWriteAlreadyDone(ticket))
-      return false; // Blueprint 8/39: max ONE position modify per ticket per cycle
 
-   // Re-read the live position immediately before submitting the combined
-   // SL/TP request. If TP changed since the earlier snapshot, abort instead
-   // of restoring a stale TP over a manual/other-manager update.
-   if(!PositionSelectByTicket(ticket))
-      return false;
-   long latestType=PositionGetInteger(POSITION_TYPE);
-   double latestSL=PositionGetDouble(POSITION_SL);
-   double latestTP=PositionGetDouble(POSITION_TP);
-   double pointNow=SymbolInfoDouble(symbol,SYMBOL_POINT);
-   double tickSizeNow=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   double tpTolerance=MathMax(pointNow*0.5,
-                              tickSizeNow>0.0 ? tickSizeNow*0.5:pointNow*0.5);
-   if(latestType!=type || MathAbs(latestTP-tp)>tpTolerance)
+   Print("[STB][P5A][MODFAIL][BEFORE_REQUEST] ticket=",ticket,      " gv=",gv,      " tickms=",GetTickCount64(),      " newSL=",DoubleToString(newSL,_Digits),      " currentSL=",DoubleToString(currentSL,_Digits),      " ret_before=",trade.ResultRetcode());
+    STB_GeomStore(ticket,true,PositionGetDouble(POSITION_PRICE_OPEN),newSL,tp); // MANUAL_OVERRIDE: remember own write
+    if(!trade.PositionModify(ticket,newSL,tp))
      {
-      Print("STB MODIFY ABORTED: position state changed before request ticket=",
-            IntegerToString((int)ticket),
-            " tpSnapshot=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " tpLatest=",DoubleToString(latestTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-      return false;
-     }
-   if(latestSL>0.0 &&
-      ((latestType==POSITION_TYPE_BUY && newSL<=latestSL) ||
-       (latestType==POSITION_TYPE_SELL && newSL>=latestSL)))
-      return true;
-   if(!IsValidSLForPosition(symbol,latestType,newSL))
-      return false;
-   tp=latestTP;
-
-   // Re-verify writer authority at the last possible point before the broker
-   // request; an earlier lease check can become stale during validation.
-   if(!STB_SymbolManagementOwnedVerified(symbol))
-      return false;
-
-   if(!trade.PositionModify(ticket,newSL,tp))
-     {
-      // Failed writes must not leave the proposed SL as the geometry baseline;
-      // refresh the cache from the actual terminal state instead.
-      if(PositionSelectByTicket(ticket))
-         STB_GeomStore(ticket,true,
-                       PositionGetDouble(POSITION_PRICE_OPEN),
-                       PositionGetDouble(POSITION_SL),
-                       PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
+       Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       Print("STB MODIFY request failed ticket=",ticket,
             " ret=",trade.ResultRetcode()," ",
             trade.ResultRetcodeDescription());
@@ -5142,33 +5807,19 @@ void STB_ProfitProtectionOne(const ulong ticket)
    if(ret==TRADE_RETCODE_NO_CHANGES)
      {
       g_modifyWasNoChanges=true;
-      if(PositionSelectByTicket(ticket))
-        {
-         STB_GeomStore(ticket,true,
-                       PositionGetDouble(POSITION_PRICE_OPEN),
-                       PositionGetDouble(POSITION_SL),
-                       PositionGetDouble(POSITION_TP));
-         STB_CycleMarkWritten(ticket); // one broker modify request per cycle, even if unchanged
-        }
-      GlobalVariableDel(gv);
+      Print("[STB][P5A][MODFAIL][BEFORE_DEL] ticket=",ticket,      " gv=",gv,      " exists=",GlobalVariableCheck(gv),      " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,      " tickms=",GetTickCount64(),      " ret=",trade.ResultRetcode());
+       GlobalVariableDel(gv);
       return true;
      }
 
    if(!TradeRetcodeModifySucceeded())
      {
-      if(PositionSelectByTicket(ticket))
-         STB_GeomStore(ticket,true,
-                       PositionGetDouble(POSITION_PRICE_OPEN),
-                       PositionGetDouble(POSITION_SL),
-                       PositionGetDouble(POSITION_TP));
       GlobalVariableSet(gv,(double)TimeCurrent());
-      Print("STB MODIFY REJECTED ticket=",ticket,
-            " symbol=",symbol,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription(),
-            " requestedSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+       Print("[STB][P5A][MODFAIL][AFTER_SET] ticket=",ticket,             " gv=",gv,             " exists=",GlobalVariableCheck(gv),             " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,             " tickms=",GetTickCount64(),             " ret=",trade.ResultRetcode(),             " desc=",trade.ResultRetcodeDescription());
       return false;
      }
+
+   Print("[STB][P5A][MODFAIL][BEFORE_DEL] ticket=",ticket,      " gv=",gv,      " exists=",GlobalVariableCheck(gv),      " value=",GlobalVariableCheck(gv) ? GlobalVariableGet(gv) : 0.0,      " tickms=",GetTickCount64(),      " ret=",trade.ResultRetcode());
        GlobalVariableDel(gv);
 
    if(!PositionSelectByTicket(ticket))
@@ -5180,116 +5831,7 @@ void STB_ProfitProtectionOne(const ulong ticket)
    double tolerance=MathMax(point*0.5,
                             tickSize>0.0 ? tickSize*0.5:point*0.5);
 
-   STB_GeomStore(ticket,true,
-                  PositionGetDouble(POSITION_PRICE_OPEN),
-                  verified,
-                  PositionGetDouble(POSITION_TP)); // MANUAL_OVERRIDE: only cache the verified terminal geometry
-   STB_CycleMarkWritten(ticket); // Blueprint 8/39: this cycle already wrote this ticket
    return MathAbs(verified-newSL)<=tolerance;
-  }
-
-// Resolve all automatic candidates after the three managers have run.
-// The selected write is revalidated by ModifyPositionSL against live terminal state.
-void STB_FlushPositionSLProposals()
-  {
-   g_stbCollectingSLProposals=false;
-   bool collectionFault=g_stbSLCollectionFaulted;
-   g_stbSLCollectionFaulted=false;
-   if(collectionFault)
-     {
-      Print("STB SL arbitration ABORTED: incomplete proposal queue; no automatic SL writes this cycle=",
-            g_stbCycleId," queued=",ArraySize(g_stbSLQueue));
-      ArrayResize(g_stbSLQueue,0);
-      return;
-     }
-   for(int i=0;i<ArraySize(g_stbSLQueue);i++)
-     {
-      ulong ticket=g_stbSLQueue[i].ticket;
-      if(ticket==0 || g_stbSLQueue[i].cycle!=g_stbCycleId) continue;
-      bool seen=false;
-      for(int j=0;j<i;j++)
-         if(g_stbSLQueue[j].ticket==ticket && g_stbSLQueue[j].cycle==g_stbCycleId) { seen=true; break; }
-      if(seen ||  !STB_IsProtectionPosition(ticket)) continue;
-      STBSLProposal props[];
-      int count=0;
-      for(int j=i;j<ArraySize(g_stbSLQueue);j++)
-         if(g_stbSLQueue[j].ticket==ticket && g_stbSLQueue[j].cycle==g_stbCycleId)
-            count++;
-      if(count<=0) continue;
-      if(ArrayResize(props,count)!=count)
-        {
-         Print("STB SL arbitration ABORTED for ticket=",ticket,
-               ": cannot allocate full candidate set cycle=",g_stbCycleId,
-               " candidates=",count);
-         continue; // never arbitrate a silently truncated candidate set
-        }
-      int propIndex=0;
-      for(int j=i;j<ArraySize(g_stbSLQueue);j++)
-        {
-         if(g_stbSLQueue[j].ticket!=ticket || g_stbSLQueue[j].cycle!=g_stbCycleId) continue;
-         props[propIndex].valid=g_stbSLQueue[j].valid; props[propIndex].hasSL=g_stbSLQueue[j].hasSL;
-         props[propIndex].sl=g_stbSLQueue[j].sl; props[propIndex].source=g_stbSLQueue[j].source;
-         props[propIndex].reason=g_stbSLQueue[j].reason; propIndex++;
-        }
-      double chosenSL=0.0; int chosenSource=-1;
-      if(count<=0 || !STB_ResolvePositionSL(ticket,props,count,chosenSL,chosenSource))
-        {
-         Print("STB SL arbitration WAIT: no valid candidate ticket=",ticket,
-               " cycle=",g_stbCycleId,
-               " candidates=",count);
-         continue;
-        }
-      string symbol=PositionGetString(POSITION_SYMBOL);
-      long side=PositionGetInteger(POSITION_TYPE);
-      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-      bool hasProfitCandidate=false;
-      for(int j=0;j<count;j++)
-         if(props[j].valid && props[j].hasSL && props[j].source==STB_SL_SRC_PROFIT_PROTECTION)
-            hasProfitCandidate=true;
-      if(!ModifyPositionSL(ticket,chosenSL,false) || !PositionSelectByTicket(ticket)) continue;
-      double actualSL=PositionGetDouble(POSITION_SL);
-      // A missing SL must never be treated as a confirmed protective stop;
-      // this is especially important for SELL-side lock-pips bookkeeping.
-      if(actualSL<=0.0)
-        {
-         Print("STB SL arbitration verification failed: position has no SL ticket=",ticket,
-               " cycle=",g_stbCycleId);
-         continue;
-        }
-      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-      double tolerance=MathMax(point*0.5,tickSize>0.0 ? tickSize*0.5:point*0.5);
-      if(side==POSITION_TYPE_BUY && actualSL+tolerance<chosenSL) continue;
-      if(side==POSITION_TYPE_SELL && actualSL-tolerance>chosenSL) continue;
-      if(hasProfitCandidate)
-        {
-         double pip=PipSize(symbol);
-         double lockTargetSL=(pip>0.0 ?
-            NormalizePrice(symbol,
-               side==POSITION_TYPE_BUY
-               ? entry+STB_ProfitLockLockPips()*pip
-               : entry-STB_ProfitLockLockPips()*pip):0.0);
-         bool lockTargetConfirmed=
-            (lockTargetSL>0.0 && pip>0.0 &&
-             (side==POSITION_TYPE_BUY
-              ? actualSL+tolerance>=lockTargetSL
-              : actualSL-tolerance<=lockTargetSL));
-         // Do not persist a partial/sub-minimum lock merely because some
-         // profit-protection proposal was queued but lost live validation.
-         if(lockTargetConfirmed)
-           {
-            double achieved=(side==POSITION_TYPE_BUY
-                             ? (actualSL-entry)/pip
-                             : (entry-actualSL)/pip);
-            if(achieved>0.0)
-               SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
-           }
-        }
-      Print("STB SL arbitration confirmed ticket=",ticket," source=",chosenSource,
-            " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " candidates=",count);
-     }
-   ArrayResize(g_stbSLQueue,0);
   }
 
 //==================================================================
@@ -5323,25 +5865,7 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 
       if(currentSL>0.0 && targetSL<=currentSL)
       {
-         // The observed SL may change outside this EA between the initial read
-         // and the bookkeeping update. Re-read terminal state before crediting
-         // a lock that is already satisfied without a broker write.
-         if(!PositionSelectByTicket(ticket))
-            return false;
-         long liveType=PositionGetInteger(POSITION_TYPE);
-         double liveSL=PositionGetDouble(POSITION_SL);
-         double liveEntry=PositionGetDouble(POSITION_PRICE_OPEN);
-         double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-         double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-         double tolerance=MathMax(point*0.5,
-                                  tickSize>0.0 ? tickSize*0.5:point*0.5);
-         if(liveType!=POSITION_TYPE_BUY || liveSL<=0.0 ||
-            liveSL+tolerance<targetSL)
-            return false;
-         double achieved=(liveSL-liveEntry)/pip;
-         if(achieved<=0.0)
-            return false;
-         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
+         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
          return true;
       }
    }
@@ -5352,24 +5876,7 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 
       if(currentSL>0.0 && targetSL>=currentSL)
       {
-         // Confirm the live SELL stop still protects at least the requested
-         // lock before persisting lock bookkeeping.
-         if(!PositionSelectByTicket(ticket))
-            return false;
-         long liveType=PositionGetInteger(POSITION_TYPE);
-         double liveSL=PositionGetDouble(POSITION_SL);
-         double liveEntry=PositionGetDouble(POSITION_PRICE_OPEN);
-         double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-         double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-         double tolerance=MathMax(point*0.5,
-                                  tickSize>0.0 ? tickSize*0.5:point*0.5);
-         if(liveType!=POSITION_TYPE_SELL || liveSL<=0.0 ||
-            liveSL-tolerance>targetSL)
-            return false;
-         double achieved=(liveEntry-liveSL)/pip;
-         if(achieved<=0.0)
-            return false;
-         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
+         SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
          return true;
       }
    }
@@ -5397,8 +5904,7 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
    if(!STB_SubmitPositionSL(ticket,targetSL,STB_SL_SRC_PROFIT_PROTECTION,"PROFIT_PROTECTION",isUserAction))
       return false;
 
-   if(!g_stbCollectingSLProposals || isUserAction)
-      SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
+   SetLockedPips(ticket,MathMax(GetLockedPips(ticket),lockPips));
 
    return true;
 }
@@ -5412,15 +5918,34 @@ bool ApplyProfitLock(const ulong ticket,const double lockPips,const bool isUserA
 //+------------------------------------------------------------------+
 void AutoProfitProtection()
 {
-   // One implementation owns the universal trigger and lock policy.
-   // Open-position management remains active regardless of manual SL/TP edits.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !STB_IsProtectionPosition(ticket))
+
+      if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
-      STB_ProfitProtectionOne(ticket);
+      PositionSelectByTicket(ticket);
+
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      long type=PositionGetInteger(POSITION_TYPE);
+      double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+
+      double profit=PositionNetProfitPips(ticket);
+      double locked=GetLockedPips(ticket);
+
+      if(profit>=STB_ProfitLockTriggerPips() && locked<STB_ProfitLockLockPips())
+      {
+         Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket,
+               " symbol=",symbol,
+               " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+               " profitPips=",DoubleToString(profit,1),
+               " triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1),
+               " lockPips=",DoubleToString(STB_ProfitLockLockPips(),1),
+               " lockedPips=",DoubleToString(locked,1));
+
+         ApplyProfitLock(ticket,STB_ProfitLockLockPips());
+      }
    }
 }
 
@@ -5433,7 +5958,6 @@ void AutoProfitProtection()
 //+------------------------------------------------------------------+
 void ManualSavePlus20()
   {
-   STB_BeginCycle(); // Blueprint 26: user SAVE command gets its own decision cycle
    int managed=0;
 
    for(int i=PositionsTotal()-1;i>=0;i--)
@@ -5452,7 +5976,8 @@ void ManualSavePlus20()
       double requested=currentLock+InpManualSaveStepPips;
 
       if(profit>=requested)
-          ApplyProfitLock(ticket,requested,true);
+         ApplyProfitLock(ticket,requested,true);
+         STB_ManualOverrideSet(ticket); // MANUAL_OVERRIDE: user SAVE command is final
      }
 
    Print("STB SAVE +20 executed for managed positions count=",managed);
@@ -5467,9 +5992,12 @@ void ManualSavePlus20()
 //+------------------------------------------------------------------+
 bool TrailPositionByLivePrice(const ulong ticket)
 {
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
+   if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
-   // Manual SL/TP edits do not disable automated protection/trailing.
+
+   if(!IsManagedPosition(ticket))
+      return false;
+
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double currentSL=PositionGetDouble(POSITION_SL);
@@ -5483,7 +6011,7 @@ bool TrailPositionByLivePrice(const ulong ticket)
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
-   double profit=STB_PositionPriceMovePips(ticket);
+   double profit=PositionNetProfitPips(ticket);
 
    if(profit < InpTrailStartPips)
       return false;
@@ -5575,7 +6103,7 @@ bool TrailPositionByLivePrice(const ulong ticket)
 
    bool result=STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL,"TRAIL");
 
-   if(result && !g_stbCollectingSLProposals)
+   if(result)
    {
       Print("STB LIVE TRAIL updated ticket=",ticket,
             " symbol=",symbol,
@@ -5642,10 +6170,6 @@ bool CalculateNearestStructuralSL(const string symbol,
          if(candidate<=0.0 || candidate>=maxAllowed)
             continue;
 
-         // Cap the final Entry-to-SL distance, including the structural buffer.
-         if(strategyCap<DBL_MAX && referencePrice-candidate>strategyCap)
-            continue;
-
          if(swingLow>bestLow)
            {
             bestLow=swingLow;
@@ -5679,10 +6203,6 @@ bool CalculateNearestStructuralSL(const string symbol,
          if(candidate<=minAllowed)
             continue;
 
-         // Cap the final Entry-to-SL distance, including the structural buffer.
-         if(strategyCap<DBL_MAX && candidate-referencePrice>strategyCap)
-            continue;
-
          if(swingHigh<bestHigh)
            {
             bestHigh=swingHigh;
@@ -5703,7 +6223,7 @@ bool CalculateNearestStructuralSL(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool CalculateReferenceCandleSL(const string symbol,
+double CalculateReferenceCandleSL(const string symbol,
                                    const long positionType,
                                    const double referencePrice,
                                    double &sl)
@@ -5733,10 +6253,7 @@ bool CalculateReferenceCandleSL(const string symbol,
 
       candidate=NormalizePrice(symbol,candidate);
 
-      bool withinStrategyCap=(InpMaxInitialSLPips<=0.0 ||
-                              MathAbs(referencePrice-candidate)<=InpMaxInitialSLPips*pip);
-
-      if(candidate>0.0 && withinStrategyCap &&
+      if(candidate>0.0 &&
          IsValidSLForPosition(symbol,positionType,candidate))
         {
          sl=candidate;
@@ -5788,47 +6305,15 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
    sl=0.0;
 
    long direction=(orderType==ORDER_TYPE_BUY_STOP ||
-                   orderType==ORDER_TYPE_BUY_LIMIT ||
-                   orderType==ORDER_TYPE_BUY_STOP_LIMIT)
+                   orderType==ORDER_TYPE_BUY_LIMIT)
                   ? POSITION_TYPE_BUY
                   : (orderType==ORDER_TYPE_SELL_STOP ||
-                     orderType==ORDER_TYPE_SELL_LIMIT ||
-                     orderType==ORDER_TYPE_SELL_STOP_LIMIT)
+                     orderType==ORDER_TYPE_SELL_LIMIT)
                   ? POSITION_TYPE_SELL
                   : -1;
 
    if(direction<0)
       return false;
-
-   // BUY STOP / SELL STOP initial protection is anchored to the latest CLOSED
-   // M5 candle, as requested. If that structural SL cannot satisfy broker
-   // constraints, reject the pending order rather than silently substituting
-   // a different timeframe/structure.
-   if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)
-     {
-      double pip=PipSize(symbol);
-      double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-      double minDistance=TradeMinDistance(symbol);
-      if(pip<=0.0 || point<=0.0 || minDistance<=0.0)
-         return false;
-
-      bool buyStop=(orderType==ORDER_TYPE_BUY_STOP);
-      double anchor=(buyStop ? iLow(symbol,PERIOD_M5,1)
-                             : iHigh(symbol,PERIOD_M5,1));
-      if(anchor<=0.0)
-         return false;
-
-      double buffer=MathMax(MathMax(0.0,InpInitialSLBufferPips)*pip,
-                            minDistance+point);
-      double candleSL=NormalizePrice(symbol,
-                                     buyStop ? anchor-buffer:anchor+buffer);
-      if(candleSL<=0.0 ||
-         !IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL))
-         return false;
-
-      sl=candleSL;
-      return true;
-     }
 
    // Same protection source as market positions.
    double candidate=0.0;
@@ -5891,6 +6376,15 @@ bool CalculateInitialProtectionSL(const string symbol,
    return false;
   }
 
+double CalculateInitialSL(const string symbol,
+                          const long positionType,
+                          const double entryPrice)
+  {
+   double sl=0.0;
+   if(!CalculateInitialProtectionSL(symbol,positionType,entryPrice,sl))
+      return 0.0;
+   return sl;
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -5931,11 +6425,6 @@ bool CalculateBrokerFallbackSL(const string symbol,
          return false;
 
    sl=NormalizePrice(symbol,sl);
-
-   if(InpMaxInitialSLPips>0.0 &&
-      MathAbs(entryPrice-sl)>InpMaxInitialSLPips*pip)
-      return false;
-
    return IsValidSLForPosition(symbol,positionType,sl);
   }
 
@@ -5944,31 +6433,28 @@ bool CalculateBrokerFallbackSL(const string symbol,
 //+------------------------------------------------------------------+
 bool EnsureInitialSL(const ulong ticket)
   {
-   if(ticket==0 || !STB_IsProtectionPosition(ticket))
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   if(!IsManagedPosition(ticket))
       return false;
    if(PositionGetDouble(POSITION_SL)>0.0)
       return true;
-   // A live position without SL is automatically repaired; manual edits never
-   // silently opt an open position out of protection.
+
    string symbol=PositionGetString(POSITION_SYMBOL);
    long type=PositionGetInteger(POSITION_TYPE);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
    double candidate=0.0;
+
    if(!CalculateInitialProtectionSL(symbol,type,entry,candidate))
-     {
-      Print("STB INITIAL SL WAIT: unable to calculate valid stop ticket=",ticket,
-            " symbol=",symbol,
-            " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
-            " entry=",DoubleToString(entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " pipSize=",DoubleToString(PipSize(symbol),(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-            " stopsLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL),
-            " freezeLevel=",SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL));
       return false;
-     }
+
    if(!STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_INITIAL,"INITIAL"))
       return false;
-   if(!PositionSelectByTicket(ticket) || PositionGetDouble(POSITION_SL)<=0.0)
+
+   if(!PositionSelectByTicket(ticket) ||
+      PositionGetDouble(POSITION_SL)<=0.0)
       return false;
+
    Print("STB initial SL active ticket=",ticket,
          " symbol=",symbol,
          " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
@@ -5976,8 +6462,9 @@ bool EnsureInitialSL(const ulong ticket)
    return true;
   }
 
-void STB_RecordPendingInitialSLFailure(const int stateIdx);
-
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool EnsureInitialSLForPendingOrder(const ulong ticket)
   {
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
@@ -6000,26 +6487,7 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
    if(currentSL>0.0)
       return VerifyPendingInitialSL(ticket);
 
-   // Do not impose protection on an order explicitly assigned to the user.
-   if(STB_ManualOverrideIs(ticket))
-      return false;
-
    string symbol=OrderGetString(ORDER_SYMBOL);
-
-   // Register missing-SL orders so failed protection attempts share the
-   // pending engine's bounded 5/15/60-second retry policy.
-   int stateIdx=STB_PendingTrailFind(ticket);
-   if(stateIdx<0)
-     {
-      STB_PendingTrailRegister(ticket,"INITIAL_PROTECTION");
-      stateIdx=STB_PendingTrailFind(ticket);
-     }
-
-   datetime now=TimeCurrent();
-   if(stateIdx>=0 &&
-      g_stbPendingTrail[stateIdx].nextRetryTime>now)
-      return false;
-
    double entry=OrderGetDouble(ORDER_PRICE_OPEN);
    double candidate=0.0;
 
@@ -6028,37 +6496,16 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       Print("STB pending initial SL unavailable ticket=",ticket,
             " symbol=",symbol,
             " type=",EnumToString(orderType));
-      STB_RecordPendingInitialSLFailure(stateIdx);
       return false;
      }
 
    if(!STB_ModifyPendingOrderGeometry(ticket,
                                       entry,
                                       candidate,
-                                      OrderGetDouble(ORDER_TP)) ||
-      !VerifyPendingInitialSL(ticket))
-     {
-      STB_RecordPendingInitialSLFailure(stateIdx);
+                                      OrderGetDouble(ORDER_TP)))
       return false;
-     }
 
-   if(stateIdx>=0 && OrderSelect(ticket))
-     {
-      double verifiedEntry=OrderGetDouble(ORDER_PRICE_OPEN);
-      double verifiedSL=OrderGetDouble(ORDER_SL);
-      double pip=PipSize(symbol);
-
-      g_stbPendingTrail[stateIdx].lastEntry=verifiedEntry;
-      g_stbPendingTrail[stateIdx].lastSL=verifiedSL;
-      if(pip>0.0)
-         g_stbPendingTrail[stateIdx].slBufferPips=
-            MathAbs(verifiedEntry-verifiedSL)/pip;
-      g_stbPendingTrail[stateIdx].failureCount=0;
-      g_stbPendingTrail[stateIdx].nextRetryTime=0;
-      g_stbPendingTrail[stateIdx].lastModifyTime=TimeCurrent();
-     }
-
-   return true;
+   return VerifyPendingInitialSL(ticket);
   }
 
 
@@ -6073,28 +6520,9 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // P10: management lease scope is account + symbol ONLY (never magic). Under
 // Universal Management every exposure on an allowed symbol has exactly one
 // broker writer, regardless of which magic/EA created it.
-string g_stbLeaseSymbols[];
-
-void STB_LeaseTrackSymbol(const string symbol)
-  {
-   if(symbol=="")
-      return;
-
-   for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
-      if(g_stbLeaseSymbols[i]==symbol)
-         return;
-
-   int n=ArraySize(g_stbLeaseSymbols);
-   if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
-      g_stbLeaseSymbols[n]=symbol;
-  }
-
 string STB_MgmtScopeKey(const string purpose,const string symbol)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|MGMT|"+purpose+"|"+symbol;
-   // A tester must not claim or release a live chart's per-symbol lease.
-   if(MQLInfoInteger(MQL_TESTER))
-      raw+="|TESTER";
    return g_prefix+(string)SymbolHash(raw);
   }
 
@@ -6110,11 +6538,12 @@ string STB_MgmtLeaseKey(const string symbol)
 
 // Central per-symbol management lease. The first instance to reach a symbol
 // claims it; the live owner keeps it; a stale owner (no refresh within
-// STB_MGMT_LEASE_SEC) may lose it. Only the current owner should pass the
-// broker-writer guards. GlobalVariableSetOnCondition provides atomic CAS for
-// claiming/reclaiming the lease within this terminal, but the lease check and
-// broker request are not one atomic operation. Final pre-submit rechecks reduce
-// the race window; this is not a cross-terminal mutex.
+// STB_MGMT_LEASE_SEC) loses it. Only the owner may pass the broker writers,
+// so one symbol never has two independent position/pending writers.
+// P10 race-safety: after claiming, re-read the owner key. A concurrent
+// claimant may have overwritten it in the same window; the loser must not
+// write to the broker. (MQL5 exposes no atomic CAS, so this verify-after-set
+// plus the TTL lease is the strongest available guard.)
 bool STB_SymbolManagementOwnedVerified(const string symbol)
   {
    if(!STB_SymbolManagementOwned(symbol))
@@ -6137,29 +6566,14 @@ bool STB_SymbolManagementOwned(const string symbol)
    string leaseKey=STB_MgmtLeaseKey(symbol);
    datetime now=TimeCurrent();
 
-   // Create the sentinel without overwriting a concurrent claimant. A plain
-   // GlobalVariableSet(ownerKey,0) after a missing-key check can race and erase
-   // another chart's successful claim. GlobalVariableTemp creates only-if-absent.
+   // P11: seed an unowned sentinel (0.0) so the claim can be an atomic CAS.
    if(!GlobalVariableCheck(ownerKey))
-     {
-      ResetLastError();
-      if(!GlobalVariableTemp(ownerKey) && !GlobalVariableCheck(ownerKey))
-        {
-         Print("STB lease owner-key creation failed symbol=",symbol,
-               " err=",GetLastError());
-         return false;
-        }
-     }
-
-   if(!GlobalVariableCheck(ownerKey))
-      return false;
+      GlobalVariableSet(ownerKey,0.0);
 
    if(GlobalVariableGet(ownerKey)==0.0)
      {
-      if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
-         return false; // P11 atomic claim (CAS 0 -> me)
+      if(!GlobalVariableSetOnCondition(ownerKey,me,0.0)) return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
@@ -6169,16 +6583,13 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
    if(lease<=0.0 || (now-(datetime)lease)>STB_MGMT_LEASE_SEC)
      {
-      if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
-         return false; // P11 atomic stale takeover (CAS)
+      if(!GlobalVariableSetOnCondition(ownerKey,me,owner)) return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
       return true;
      }
 
@@ -6195,29 +6606,21 @@ void STB_ReleaseSymbolManagement(const string symbol)
    double me=(double)((long)ChartID());
    string ownerKey=STB_MgmtOwnerKey(symbol);
 
-   // Release through CAS. Deleting the key after a separate owner check can
-   // erase a new chart's claim in the race window. Zero is an unowned sentinel.
-   if(GlobalVariableCheck(ownerKey))
-      GlobalVariableSetOnCondition(ownerKey,0.0,me);
-  }
-
-void STB_ReleaseAllSymbolManagement()
-  {
-   for(int i=ArraySize(g_stbLeaseSymbols)-1;i>=0;i--)
-      STB_ReleaseSymbolManagement(g_stbLeaseSymbols[i]);
-
-   ArrayResize(g_stbLeaseSymbols,0);
+   if(GlobalVariableCheck(ownerKey) && GlobalVariableGet(ownerKey)==me)
+     {
+      GlobalVariableDel(ownerKey);
+      GlobalVariableDel(STB_MgmtLeaseKey(symbol));
+     }
   }
 
 void ManagePositions()
 {
-   // Collect all automatic SL candidates before any broker write.
-   g_stbCollectingSLProposals=true;
+   // First pass: immediately protect every managed position that has no SL.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);
 
-      if(ticket==0 || !STB_IsProtectionPosition(ticket))
+      if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
       EnsureInitialSL(ticket);
@@ -6232,13 +6635,11 @@ void ManagePositions()
       if(ticket==0)
          continue;
 
-      if(!STB_IsProtectionPosition(ticket))
+      if(!IsManagedPosition(ticket))
          continue;
 
       TrailPositionByLivePrice(ticket);
    }
-
-   STB_FlushPositionSLProposals();
 }
 
 //==================================================================
@@ -6248,6 +6649,75 @@ void ManagePositions()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+double STB_CalcSmartPendingBuffer(
+   const string symbol,
+   const int pendingDirection,
+   const ENUM_STB_ORIGIN origin)
+  {
+   double baseBufferPips=InpEntryBufferPips;
+
+   if(origin==STB_ORIGIN_AUTO)
+      baseBufferPips=STB_EffectiveEntryBuffer();
+
+   if(baseBufferPips<=0.0)
+      return 0.0;
+
+   double factor=1.0;
+
+   STBRegimeState regime;
+
+   if(STB_EvaluateRegime(symbol,regime))
+     {
+      if(regime.volatilityRatio>=2.50)
+         factor+=0.15;
+      else
+         if(regime.volatilityRatio<=0.40)
+            factor-=0.15;
+         else
+            if(regime.volatilityRatio>=1.50)
+               factor+=0.05;
+            else
+               if(regime.volatilityRatio<=0.70)
+                  factor-=0.05;
+
+      if(regime.regime==STB_REGIME_TRENDING)
+        {
+         if((pendingDirection>0 && regime.bias>0) ||
+            (pendingDirection<0 && regime.bias<0))
+            factor-=0.05;
+         else
+            if(regime.bias!=0)
+               factor+=0.10;
+        }
+      else
+         if(regime.regime==STB_REGIME_RANGING)
+           {
+            factor+=0.05;
+           }
+     }
+
+   MqlTick tick;
+
+   if(SymbolInfoTick(symbol,tick))
+     {
+      double pip=PipSize(symbol);
+
+      if(pip>0.0)
+        {
+         double spreadPips=(tick.ask-tick.bid)/pip;
+
+         if(spreadPips>=baseBufferPips)
+            factor+=0.10;
+         else
+            if(spreadPips>=baseBufferPips*0.50)
+               factor+=0.05;
+        }
+     }
+
+   factor=MathMax(0.65,MathMin(1.50,factor));
+
+   return baseBufferPips*factor;
+  }
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -6271,16 +6741,15 @@ void ManagePendingOrders()
       string symbol=OrderGetString(ORDER_SYMBOL);
       if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
 
-      // Protect every managed pending order with no SL, not only orders created
-      // by this EA. The helper respects manual overrides and throttles failures.
+      // Pending orders discovered on the terminal (manual / mobile / foreign /
+      // restart-recovered) must receive their initial protection SL here:
+      // STB_AfterExposureCreated() only covers exposures created by this EA, so
+      // a manual BUY STOP / SELL STOP without SL would otherwise stay
+      // unprotected and the pending trail would skip it forever
+      // (STB_PendingTrailManageOne: reason=NO_INITIAL_SL). Same helper as the
+      // EA-created path, idempotent, and only for managed + leased symbols.
       if(OrderGetDouble(ORDER_SL)<=0.0)
-        {
          EnsureInitialSLForPendingOrder(ticket);
-         if(!OrderSelect(ticket))
-            continue;
-         symbol=OrderGetString(ORDER_SYMBOL);
-        }
-
       datetime setupTime=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
       int profileId=STB_AdaptiveParseProfileFromComment(OrderGetString(ORDER_COMMENT));
       int maxBars=InpMaxPendingBars;
@@ -6313,12 +6782,17 @@ void ManagePendingOrders()
                " symbol=",symbol,
                " profile=",IntegerToString(profileId));
 
-         if(!STB_RequestOrderDelete(ticket,STB_DEL_SERVER_EXPIRATION,"ManagePendingOrders"))
-      Print("STB pending delete failed ticket=",ticket,
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-   else
-      STB_AdaptiveDeleteOrderState(ticket);
+         if(!trade.OrderDelete(ticket))
+            Print("STB pending delete failed ticket=",ticket,
+                  " ret=",trade.ResultRetcode()," ",
+                  trade.ResultRetcodeDescription());
+         else
+            if(!TradeRetcodeModifySucceeded())
+               Print("STB pending delete server rejected ticket=",ticket,
+                     " ret=",trade.ResultRetcode()," ",
+                     trade.ResultRetcodeDescription());
+            else
+               STB_AdaptiveDeleteOrderState(ticket);
         }
      }
   }
@@ -6330,37 +6804,6 @@ void ManagePendingOrders()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-double DirectionExposureVolume(const string symbol,const int direction);
-
-// Shared preflight for every EA order-creation path. This is a local
-// snapshot check, not an account-wide atomic reservation; OrderCheck and the
-// server response remain authoritative if exposure changes concurrently.
-bool STB_DirectionVolumeWithinLimit(const string symbol,
-                                    const int direction,
-                                    const double requestedVolume,
-                                    const string source)
-  {
-   if((direction!=1 && direction!=-1) || requestedVolume<=0.0)
-      return false;
-
-   double volumeLimit=SymbolInfoDouble(symbol,SYMBOL_VOLUME_LIMIT);
-   if(volumeLimit<=0.0)
-      return true;
-
-   double currentVolume=DirectionExposureVolume(symbol,direction);
-   if(currentVolume+requestedVolume>volumeLimit+1e-9)
-     {
-      Print("STB VOLUME LIMIT REJECT source=",source,
-            " symbol=",symbol,
-            " direction=",(direction>0 ? "BUY":"SELL"),
-            " requested=",DoubleToString(requestedVolume,3),
-            " currentDirectionVolume=",DoubleToString(currentVolume,3),
-            " limit=",DoubleToString(volumeLimit,3));
-      return false;
-     }
-   return true;
-  }
-
 double DirectionExposureVolume(const string symbol,const int direction)
   {
    double total=0.0;
@@ -6586,22 +7029,19 @@ double CalculateOrderVolumeByRisk(const Setup &s)
    double raw=riskMoney/lossForOneLot;
    double minLot=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_MIN);
 
-   if(InpMaxRiskVolume>0.0)
-      raw=MathMin(raw,InpMaxRiskVolume);
-
-   if(raw+1e-9<minLot)
+   if(raw<minLot)
      {
-      // The broker minimum OR the configured volume cap would exceed the
-      // requested risk/volume limit. Never clamp upward into an unsafe lot.
+      // The broker minimum would exceed the requested account risk.
+      // Refuse the setup instead of silently oversizing the trade.
       return 0.0;
      }
 
+   if(InpMaxRiskVolume>0.0)
+      raw=MathMin(raw,InpMaxRiskVolume);
+
    double volume=NormalizeVolume(s.symbol,raw);
 
-   if(volume<=0.0 || !MathIsValidNumber(volume))
-      return 0.0;
-
-   if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)
+   if(volume<=0.0)
       return 0.0;
 
    return volume;
@@ -6628,16 +7068,10 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool PlaceSetup(Setup &s,const double entryLockToken)
+bool PlaceSetup(Setup &s)
   {
    if(!s.valid)
       return false;
-
-   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
-      return STB_LogPlaceReject(s,"ENTRY_LOCK_NOT_OWNED");
-
-   if(!STB_SymbolManagementOwnedVerified(s.symbol))
-      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_NOT_OWNED");
 
    if(!g_autoTrading)
       return STB_LogPlaceReject(s,"AUTO_TRADING_OFF");
@@ -6692,8 +7126,16 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
          return STB_LogPlaceReject(s,"FIXED_VOLUME_INVALID");
      }
 
-   if(!STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetup"))
+   double volumeLimit=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_LIMIT);
+   if(volumeLimit>0.0 &&
+      DirectionExposureVolume(s.symbol,s.direction)+volume>volumeLimit+1e-9)
+     {
+      Print("STB order rejected by SYMBOL_VOLUME_LIMIT symbol=",s.symbol,
+            " requested=",DoubleToString(volume,3),
+            " currentDirectionVolume=",DoubleToString(DirectionExposureVolume(s.symbol,s.direction),3),
+            " limit=",DoubleToString(volumeLimit,3));
       return STB_LogPlaceReject(s,"VOLUME_LIMIT");
+     }
 
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
@@ -6726,29 +7168,7 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
    trade.SetAsyncMode(false);
 
-   double commentPip=PipSize(s.symbol);
-   MqlTick commentTick;
-   if(!SymbolInfoTick(s.symbol,commentTick) || commentPip<=0.0)
-      return STB_LogPlaceReject(s,"NO_TICK_BEFORE_PLACEMENT");
-
-   // EB is the distance from the pending entry to the pending-trail's live
-   // anchor at registration: Bid for BUY-side orders, Ask for SELL-side.
-   // Storing the pattern-zone distance here can make restart recovery infer an
-   // old extreme and cause an immediate unintended entry jump.
-   double commentAnchor=(s.direction>0 ? commentTick.bid:commentTick.ask);
-   double effectiveEntryBuffer=MathAbs(s.entry-commentAnchor)/commentPip;
-   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+
-                  IntegerToString(s.adaptiveProfile)+"|EB"+
-                  DoubleToString(effectiveEntryBuffer,8);
-
-   // Final pre-submit gate: a second instance may have changed exposure while
-   // this setup was being validated and sized.
-   if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
-      return STB_LogPlaceReject(s,"ENTRY_LOCK_LOST_BEFORE_SUBMIT");
-   if(!STB_SymbolManagementOwnedVerified(s.symbol))
-      return STB_LogPlaceReject(s,"SYMBOL_WRITER_LEASE_LOST");
-   if(HasManagedExposure(s.symbol))
-      return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT");
+   string comment="STB|"+(s.direction>0 ? "B":"S")+"|P"+IntegerToString(s.adaptiveProfile)+"|EB"+DoubleToString(MathMax(0.0,s.entryBufferPips),8);
 
    bool ok=false;
 
@@ -6782,6 +7202,9 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
       return false;
      }
 
+   SetLastSetupTime(s.symbol,s.direction,s.setupTime);
+   STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
+
    ulong placedOrder=trade.ResultOrder();
 
    if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))
@@ -6790,15 +7213,9 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
             s.symbol,
             " order=",IntegerToString((int)placedOrder));
       if(placedOrder>0 && OrderSelect(placedOrder))
-         STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,"PlaceSetup");
+         trade.OrderDelete(placedOrder);
       return STB_LogPlaceReject(s,"INITIAL_SL_NOT_CONFIRMED");
      }
-
-   // Commit the setup cooldown only after the accepted order's initial SL
-   // has been verified. A failed protection check triggers rollback and must
-   // not poison this valid setup with a false "already placed" timestamp.
-   SetLastSetupTime(s.symbol,s.direction,s.setupTime);
-   STB_AdaptiveRememberLastProfile(s.symbol,s.direction,s.adaptiveProfile);
 
    if(placedOrder>0)
      {
@@ -6857,6 +7274,25 @@ enum ENUM_STB_REGIME
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+string STB_RegimeName(const ENUM_STB_REGIME regime)
+  {
+   switch(regime)
+     {
+      case STB_REGIME_TRENDING:
+         return "TRENDING";
+      case STB_REGIME_RANGING:
+         return "RANGING";
+      case STB_REGIME_TRANSITION:
+         return "TRANSITION";
+      case STB_REGIME_HIGH_VOLATILITY:
+         return "HIGH_VOLATILITY";
+      case STB_REGIME_LOW_VOLATILITY:
+         return "LOW_VOLATILITY";
+      case STB_REGIME_UNSTABLE:
+         return "UNSTABLE";
+     }
+   return "UNSTABLE";
+  }
 
 struct STBMarketQuality
   {
@@ -6933,12 +7369,12 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      c.rejectReason="REJECT_QUALITY_SCORE_BELOW_MINIMUM";
+      c.rejectReason="REJECT_SPREAD";
       return false;
      }
 
    Setup refreshed;
-   if(!BuildSetup(c.symbol,c.direction,refreshed,false))
+   if(!BuildSetup(c.symbol,c.direction,refreshed))
      {
       c.rejectReason=(g_lastBuildRejectReason=="" ?
                       "REJECT_NO_STRATEGY":g_lastBuildRejectReason);
@@ -6965,111 +7401,32 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-// Serialize final scanner revalidation/submission across chart instances.
-// The lock is terminal-local and expires automatically if an instance disappears.
-string STB_EntryLockKey(const string symbol)
+bool STB_ExposureAllowsExecution(const Setup &s)
   {
-   return STB_MgmtScopeKey("ENTRY_"+(string)InpMagic,symbol);
-  }
-
-bool STB_EntryLockAcquire(const string symbol,double &token)
-  {
-   token=0.0;
-   if(symbol=="")
-      return false;
-
-   string key=STB_EntryLockKey(symbol);
-   if(!GlobalVariableCheck(key))
-     {
-      ResetLastError();
-      if(!GlobalVariableTemp(key) && !GlobalVariableCheck(key))
-        {
-         Print("STB entry lock creation failed symbol=",symbol,
-               " err=",GetLastError());
-         return false;
-        }
-     }
-
-   if(!GlobalVariableCheck(key))
-      return false;
-
-   // Use local wall-clock time so a quiet server market does not freeze the
-   // lease expiry while other chart instances remain active.
-   datetime now=TimeLocal();
-   double current=GlobalVariableGet(key);
-   if(current!=0.0 && MathFloor(current)>(double)now)
-      return false;
-
-   // Integer part is a 120-second lease expiry; fractional part tags the chart.
-   token=(double)(now+120)+
-         (double)((long)ChartID()%1000000)/1000000.0;
-   if(!GlobalVariableSetOnCondition(key,token,current))
-     {
-      token=0.0;
-      return false;
-     }
-
-   return true;
-  }
-
-bool STB_EntryLockStillOwned(const string symbol,const double token)
-  {
-   if(symbol=="" || token==0.0)
-      return false;
-
-   string key=STB_EntryLockKey(symbol);
-   if(!GlobalVariableCheck(key))
-      return false;
-
-   return (GlobalVariableGet(key)==token &&
-           MathFloor(token)>(double)TimeLocal());
-  }
-
-void STB_EntryLockRelease(const string symbol,const double token)
-  {
-   if(symbol=="" || token==0.0)
-      return;
-
-   string key=STB_EntryLockKey(symbol);
-   if(GlobalVariableCheck(key))
-      GlobalVariableSetOnCondition(key,0.0,token);
-  }
-
-bool STB_ExposureAllowsExecution(const Setup &s,string &reason)
-  {
-   reason="";
    if(HasManagedExposure(s.symbol))
-     {
-      reason="MANAGED_EXPOSURE_EXISTS";
       return false;
-     }
+
    long maxOrders=AccountInfoInteger(ACCOUNT_LIMIT_ORDERS);
    if(maxOrders>0 && OrdersTotal()>=maxOrders)
-     {
-      reason="ACCOUNT_ORDER_LIMIT";
       return false;
-     }
+
    return true;
   }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_FinalAutoGate(const Setup &s,string &reason)
+bool STB_FinalAutoGate(const Setup &s)
   {
-   reason="";
    if(!g_autoTrading)
-     {
-      reason="AUTO_TRADING_OFF";
       return false;
-     }
+
    if(!STB_TradeEnvironmentAllowed())
-     {
-      reason="TRADE_ENVIRONMENT_REJECT";
       return false;
-     }
-   if(!STB_ExposureAllowsExecution(s,reason))
+
+   if(!STB_ExposureAllowsExecution(s))
       return false;
+
    return true;
   }
 
@@ -7078,32 +7435,8 @@ bool STB_FinalAutoGate(const Setup &s,string &reason)
 //+------------------------------------------------------------------+
 void STB_ExecuteTopCandidate()
   {
-   if(g_scannerTop10Count<=0)
-      {
-       Print("STB EXECUTION SKIP reason=NO_TOP_CANDIDATE",
-             " confidence=",g_scannerConfidence,
-             " universe=",IntegerToString(g_scannerUniverseCount),
-             " eligible=",IntegerToString(g_scannerEligibleCount),
-             " quality=",IntegerToString(g_scannerQualityCount),
-             " regime=",IntegerToString(g_scannerRegimeCount),
-             " candidates=",IntegerToString(g_scannerCandidateCount));
-       return;
-      }
-    if(g_scannerConfidence!="CLEAR")
-      {
-       double topScore=g_scannerTop10[0].opportunityScore;
-       double secondScore=(g_scannerTop10Count>1 ?
-                           g_scannerTop10[1].opportunityScore:0.0);
-       Print("STB EXECUTION SKIP reason=CONFIDENCE_NOT_CLEAR",
-             " confidence=",g_scannerConfidence,
-             " top=",g_scannerTop10[0].symbol,
-             " direction=",(g_scannerTop10[0].direction>0 ? "BUY":"SELL"),
-             " topScore=",DoubleToString(topScore,1),
-             " secondScore=",DoubleToString(secondScore,1),
-             " requiredGap=",DoubleToString(InpScannerMinTopGap,1),
-             " topCount=",IntegerToString(g_scannerTop10Count));
-       return;
-      }
+   if(g_scannerTop10Count<=0 || g_scannerConfidence!="CLEAR")
+      return;
 
    if(!g_autoTrading)
      {
@@ -7117,67 +7450,15 @@ void STB_ExecuteTopCandidate()
    for(int i=0;i<g_scannerTop10Count;i++)
      {
       STBCandidate c=g_scannerTop10[i];
-      string symbol=c.symbol;
-      bool wasSelected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
-
-      // Keep the candidate symbol subscribed through final revalidation and
-      // order placement. Retain it afterward only while a managed exposure
-      // needs live quotes for stop management/trailing.
-      if(!wasSelected && !SymbolSelect(symbol,true))
-         {
-          Print("STB CANDIDATE REJECT",
-                " stage=SYMBOL_SELECT",
-                " symbol=",symbol,
-                " reason=SYMBOL_SELECT_FAILED",
-                " error=",IntegerToString(GetLastError()));
-          continue;
-         }
-
-      // The lock spans exposure recheck through broker submission so two
-      // chart instances cannot both pass the same-symbol gate concurrently.
-      double entryLockToken=0.0;
-      if(!STB_EntryLockAcquire(symbol,entryLockToken))
-        {
-         if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
-            SymbolSelect(symbol,false);
-         continue;
-        }
 
       Setup validated;
-       bool revalidated=STB_FinalCandidateRevalidation(c,validated);
-       bool placed=false;
-       if(!revalidated)
-         {
-          Print("STB CANDIDATE REJECT",
-                " stage=FINAL_REVALIDATION",
-                " symbol=",c.symbol,
-                " direction=",(c.direction>0 ? "BUY":"SELL"),
-                " reason=",(c.rejectReason=="" ? "UNSPECIFIED":c.rejectReason),
-                " rank=",IntegerToString(c.currentRank),
-                " score=",DoubleToString(c.opportunityScore,1));
-         }
-       else
-         {
-          string finalGateReason="";
-          if(!STB_FinalAutoGate(validated,finalGateReason))
-            {
-             Print("STB CANDIDATE REJECT",
-                   " stage=FINAL_AUTO_GATE",
-                   " symbol=",c.symbol,
-                   " direction=",(c.direction>0 ? "BUY":"SELL"),
-                   " reason=",(finalGateReason=="" ? "UNSPECIFIED":finalGateReason),
-                   " rank=",IntegerToString(c.currentRank),
-                   " score=",DoubleToString(c.opportunityScore,1));
-            }
-          else
-             placed=PlaceSetup(validated,entryLockToken);
-         }
-       STB_EntryLockRelease(symbol,entryLockToken);
+      if(!STB_FinalCandidateRevalidation(c,validated))
+         continue;
 
-      if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
-         SymbolSelect(symbol,false);
+      if(!STB_FinalAutoGate(validated))
+         continue;
 
-      if(placed)
+      if(PlaceSetup(validated))
         {
          g_panelScanPlacements++;
          return;
@@ -7194,21 +7475,7 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if((direction!=1 && direction!=-1) ||
-      !STB_TradeEnvironmentAllowed())
-      return false;
-
-   if(!STB_SymbolManagementOwnedVerified(_Symbol))
-     {
-      Print("STB MANUAL PENDING REJECTED: symbol writer lease not owned symbol=",_Symbol);
-      return false;
-     }
-
-   long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
-   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
-      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
-      (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
-      (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+   if(direction!=1 && direction!=-1)
       return false;
 
    MqlTick tick;
@@ -7218,8 +7485,6 @@ bool PlaceManualPendingDirection(const int direction)
    double pip=PipSize(_Symbol);
    double volume=NormalizeVolume(_Symbol,InpBaseLots);
    if(pip<=0.0 || volume<=0.0)
-      return false;
-   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
       return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
@@ -7239,13 +7504,12 @@ bool PlaceManualPendingDirection(const int direction)
          return false;
      }
 
+   double entry=(direction>0 ? tick.ask+InpManualPendingGapPips*pip
+                             : tick.bid-InpManualPendingGapPips*pip);
+   entry=NormalizePrice(_Symbol,entry);
+
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_STOP
                                           : ORDER_TYPE_SELL_STOP);
-   double requestedEntry=(direction>0 ? tick.ask+InpManualPendingGapPips*pip
-                                      : tick.bid-InpManualPendingGapPips*pip);
-   double entry=0.0;
-   if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
-      return false;
 
    double sl=0.0;
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
@@ -7255,10 +7519,7 @@ bool PlaceManualPendingDirection(const int direction)
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
-   string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
-   if(!STB_SymbolManagementOwnedVerified(_Symbol))
-      return false;
+   string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
    bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7272,7 +7533,7 @@ bool PlaceManualPendingDirection(const int direction)
       Print("STB MANUAL PENDING REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
             _Symbol," order=",IntegerToString((int)ticket));
       if(ticket>0 && OrderSelect(ticket))
-         STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"PlaceManual");
+         trade.OrderDelete(ticket);
       return false;
      }
 
@@ -7301,21 +7562,7 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if((direction!=1 && direction!=-1) ||
-      !STB_TradeEnvironmentAllowed())
-      return false;
-
-   if(!STB_SymbolManagementOwnedVerified(_Symbol))
-     {
-      Print("STB MANUAL LIMIT REJECTED: symbol writer lease not owned symbol=",_Symbol);
-      return false;
-     }
-
-   long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
-   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED ||
-      tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
-      (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
-      (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+   if(direction!=1 && direction!=-1)
       return false;
 
    MqlTick tick;
@@ -7325,8 +7572,6 @@ bool PlaceManualLimitDirection(const int direction)
    double pip=PipSize(_Symbol);
    double volume=NormalizeVolume(_Symbol,InpBaseLots);
    if(pip<=0.0 || volume<=0.0)
-      return false;
-   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
       return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
@@ -7346,13 +7591,12 @@ bool PlaceManualLimitDirection(const int direction)
          return false;
      }
 
+   double entry=(direction>0 ? tick.bid-InpManualPendingGapPips*pip
+                             : tick.ask+InpManualPendingGapPips*pip);
+   entry=NormalizePrice(_Symbol,entry);
+
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_LIMIT
                                           : ORDER_TYPE_SELL_LIMIT);
-   double requestedEntry=(direction>0 ? tick.bid-InpManualPendingGapPips*pip
-                                      : tick.ask+InpManualPendingGapPips*pip);
-   double entry=0.0;
-   if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
-      return false;
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
@@ -7362,11 +7606,7 @@ bool PlaceManualLimitDirection(const int direction)
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
-   double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
-   string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+
-                  "|EB"+DoubleToString(effectiveManualOffset,8);
-   if(!STB_SymbolManagementOwnedVerified(_Symbol))
-      return false;
+   string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+"|EB"+DoubleToString(MathMax(0.0,InpManualPendingGapPips),8);
    bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -7380,7 +7620,7 @@ bool PlaceManualLimitDirection(const int direction)
       Print("STB MANUAL LIMIT REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
             _Symbol," order=",IntegerToString((int)ticket));
       if(ticket>0 && OrderSelect(ticket))
-         STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"PlaceManual");
+         trade.OrderDelete(ticket);
       return false;
      }
 
@@ -7422,6 +7662,29 @@ int g_scannerTop10Count=0;
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_ScannerIsAllowListed(const string symbol)
+  {
+   if(StringLen(InpScannerSymbols)==0)
+      return true;
+
+   string configured=InpScannerSymbols;
+   StringReplace(configured,";",",");
+
+   string parts[];
+   ushort separator=StringGetCharacter(",",0);
+   int n=StringSplit(configured,separator,parts);
+
+   for(int i=0;i<n;i++)
+     {
+      string item=parts[i];
+      StringTrimLeft(item);
+      StringTrimRight(item);
+      if(item==symbol)
+         return true;
+     }
+
+   return false;
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -7474,17 +7737,15 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
   {
    reason="";
 
+   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
+
+   if(!selected)
+      SymbolSelect(symbol,true);
+
    bool custom=false;
-   if(symbol=="" || !SymbolExist(symbol,custom))
+   if(!SymbolExist(symbol,custom))
      {
       reason="REJECT_SYMBOL_NOT_FOUND";
-      return false;
-     }
-
-   bool selected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
-   if(!selected && !SymbolSelect(symbol,true))
-     {
-      reason="REJECT_SYMBOL_SELECT_FAILED";
       return false;
      }
 
@@ -7651,7 +7912,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
-      q.reason="REJECT_QUALITY_SCORE";
+      q.reason="REJECT_SPREAD";
       return false;
      }
 
@@ -7873,11 +8134,8 @@ void STB_SortCandidates(STBCandidate &arr[])
 void STB_ScannerRun()
   {
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
-   bool newChartBar=(cycleBar>0 && cycleBar!=g_scannerLastCycleBar);
-   int scanInterval=MathMax(1,InpScanSeconds);
-   bool intervalElapsed=(g_scannerLastRun<=0 ||
-                         TimeCurrent()-g_scannerLastRun>=scanInterval);
-   if(!newChartBar && !intervalElapsed)
+
+   if(cycleBar<=0 || cycleBar==g_scannerLastCycleBar)
       return;
 
    ulong started=(ulong)GetTickCount();
@@ -7916,22 +8174,14 @@ void STB_ScannerRun()
       ArrayResize(symbols,1);
       symbols[0]=_Symbol;
      }
-   else if(StringLen(InpScannerSymbols)>0)
+   else
      {
-      // Parse only configured symbols instead of iterating the broker's full
-      // symbol catalog. This keeps explicit-universe scans bounded and fast.
-      string configured=InpScannerSymbols;
-      StringReplace(configured,";",",");
-      string parts[];
-      ushort separator=StringGetCharacter(",",0);
-      int count=StringSplit(configured,separator,parts);
+      int total=SymbolsTotal(false);
 
-      for(int i=0;i<count;i++)
+      for(int i=0;i<total;i++)
         {
-         string symbol=parts[i];
-         StringTrimLeft(symbol);
-         StringTrimRight(symbol);
-         if(symbol=="")
+         string symbol=SymbolName(i,false);
+         if(symbol=="" || !STB_ScannerIsAllowListed(symbol))
             continue;
 
          bool duplicate=false;
@@ -7943,22 +8193,6 @@ void STB_ScannerRun()
               }
 
          if(duplicate)
-            continue;
-
-         int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
-         symbols[n]=symbol;
-        }
-     }
-   else
-     {
-      // Empty InpScannerSymbols means selected Market Watch symbols only.
-      int total=SymbolsTotal(true);
-
-      for(int i=0;i<total;i++)
-        {
-         string symbol=SymbolName(i,true);
-         if(symbol=="")
             continue;
 
          int n=ArraySize(symbols);
@@ -7985,39 +8219,22 @@ void STB_ScannerRun()
 
       string reason="";
       if(!STB_ScannerDataEligible(symbol,reason))
-        {
-         Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
-               " reason=",(reason=="" ? "UNSPECIFIED":reason));
          continue;
-        }
+
       g_scannerEligibleCount++;
+
       STBMarketQuality quality;
       if(!STB_CalcMarketQuality(symbol,quality))
-        {
-         Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
-               " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
-               " score=",DoubleToString(quality.score,1),
-               " spreadPips=",DoubleToString(quality.spreadPips,2),
-               " activityRatio=",DoubleToString(quality.activityRatio,2),
-               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
          continue;
-        }
+
       g_scannerQualityCount++;
+
       STBRegimeState regime;
       if(!STB_EvaluateRegime(symbol,regime))
-        {
-         Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
-               " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
          continue;
-        }
+
       if(regime.regime==STB_REGIME_UNSTABLE)
-        {
-         Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
-               " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
-               " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
-               " efficiency=",DoubleToString(regime.efficiency,2));
          continue;
-        }
 
       g_scannerRegimeCount++;
 
@@ -8027,7 +8244,7 @@ void STB_ScannerRun()
             continue;
 
          Setup setup;
-         if(!BuildSetup(symbol,direction,setup,true))
+         if(!BuildSetup(symbol,direction,setup))
             continue;
 
          STBCandidate candidate;
@@ -8104,30 +8321,16 @@ void STB_ScannerRun()
       c.setup=validated;
 
       STBMarketQuality q;
-       if(!STB_CalcMarketQuality(c.symbol,q))
-         {
-          Print("STB SCANNER REJECT stage=WATCHLIST_QUALITY symbol=",c.symbol,
-                " reason=",(q.reason=="" ? "UNSPECIFIED":q.reason));
-          continue;
-         }
-       c.marketQualityScore=q.score;
-       STBRegimeState rr;
-       if(!STB_EvaluateRegime(c.symbol,rr))
-         {
-          Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
-                " reason=",(rr.reason=="" ? "UNSPECIFIED":rr.reason));
-          continue;
-         }
-       if(rr.regime==STB_REGIME_UNSTABLE)
-         {
-          Print("STB SCANNER REJECT stage=WATCHLIST_REGIME symbol=",c.symbol,
-                " reason=",(rr.reason=="" ? "UNSTABLE_REGIME":rr.reason));
-          continue;
-         }
+      if(STB_CalcMarketQuality(c.symbol,q))
+         c.marketQualityScore=q.score;
 
-      c.regime=rr.regime;
-      c.regimeStrength=rr.strength;
-      c.regimeScore=STB_RegimeFitScore(c,rr);
+      STBRegimeState rr;
+      if(STB_EvaluateRegime(c.symbol,rr))
+        {
+         c.regime=rr.regime;
+         c.regimeStrength=rr.strength;
+         c.regimeScore=STB_RegimeFitScore(c,rr);
+        }
 
       c.setupAgeBars=(int)MathMax(0,
                                   (long)((TimeCurrent()-c.setup.setupTime)/900));
@@ -8210,13 +8413,10 @@ void STB_ScannerRun()
      }
 
    for(int i=0;i<ArraySize(symbols) && i<ArraySize(wasSelected);i++)
-      if(!wasSelected[i] && !STB_HasSymbolExposureForManagement(symbols[i]))
+      if(!wasSelected[i])
          SymbolSelect(symbols[i],false);
 
-   if(cycleBar>0)
-
-      g_scannerLastCycleBar=cycleBar;
-
+   g_scannerLastCycleBar=cycleBar;
    g_scannerLastRun=TimeCurrent();
    g_scannerCycle++;
    g_scannerStatus="PASS";
@@ -8240,6 +8440,10 @@ void STB_ScannerRun()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void ScanWatchlist()
+  {
+   STB_ScannerRun();
+  }
 
 //==================================================================
 // PANEL
@@ -8261,20 +8465,206 @@ void STB_DashDeleteAll()
      }
   }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void STB_DashBox(const string name,
+                 const int x,
+                 const int y,
+                 const int width,
+                 const int height,
+                 const color bg,
+                 const color border)
+  {
+   if(ObjectFind(0,name)<0)
+     {
+      if(!ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0))
+         return;
+     }
 
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bg);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,border);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,10);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_DashLabel(const string name,
+                   const string text,
+                   const int x,
+                   const int y,
+                   const int size,
+                   const color clr,
+                   const bool bold=false)
+  {
+   if(ObjectFind(0,name)<0)
+     {
+      if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0))
+         return;
+     }
+
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,size);
+   ObjectSetString(0,name,OBJPROP_FONT,bold ? "Arial Bold":"Consolas");
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,20);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_DashEnsure()
+  {
+   string p=g_prefix+"DASH_";
 
+   STB_DashBox(p+"BG",10,10,390,302,clrBlack,clrDimGray);
+   STB_DashBox(p+"HEAD",10,10,390,46,clrNavy,clrSlateGray);
+   STB_DashBox(p+"DIV1",22,58,366,1,clrSlateGray,clrSlateGray);
+   STB_DashBox(p+"DIV2",22,244,366,1,clrDimGray,clrDimGray);
+
+   STB_DashLabel(p+"TITLE","SMART TRADING BOT",24,17,12,clrWhite,true);
+   STB_DashLabel(p+"SUB","ADVANCED CONTROL CENTER  •  BUILD 1.125",24,35,8,clrSilver,false);
+
+   STB_DashLabel(p+"L1","STATE",24,70,8,clrSilver,true);
+   STB_DashLabel(p+"V1","--",92,68,9,clrWhite,true);
+   STB_DashLabel(p+"L2","H4 TREND",204,70,8,clrSilver,true);
+   STB_DashLabel(p+"V2","--",272,68,9,clrWhite,true);
+
+   STB_DashLabel(p+"L3","M15 OSC",24,96,8,clrSilver,true);
+   STB_DashLabel(p+"V3","--",92,94,9,clrWhite,true);
+   STB_DashLabel(p+"L4","SETUP",204,96,8,clrSilver,true);
+   STB_DashLabel(p+"V4","--",272,94,9,clrWhite,true);
+
+   STB_DashLabel(p+"L5","POS / PEND",24,122,8,clrSilver,true);
+   STB_DashLabel(p+"V5","--",92,120,9,clrWhite,true);
+   STB_DashLabel(p+"L6","SPREAD",204,122,8,clrSilver,true);
+   STB_DashLabel(p+"V6","--",272,120,9,clrWhite,true);
+
+   STB_DashLabel(p+"L7","FLOAT P/L",24,148,8,clrSilver,true);
+   STB_DashLabel(p+"V7","--",92,146,9,clrWhite,true);
+   STB_DashLabel(p+"L8","EQUITY",204,148,8,clrSilver,true);
+   STB_DashLabel(p+"V8","--",272,146,9,clrWhite,true);
+
+   STB_DashLabel(p+"L9","PROTECTION",24,174,8,clrSilver,true);
+   STB_DashLabel(p+"V9","--",92,172,9,clrWhite,true);
+   STB_DashLabel(p+"L10","RISK",204,174,8,clrSilver,true);
+   STB_DashLabel(p+"V10","--",272,172,9,clrWhite,true);
+
+   STB_DashLabel(p+"L11","ADAPTIVE",24,200,8,clrSilver,true);
+   STB_DashLabel(p+"V11","--",92,198,9,clrWhite,true);
+   STB_DashLabel(p+"L12","SCANNER",204,200,8,clrSilver,true);
+   STB_DashLabel(p+"V12","--",272,198,9,clrWhite,true);
+
+   STB_DashLabel(p+"L13","SYMBOL / TF",24,226,8,clrSilver,true);
+   STB_DashLabel(p+"V13","--",92,224,9,clrWhite,true);
+   STB_DashLabel(p+"L14","CONTROLS",204,226,8,clrSilver,true);
+   STB_DashLabel(p+"V14","--",272,224,9,clrWhite,true);
+
+   STB_DashLabel(p+"STATUS","SYSTEM READY",24,254,8,clrAqua,true);
+   STB_DashLabel(p+"ACTION","LAST ACTION: READY",24,271,8,clrSilver,false);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_DashSet(const string name,
+                 const string text,
+                 const color clr)
+  {
+   if(ObjectFind(0,name)<0)
+      return;
+
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int STB_DashManagedPositions(bool &allSLProtected)
+  {
+   int count=0;
+   allSLProtected=true;
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+
+      if(!IsManagedPosition(ticket))
+         continue;
+
+      count++;
+
+      if(PositionGetDouble(POSITION_SL)<=0.0)
+         allSLProtected=false;
+     }
+
+   return count;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void STB_DashProtection(bool &allSLProtected)
+  {
+   bool posProtected=true;
+   int positions=STB_DashManagedPositions(posProtected);
+
+   bool pendingProtected=true;
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+
+      if(!IsManagedOrder(ticket))
+         continue;
+
+      ENUM_ORDER_TYPE type=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+
+      if(type==ORDER_TYPE_BUY_STOP ||
+         type==ORDER_TYPE_SELL_STOP ||
+         type==ORDER_TYPE_BUY_LIMIT ||
+         type==ORDER_TYPE_SELL_LIMIT ||
+         type==ORDER_TYPE_BUY_STOP_LIMIT ||
+         type==ORDER_TYPE_SELL_STOP_LIMIT)
+        {
+         if(OrderGetDouble(ORDER_SL)<=0.0)
+           {
+            pendingProtected=false;
+            break;
+           }
+        }
+     }
+
+   allSLProtected=posProtected && pendingProtected;
+
+   if(positions==0 && CountManagedPendingOrders()==0)
+      allSLProtected=true;
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
@@ -8415,8 +8805,8 @@ int CountManagedPendingOrders()
 //+------------------------------------------------------------------+
 int TrailAllPendingOrdersNow()
   {
-   STB_BeginCycle(); // Blueprint 26: user PEND_TRAIL command gets its own decision cycle
-   return STB_PendingTrailProcess(true); // count only confirmed broker geometry changes
+   STB_PendingTrailProcess(true); // MANUAL_OVERRIDE: user PEND_TRAIL command
+   return 1;
   }
 
 //+------------------------------------------------------------------+
@@ -8547,38 +8937,1663 @@ void DrawHLine(const string name,const double price,const color clr)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawMarker(const string name,const datetime t,const double price,
+                const color clr,const int arrowCode)
+  {
+   ObjectDelete(0,name);
+   if(t<=0 || price<=0.0)
+      return;
 
+   if(!ObjectCreate(0,name,OBJ_ARROW,0,t,price))
+      return;
 
+   ObjectSetInteger(0,name,OBJPROP_ARROWCODE,arrowCode);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,2);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+  }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawTextMarker(const string name,const datetime t,const double price,
+                    const string text,const color clr)
+  {
+   ObjectDelete(0,name);
+   if(t<=0 || price<=0.0)
+      return;
+
+   if(!ObjectCreate(0,name,OBJ_TEXT,0,t,price))
+      return;
+
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,8);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawZone(const string name,const datetime t1,const double p1,
+              const datetime t2,const double p2,const color clr)
+  {
+   ObjectDelete(0,name);
+
+   if(t1<=0 || t2<=0 || p1<=0.0 || p2<=0.0)
+      return;
+
+   if(!ObjectCreate(0,name,OBJ_RECTANGLE,0,t1,p1,t2,p2))
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_FILL,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawZigSegment(const string name,const SwingPoint &a,const SwingPoint &b)
+  {
+   ObjectDelete(0,name);
+
+   if(a.time<=0 || b.time<=0 || a.price<=0.0 || b.price<=0.0)
+      return;
+
+   if(!ObjectCreate(0,name,OBJ_TREND,0,a.time,a.price,b.time,b.price))
+      return;
+
+// Neutral ZigZag line: no bright pivot colors and no chart clutter.
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrSilver);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_SOLID);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void SortSwingsByTime(SwingPoint &points[])
+  {
+   int n=ArraySize(points);
+
+   for(int i=1;i<n;i++)
+     {
+      SwingPoint key=points[i];
+      int j=i-1;
+
+      while(j>=0 && points[j].time>key.time)
+        {
+         points[j+1]=points[j];
+         j--;
+        }
+
+      points[j+1]=key;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawZigZagVisual()
+  {
+   SwingPoint points[];
+
+   BuildZigZagPoints(_Symbol,PERIOD_M15,InpLookbackM15,points);
+
+   int n=ArraySize(points);
+   if(n<2)
+      return;
+
+   for(int i=1;i<n;i++)
+      DrawZigSegment(g_prefix+"VIS_ZZ_"+(string)i,points[i-1],points[i]);
+  }
 
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawAllFVGVisuals()
+  {
+   MqlRates r[];
+
+   if(!GetRates(_Symbol,PERIOD_M15,InpLookbackM15,r))
+      return;
+
+   int maxScan=MathMin(InpPatternWindowBars,InpLookbackM15-3);
+
+   for(int s=1;s<=maxScan;s++)
+     {
+      if(r[s].low>r[s+2].high)
+        {
+         DrawZone(g_prefix+"VIS_FVG_B_"+(string)s,
+                  r[s+2].time,r[s+2].high,
+                  r[s].time,r[s].low,
+                  clrAqua);
+         DrawTextMarker(g_prefix+"VIS_FVG_BT_"+(string)s,
+                        r[s].time,r[s].low,"FVG",clrAqua);
+        }
+
+      if(r[s].high<r[s+2].low)
+        {
+         DrawZone(g_prefix+"VIS_FVG_S_"+(string)s,
+                  r[s+2].time,r[s+2].low,
+                  r[s].time,r[s].high,
+                  clrYellow);
+         DrawTextMarker(g_prefix+"VIS_FVG_ST_"+(string)s,
+                        r[s].time,r[s].high,"FVG",clrYellow);
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawAllOBVisuals()
+  {
+   MqlRates r[];
+
+   if(!GetRates(_Symbol,PERIOD_M15,InpLookbackM15,r))
+      return;
+
+   int maxScan=MathMin(InpPatternWindowBars*2,InpLookbackM15-1);
+
+   for(int s=1;s<=maxScan;s++)
+     {
+      if(r[s].close<r[s].open)
+        {
+         datetime t2=r[MathMax(1,s-2)].time;
+         DrawZone(g_prefix+"VIS_OB_B_"+(string)s,
+                  r[s].time,r[s].high,t2,r[s].low,
+                  clrDodgerBlue);
+        }
+
+      if(r[s].close>r[s].open)
+        {
+         datetime t2=r[MathMax(1,s-2)].time;
+         DrawZone(g_prefix+"VIS_OB_S_"+(string)s,
+                  r[s].time,r[s].high,t2,r[s].low,
+                  clrOrange);
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawStructureVisuals()
+  {
+// Draw the latest CONFIRMED ZigZag high and low as horizontal
+// structural levels. Each level extends exactly 30 candles to the
+// right, unless a CLOSED candle breaks it earlier.
+//
+// Break classification:
+//   resistance break in bullish context  -> BOS BUY
+//   resistance break in bearish context  -> CHoCH BUY
+//   support break in bearish context     -> BOS SELL
+//   support break in bullish context     -> CHoCH SELL
+//
+// This is deliberately independent from FVG/OB/entry filters.
+   SwingPoint zz[];
+   BuildZigZagPoints(_Symbol,PERIOD_M15,InpLookbackM15,zz);
+
+   int n=ArraySize(zz);
+   if(n<4)
+      return;
+
+   SwingPoint validHigh= {0,0,0.0,false};
+   SwingPoint validLow= {0,0,0.0,false};
+   bool haveHigh=false;
+   bool haveLow=false;
+
+// Latest confirmed ZigZag high/low are the valid structural levels.
+   for(int i=n-1;i>=0;i--)
+     {
+      if(!haveHigh && zz[i].isHigh)
+        {
+         validHigh=zz[i];
+         haveHigh=true;
+        }
+
+      if(!haveLow && !zz[i].isHigh)
+        {
+         validLow=zz[i];
+         haveLow=true;
+        }
+
+      if(haveHigh && haveLow)
+         break;
+     }
+
+   if(!haveHigh || !haveLow)
+      return;
+
+   MqlRates rates[];
+   if(!GetRates(_Symbol,PERIOD_M15,InpLookbackM15,rates))
+      return;
+
+   const int extensionBars=30;
+
+// Determine the structural context immediately BEFORE each level.
+// The previous opposite pivots provide the market-structure direction.
+   string highContext="NEUTRAL";
+   string lowContext ="NEUTRAL";
+
+   for(int i=n-1;i>=0;i--)
+     {
+      if(zz[i].time>=validHigh.time)
+         continue;
+
+      if(zz[i].isHigh && zz[i].price<validHigh.price)
+        {
+         highContext="BULLISH";
+         break;
+        }
+     }
+
+   for(int i=n-1;i>=0;i--)
+     {
+      if(zz[i].time>=validLow.time)
+         continue;
+
+      if(!zz[i].isHigh && zz[i].price>validLow.price)
+        {
+         lowContext="BEARISH";
+         break;
+        }
+     }
+
+// If the immediate prior structure is not obvious from the same type
+// of pivot, compare the latest two confirmed highs/lows.
+   SwingPoint highs[];
+   SwingPoint lows[];
+
+   for(int i=n-1;i>=0;i--)
+     {
+      if(zz[i].isHigh)
+        {
+         int h=ArraySize(highs);
+         ArrayResize(highs,h+1);
+         highs[h]=zz[i];
+        }
+      else
+        {
+         int l=ArraySize(lows);
+         ArrayResize(lows,l+1);
+         lows[l]=zz[i];
+        }
+     }
+
+   if(ArraySize(highs)>=2)
+     {
+      if(highs[0].price>highs[1].price)
+         highContext="BULLISH";
+      else
+         if(highs[0].price<highs[1].price)
+            highContext="BEARISH";
+     }
+
+   if(ArraySize(lows)>=2)
+     {
+      if(lows[0].price>lows[1].price)
+         lowContext="BULLISH";
+      else
+         if(lows[0].price<lows[1].price)
+            lowContext="BEARISH";
+     }
+
+// ---------------------------------------------------------------
+// VALID HIGH / RESISTANCE
+// ---------------------------------------------------------------
+     {
+      string lineName=g_prefix+"VIS_VALID_HIGH";
+      string textName=g_prefix+"SIG_VALID_HIGH";
+      ObjectDelete(0,lineName);
+      ObjectDelete(0,textName);
+
+      int startShift=validHigh.shift;
+      int breakShift=-1;
+      int endShift=MathMax(1,startShift-extensionBars);
+
+      // rates[] is series data. Search only CLOSED candles after the
+      // confirmed pivot, up to exactly 30 candles.
+      for(int sh=startShift-1;sh>=endShift;sh--)
+        {
+         if(rates[sh].close>validHigh.price)
+           {
+            breakShift=sh;
+            break;
+           }
+        }
+
+      int finalShift=(breakShift>0 ? breakShift : endShift);
+
+      if(finalShift<1)
+         finalShift=1;
+
+      datetime t1=validHigh.time;
+      datetime t2=rates[finalShift].time;
+
+      if(t2>t1)
+        {
+         if(ObjectCreate(0,lineName,OBJ_TREND,0,t1,validHigh.price,t2,validHigh.price))
+           {
+            ObjectSetInteger(0,lineName,OBJPROP_COLOR,clrSlateGray);
+            ObjectSetInteger(0,lineName,OBJPROP_WIDTH,2);
+            ObjectSetInteger(0,lineName,OBJPROP_STYLE,STYLE_SOLID);
+            ObjectSetInteger(0,lineName,OBJPROP_RAY_LEFT,false);
+            ObjectSetInteger(0,lineName,OBJPROP_RAY_RIGHT,false);
+            ObjectSetInteger(0,lineName,OBJPROP_BACK,false);
+            ObjectSetInteger(0,lineName,OBJPROP_SELECTABLE,false);
+            ObjectSetInteger(0,lineName,OBJPROP_HIDDEN,false);
+           }
+        }
+
+      if(breakShift>0)
+        {
+         string eventText=(highContext=="BEARISH" ? "CHoCH BUY" : "BOS BUY");
+         datetime bt=rates[breakShift].time;
+
+         DrawTextMarker(textName,bt,validHigh.price,
+                        eventText,clrSilver);
+
+         DrawStructureLine(g_prefix+"SIG_HIGH_BREAK",
+                           validHigh.time,validHigh.price,
+                           bt,validHigh.price,clrSilver);
+
+         Print("STB HIGH LEVEL BREAK symbol=",_Symbol,
+               " event=",eventText,
+               " price=",DoubleToString(validHigh.price,
+                                        (int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
+               " time=",TimeToString(bt));
+        }
+     }
+
+// ---------------------------------------------------------------
+// VALID LOW / SUPPORT
+// ---------------------------------------------------------------
+     {
+      string lineName=g_prefix+"VIS_VALID_LOW";
+      string textName=g_prefix+"SIG_VALID_LOW";
+      ObjectDelete(0,lineName);
+      ObjectDelete(0,textName);
+
+      int startShift=validLow.shift;
+      int breakShift=-1;
+      int endShift=MathMax(1,startShift-extensionBars);
+
+      for(int sh=startShift-1;sh>=endShift;sh--)
+        {
+         if(rates[sh].close<validLow.price)
+           {
+            breakShift=sh;
+            break;
+           }
+        }
+
+      int finalShift=(breakShift>0 ? breakShift : endShift);
+
+      if(finalShift<1)
+         finalShift=1;
+
+      datetime t1=validLow.time;
+      datetime t2=rates[finalShift].time;
+
+      if(t2>t1)
+        {
+         if(ObjectCreate(0,lineName,OBJ_TREND,0,t1,validLow.price,t2,validLow.price))
+           {
+            ObjectSetInteger(0,lineName,OBJPROP_COLOR,clrSlateGray);
+            ObjectSetInteger(0,lineName,OBJPROP_WIDTH,2);
+            ObjectSetInteger(0,lineName,OBJPROP_STYLE,STYLE_SOLID);
+            ObjectSetInteger(0,lineName,OBJPROP_RAY_LEFT,false);
+            ObjectSetInteger(0,lineName,OBJPROP_RAY_RIGHT,false);
+            ObjectSetInteger(0,lineName,OBJPROP_BACK,false);
+            ObjectSetInteger(0,lineName,OBJPROP_SELECTABLE,false);
+            ObjectSetInteger(0,lineName,OBJPROP_HIDDEN,false);
+           }
+        }
+
+      if(breakShift>0)
+        {
+         string eventText=(lowContext=="BULLISH" ? "CHoCH SELL" : "BOS SELL");
+         datetime bt=rates[breakShift].time;
+
+         DrawTextMarker(textName,bt,validLow.price,
+                        eventText,clrSilver);
+
+         DrawStructureLine(g_prefix+"SIG_LOW_BREAK",
+                           validLow.time,validLow.price,
+                           bt,validLow.price,clrSilver);
+
+         Print("STB LOW LEVEL BREAK symbol=",_Symbol,
+               " event=",eventText,
+               " price=",DoubleToString(validLow.price,
+                                        (int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
+               " time=",TimeToString(bt));
+        }
+     }
+  }
 
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawStructureLine(const string name,
+                       const datetime t1,const double p1,
+                       const datetime t2,const double p2,
+                       const color clr)
+  {
+   ObjectDelete(0,name);
+   if(t1<=0 || t2<=t1 || p1<=0.0 || p2<=0.0)
+      return;
+
+   if(!ObjectCreate(0,name,OBJ_TREND,0,t1,p1,t2,p2))
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
+   ObjectSetInteger(0,name,OBJPROP_RAY_LEFT,false);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,false);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void DrawSetupLevels(const Setup &s,const string side)
+  {
+   if(!s.valid)
+      return;
+
+   string tag=g_prefix+"SIG_"+side+"_";
+   DrawHLine(tag+"ENTRY",s.entry,s.direction>0?clrLimeGreen:clrSilver);
+   DrawHLine(tag+"SL",s.sl,clrSilver);
+   DrawHLine(tag+"TP",s.tp,clrDeepSkyBlue);
+
+   datetime t=iTime(_Symbol,PERIOD_M15,s.bosShift);
+   if(t>0)
+     {
+      DrawTextMarker(tag+"ENTRY_TXT",t,s.entry,
+                     side+" ENTRY",s.direction>0?clrLimeGreen:clrSilver);
+      DrawTextMarker(tag+"SL_TXT",t,s.sl,"SL",clrSilver);
+      DrawTextMarker(tag+"TP_TXT",t,s.tp,"TP",clrDeepSkyBlue);
+     }
+
+   if(s.originShift>=0)
+     {
+      datetime ot=iTime(_Symbol,PERIOD_M15,s.originShift);
+      DrawZone(tag+"OB",ot,s.originHigh,
+               iTime(_Symbol,PERIOD_M15,1),s.originLow,
+               s.direction>0?clrDodgerBlue:clrOrange);
+     }
+
+   if(s.fvgShift>=0)
+     {
+      MqlRates r[];
+      if(GetRates(_Symbol,PERIOD_M15,InpLookbackM15,r))
+        {
+         int f=s.fvgShift;
+         if(f+2<InpLookbackM15)
+           {
+            if(s.direction>0)
+               DrawZone(tag+"FVG",r[f+2].time,r[f+2].high,
+                        r[f].time,r[f].low,clrAqua);
+            else
+               DrawZone(tag+"FVG",r[f+2].time,r[f+2].low,
+                        r[f].time,r[f].high,clrYellow);
+           }
+        }
+     }
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_DrawProfessionalVisualEngine() // STB-DEADCODE: 0 callers (legacy heavy visual engine). TRADING markers live in STB_DrawTradingLevels().
+  {
+// STB_FINAL_VISUAL_ENGINE_V3
+//
+// VISUALIZATION ONLY.
+// Scanner / Risk / Execution are not touched.
+//
+// Current chart timeframe is authoritative.
+//
+// Display limits:
+//   - ZigZag path: 0
+//   - Upper zone: 1
+//   - Lower zone: 1
+//   - Upper structure event: 1
+//   - Lower structure event: 1
+//   - Active trendline: 1
+
+   ENUM_TIMEFRAMES tf=(ENUM_TIMEFRAMES)_Period;
+
+   int lookback=MathMax(
+                   160,
+                   InpLookbackM15
+                );
+
+   MqlRates r[];
+
+   if(!GetRates(
+         _Symbol,
+         tf,
+         lookback,
+         r))
+      return;
+
+   int total=ArraySize(r);
+
+   if(total<100)
+      return;
+
+// ----------------------------------------------------------
+// REMOVE LEGACY VISUAL OBJECTS
+// ----------------------------------------------------------
 
 
+   ObjectDelete(0,g_prefix+"VIS_PRO_TREND");
+   ObjectDelete(0,g_prefix+"VIS_PRO_BREAK_UP");
+   ObjectDelete(0,g_prefix+"VIS_PRO_BREAK_UP_LINE");
+   ObjectDelete(0,g_prefix+"VIS_PRO_BREAK_DOWN");
+   ObjectDelete(0,g_prefix+"VIS_PRO_BREAK_DOWN_LINE");
+
+   ObjectDelete(0,g_prefix+"VIS_ZONE_UPPER");
+   ObjectDelete(0,g_prefix+"VIS_ZONE_UPPER_TXT");
+   ObjectDelete(0,g_prefix+"VIS_ZONE_LOWER");
+   ObjectDelete(0,g_prefix+"VIS_ZONE_LOWER_TXT");
+
+   DeleteVisuals();
+
+// ----------------------------------------------------------
+// CONFIRMED SWINGS
+// ----------------------------------------------------------
+
+   SwingPoint pivots[];
+
+   BuildZigZagPoints(
+      _Symbol,
+      tf,
+      lookback,
+      pivots
+   );
+
+   SortSwingsByTime(pivots);
+
+   int n=ArraySize(pivots);
+
+   if(n<4)
+      return;
+
+   SwingPoint high1= {0,0,0.0,false};
+   SwingPoint high2= {0,0,0.0,false};
+   SwingPoint low1 = {0,0,0.0,false};
+   SwingPoint low2 = {0,0,0.0,false};
+
+   int highCount=0;
+   int lowCount=0;
+
+   for(int i=n-1;i>=0;i--)
+     {
+      if(pivots[i].isHigh)
+        {
+         if(highCount==0)
+            high1=pivots[i];
+         else
+            if(highCount==1)
+               high2=pivots[i];
+
+         highCount++;
+        }
+      else
+        {
+         if(lowCount==0)
+            low1=pivots[i];
+         else
+            if(lowCount==1)
+               low2=pivots[i];
+
+         lowCount++;
+        }
+
+      if(highCount>=2 && lowCount>=2)
+         break;
+     }
+
+   if(highCount<2 || lowCount<2)
+      return;
+
+// ----------------------------------------------------------
+// STRUCTURAL DIRECTION
+// ----------------------------------------------------------
+
+   int trendDir=0;
+
+   bool bullishStructure=
+      high1.price>high2.price &&
+      low1.price>low2.price;
+
+   bool bearishStructure=
+      high1.price<high2.price &&
+      low1.price<low2.price;
+
+   if(bullishStructure)
+      trendDir=1;
+   else
+      if(bearishStructure)
+         trendDir=-1;
+
+// ----------------------------------------------------------
+// CURRENT PRICE
+// ----------------------------------------------------------
+
+   MqlTick tick;
+
+   if(!SymbolInfoTick(_Symbol,tick))
+      return;
+
+   double price=(tick.bid+tick.ask)*0.5;
+
+// ----------------------------------------------------------
+// FIND CONFIRMED UP BREAK
+// ----------------------------------------------------------
+
+   int upBreakShift=-1;
+   double upQuality=0.0;
+
+   if(high1.shift>1)
+     {
+      int maxShift=MathMin(
+                      40,
+                      high1.shift-1
+                   );
+
+      for(int sh=1;sh<=maxShift;sh++)
+        {
+         if(r[sh].close<=
+            high1.price)
+            continue;
+
+         double range=
+            r[sh].high-r[sh].low;
+
+         if(range<=0.0)
+            continue;
+
+         double body=
+            MathAbs(
+               r[sh].close-
+               r[sh].open
+            );
+
+         double bodyRatio=body/range;
+
+         double atr=
+            STB_VizATR(
+               r,
+               sh+1,
+               14
+            );
+
+         if(atr<=0.0)
+            continue;
+
+         double rangeAtr=range/atr;
+         double closeAtr=
+            (r[sh].close-high1.price)/atr;
+
+         if(bodyRatio<0.55)
+            continue;
+
+         if(rangeAtr<0.90)
+            continue;
+
+         if(closeAtr<0.10)
+            continue;
+
+         upQuality=
+            MathMin(100.0,
+                    25.0+
+                    MathMin(25.0,bodyRatio*35.0)+
+                    MathMin(30.0,rangeAtr*15.0)+
+                    MathMin(20.0,closeAtr*40.0)
+                   );
+
+         if(upQuality>=75.0)
+           {
+            upBreakShift=sh;
+            break;
+           }
+        }
+     }
+
+// ----------------------------------------------------------
+// FIND CONFIRMED DOWN BREAK
+// ----------------------------------------------------------
+
+   int downBreakShift=-1;
+   double downQuality=0.0;
+
+   if(low1.shift>1)
+     {
+      int maxShift=MathMin(
+                      40,
+                      low1.shift-1
+                   );
+
+      for(int sh=1;sh<=maxShift;sh++)
+        {
+         if(r[sh].close>=
+            low1.price)
+            continue;
+
+         double range=
+            r[sh].high-r[sh].low;
+
+         if(range<=0.0)
+            continue;
+
+         double body=
+            MathAbs(
+               r[sh].close-
+               r[sh].open
+            );
+
+         double bodyRatio=body/range;
+
+         double atr=
+            STB_VizATR(
+               r,
+               sh+1,
+               14
+            );
+
+         if(atr<=0.0)
+            continue;
+
+         double rangeAtr=range/atr;
+         double closeAtr=
+            (low1.price-r[sh].close)/atr;
+
+         if(bodyRatio<0.55)
+            continue;
+
+         if(rangeAtr<0.90)
+            continue;
+
+         if(closeAtr<0.10)
+            continue;
+
+         downQuality=
+            MathMin(100.0,
+                    25.0+
+                    MathMin(25.0,bodyRatio*35.0)+
+                    MathMin(30.0,rangeAtr*15.0)+
+                    MathMin(20.0,closeAtr*40.0)
+                   );
+
+         if(downQuality>=75.0)
+           {
+            downBreakShift=sh;
+            break;
+           }
+        }
+     }
+
+// ----------------------------------------------------------
+// DRAW ONLY THE TWO MOST IMPORTANT STRUCTURE EVENTS
+// ----------------------------------------------------------
+
+   if(upBreakShift>0 &&
+      trendDir!=0)
+     {
+      bool choch=(trendDir<0);
+
+      string eventText=
+         choch ? "CHoCH BUY" : "BOS BUY";
+
+      color eventColor=
+         choch ? clrAqua : clrLimeGreen;
+
+      DrawStructureLine(
+         g_prefix+"VIS_PRO_BREAK_UP_LINE",
+         high1.time,
+         high1.price,
+         r[upBreakShift].time,
+         high1.price,
+         eventColor
+      );
+
+      DrawTextMarker(
+         g_prefix+"VIS_PRO_BREAK_UP",
+         r[upBreakShift].time,
+         high1.price,
+         eventText,
+         eventColor
+      );
+     }
+
+   if(downBreakShift>0 &&
+      trendDir!=0)
+     {
+      bool choch=(trendDir>0);
+
+      string eventText=
+         choch ? "CHoCH SELL" : "BOS SELL";
+
+      color eventColor=
+         choch ? clrOrange : clrTomato;
+
+      DrawStructureLine(
+         g_prefix+"VIS_PRO_BREAK_DOWN_LINE",
+         low1.time,
+         low1.price,
+         r[downBreakShift].time,
+         low1.price,
+         eventColor
+      );
+
+      DrawTextMarker(
+         g_prefix+"VIS_PRO_BREAK_DOWN",
+         r[downBreakShift].time,
+         low1.price,
+         eventText,
+         eventColor
+      );
+     }
+
+// ----------------------------------------------------------
+// DETERMINE MOST RECENT CHOCH
+// ----------------------------------------------------------
+
+   int latestChochShift=-1;
+   int latestChochDir=0;
+
+   if(trendDir<0 && upBreakShift>0)
+     {
+      latestChochShift=upBreakShift;
+      latestChochDir=1;
+     }
+
+   if(trendDir>0 && downBreakShift>0)
+     {
+      if(latestChochShift<0 ||
+         downBreakShift<latestChochShift)
+        {
+         latestChochShift=downBreakShift;
+         latestChochDir=-1;
+        }
+     }
+
+// ----------------------------------------------------------
+// TRENDLINE
+//
+// CHoCH BUY:
+//   start at structural low before the change
+//   end at first confirmed higher low after the change
+//
+// CHoCH SELL:
+//   start at structural high before the change
+//   end at first confirmed lower high after the change
+// ----------------------------------------------------------
+
+   datetime lineT1=0;
+   datetime lineT2=0;
+   double lineP1=0.0;
+   double lineP2=0.0;
+   color lineColor=clrSilver;
+   bool haveLine=false;
+
+   if(latestChochShift>0)
+     {
+      datetime changeTime=
+         r[latestChochShift].time;
+
+      if(latestChochDir==1)
+        {
+         int origin=-1;
+         int second=-1;
+
+         for(int i=n-1;i>=0;i--)
+           {
+            if(!pivots[i].isHigh &&
+               pivots[i].time<=changeTime)
+              {
+               origin=i;
+               break;
+              }
+           }
+
+         if(origin>=0)
+           {
+            for(int i=origin+1;i<n;i++)
+              {
+               if(!pivots[i].isHigh &&
+                  pivots[i].time>changeTime &&
+                  pivots[i].price>pivots[origin].price)
+                 {
+                  second=i;
+                  break;
+                 }
+              }
+           }
+
+         if(origin>=0 && second>=0)
+           {
+            lineT1=pivots[origin].time;
+            lineT2=pivots[second].time;
+            lineP1=pivots[origin].price;
+            lineP2=pivots[second].price;
+            lineColor=clrLimeGreen;
+            haveLine=true;
+           }
+        }
+      else
+         if(latestChochDir==-1)
+           {
+            int origin=-1;
+            int second=-1;
+
+            for(int i=n-1;i>=0;i--)
+              {
+               if(pivots[i].isHigh &&
+                  pivots[i].time<=changeTime)
+                 {
+                  origin=i;
+                  break;
+                 }
+              }
+
+            if(origin>=0)
+              {
+               for(int i=origin+1;i<n;i++)
+                 {
+                  if(pivots[i].isHigh &&
+                     pivots[i].time>changeTime &&
+                     pivots[i].price<pivots[origin].price)
+                    {
+                     second=i;
+                     break;
+                    }
+                 }
+              }
+
+            if(origin>=0 && second>=0)
+              {
+               lineT1=pivots[origin].time;
+               lineT2=pivots[second].time;
+               lineP1=pivots[origin].price;
+               lineP2=pivots[second].price;
+               lineColor=clrTomato;
+               haveLine=true;
+              }
+           }
+     }
+
+// Stable fallback when there is no fresh CHoCH.
+   if(!haveLine)
+     {
+      if(trendDir==1)
+        {
+         lineT1=low2.time;
+         lineT2=low1.time;
+         lineP1=low2.price;
+         lineP2=low1.price;
+         lineColor=clrLimeGreen;
+         haveLine=true;
+        }
+      else
+         if(trendDir==-1)
+           {
+            lineT1=high2.time;
+            lineT2=high1.time;
+            lineP1=high2.price;
+            lineP2=high1.price;
+            lineColor=clrTomato;
+            haveLine=true;
+           }
+     }
+
+   if(haveLine &&
+      lineT1>0 &&
+      lineT2>lineT1 &&
+      lineP1>0.0 &&
+      lineP2>0.0)
+     {
+      string lineName=
+         g_prefix+"VIS_PRO_TREND";
+
+      if(ObjectCreate(
+            0,
+            lineName,
+            OBJ_TREND,
+            0,
+            lineT1,
+            lineP1,
+            lineT2,
+            lineP2))
+        {
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_COLOR,
+            lineColor
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_WIDTH,
+            2
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_STYLE,
+            STYLE_SOLID
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_RAY_RIGHT,
+            true
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_RAY_LEFT,
+            false
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_SELECTABLE,
+            false
+         );
+
+         ObjectSetInteger(
+            0,
+            lineName,
+            OBJPROP_HIDDEN,
+            false
+         );
+        }
+     }
+
+// =========================================================
+// ZONE CHAMPIONS
+// =========================================================
+
+   double bestUpperScore=-1.0;
+   double bestUpperTop=0.0;
+   double bestUpperBottom=0.0;
+   datetime bestUpperStart=0;
+   string bestUpperLabel="";
+   color bestUpperColor=clrTomato;
+
+   double bestLowerScore=-1.0;
+   double bestLowerTop=0.0;
+   double bestLowerBottom=0.0;
+   datetime bestLowerStart=0;
+   string bestLowerLabel="";
+   color bestLowerColor=clrAqua;
+
+   int maxScan=MathMin(
+                  60,
+                  total-4
+               );
+
+// ---------------------------------------------------------
+// FVG CANDIDATES
+// ---------------------------------------------------------
+
+   for(int s=1;s<=maxScan;s++)
+     {
+      bool bullishFVG=
+         r[s].low >
+         r[s+2].high;
+
+      bool bearishFVG=
+         r[s].high <
+         r[s+2].low;
+
+      if(!bullishFVG &&
+         !bearishFVG)
+         continue;
+
+      double zoneTop=
+         bullishFVG ?
+         r[s].low :
+         r[s+2].low;
+
+      double zoneBottom=
+         bullishFVG ?
+         r[s+2].high :
+         r[s].high;
+
+      double gap=
+         zoneTop-zoneBottom;
+
+      if(gap<=0.0)
+         continue;
+
+      int disp=s+1;
+
+      double range=
+         r[disp].high-r[disp].low;
+
+      if(range<=0.0)
+         continue;
+
+      double body=
+         MathAbs(
+            r[disp].close-r[disp].open
+         );
+
+      double bodyRatio=body/range;
+
+      double atr=
+         STB_VizATR(
+            r,
+            disp,
+            14
+         );
+
+      if(atr<=0.0)
+         continue;
+
+      double gapATR=gap/atr;
+      double rangeATR=range/atr;
+
+      if(bodyRatio<0.58)
+         continue;
+
+      if(rangeATR<0.90)
+         continue;
+
+      if(gapATR<0.10)
+         continue;
+
+      if(bullishFVG &&
+         r[disp].close<=r[disp].open)
+         continue;
+
+      if(bearishFVG &&
+         r[disp].close>=r[disp].open)
+         continue;
+
+      bool fullyMitigated=false;
+      bool touched=false;
+
+      for(int newer=s-1;newer>=1;newer--)
+        {
+         if(bullishFVG)
+           {
+            if(r[newer].close<=zoneBottom)
+              {
+               fullyMitigated=true;
+               break;
+              }
+
+            if(r[newer].low<=zoneTop)
+               touched=true;
+           }
+         else
+           {
+            if(r[newer].close>=zoneTop)
+              {
+               fullyMitigated=true;
+               break;
+              }
+
+            if(r[newer].high>=zoneBottom)
+               touched=true;
+           }
+        }
+
+      if(fullyMitigated)
+         continue;
+
+      double gapScore=
+         MathMin(
+            25.0,
+            gapATR/0.50*25.0
+         );
+
+      double bodyScore=
+         MathMin(
+            20.0,
+            MathMax(
+               0.0,
+               (bodyRatio-0.58)/0.32*20.0
+            )
+         );
+
+      double displacementScore=
+         MathMin(
+            20.0,
+            rangeATR/1.60*20.0
+         );
+
+      double freshnessScore=
+         touched ? 10.0 : 20.0;
+
+      double structureScore=0.0;
+
+      int relatedBreak=
+         bullishFVG ?
+         upBreakShift :
+         downBreakShift;
+
+      if(relatedBreak>0)
+        {
+         int distance=
+            MathAbs(
+               s-relatedBreak
+            );
+
+         if(distance<=2)
+            structureScore=20.0;
+         else
+            if(distance<=5)
+               structureScore=12.0;
+        }
+
+      double score=
+         gapScore+
+         bodyScore+
+         displacementScore+
+         freshnessScore+
+         structureScore;
+
+      if(score<78.0)
+         continue;
+
+      bool below=
+         zoneTop<price;
+
+      bool above=
+         zoneBottom>price;
+
+      if(!below && !above)
+         continue;
+
+      string label=
+         bullishFVG ?
+         "FVG BUY" :
+         "FVG SELL";
+
+      label+=" "+
+             DoubleToString(score,0);
+
+      if(above &&
+         score>bestUpperScore)
+        {
+         bestUpperScore=score;
+         bestUpperTop=zoneTop;
+         bestUpperBottom=zoneBottom;
+         bestUpperStart=r[s+2].time;
+         bestUpperLabel=label;
+         bestUpperColor=
+            bearishFVG ?
+            clrTomato :
+            clrGold;
+        }
+
+      if(below &&
+         score>bestLowerScore)
+        {
+         bestLowerScore=score;
+         bestLowerTop=zoneTop;
+         bestLowerBottom=zoneBottom;
+         bestLowerStart=r[s+2].time;
+         bestLowerLabel=label;
+         bestLowerColor=
+            bullishFVG ?
+            clrAqua :
+            clrDeepSkyBlue;
+        }
+     }
+
+// ---------------------------------------------------------
+// ORDER BLOCK CANDIDATES
+// ---------------------------------------------------------
+
+   int breakShifts[2]=
+     {
+      upBreakShift,
+      downBreakShift
+     };
+
+   int breakDirs[2]=
+     {
+      1,
+      -1
+     };
+
+   for(int d=0;d<2;d++)
+     {
+      int br=breakShifts[d];
+
+      if(br<=0)
+         continue;
+
+      int direction=breakDirs[d];
+
+      int obShift=-1;
+
+      int fromShift=br+1;
+      int toShift=MathMin(
+                     br+7,
+                     total-2
+                  );
+
+      for(int sh=fromShift;sh<=toShift;sh++)
+        {
+         if(direction==1 &&
+            r[sh].close<r[sh].open)
+           {
+            obShift=sh;
+            break;
+           }
+
+         if(direction==-1 &&
+            r[sh].close>r[sh].open)
+           {
+            obShift=sh;
+            break;
+           }
+        }
+
+      if(obShift<0)
+         continue;
+
+      double zoneTop=r[obShift].high;
+      double zoneBottom=r[obShift].low;
+
+      if(zoneTop<=zoneBottom)
+         continue;
+
+      int disp=br;
+
+      double range=
+         r[disp].high-r[disp].low;
+
+      if(range<=0.0)
+         continue;
+
+      double body=
+         MathAbs(
+            r[disp].close-r[disp].open
+         );
+
+      double bodyRatio=body/range;
+
+      double atr=
+         STB_VizATR(
+            r,
+            disp+1,
+            14
+         );
+
+      if(atr<=0.0)
+         continue;
+
+      double rangeATR=range/atr;
+
+      if(bodyRatio<0.58 ||
+         rangeATR<0.90)
+         continue;
+
+      bool fullyMitigated=false;
+      bool touched=false;
+
+      for(int newer=obShift-1;newer>=1;newer--)
+        {
+         if(direction==1)
+           {
+            if(r[newer].close<=zoneBottom)
+              {
+               fullyMitigated=true;
+               break;
+              }
+
+            if(r[newer].low<=zoneTop)
+               touched=true;
+           }
+         else
+           {
+            if(r[newer].close>=zoneTop)
+              {
+               fullyMitigated=true;
+               break;
+              }
+
+            if(r[newer].high>=zoneBottom)
+               touched=true;
+           }
+        }
+
+      if(fullyMitigated)
+         continue;
+
+      double structureScore=30.0;
+
+      double displacementScore=
+         MathMin(
+            25.0,
+            rangeATR/1.60*25.0
+         );
+
+      double bodyScore=
+         MathMin(
+            15.0,
+            MathMax(
+               0.0,
+               (bodyRatio-0.58)/0.32*15.0
+            )
+         );
+
+      double freshnessScore=
+         touched ? 10.0 : 20.0;
+
+      double ageScore=
+         MathMax(
+            0.0,
+            10.0-(br*0.20)
+         );
+
+      double score=
+         structureScore+
+         displacementScore+
+         bodyScore+
+         freshnessScore+
+         ageScore;
+
+      if(score<78.0)
+         continue;
+
+      bool below=
+         zoneTop<price;
+
+      bool above=
+         zoneBottom>price;
+
+      if(!below && !above)
+         continue;
+
+      string label=
+         direction==1 ?
+         "OB BUY" :
+         "OB SELL";
+
+      label+=" "+
+             DoubleToString(score,0);
+
+      if(above &&
+         score>bestUpperScore)
+        {
+         bestUpperScore=score;
+         bestUpperTop=zoneTop;
+         bestUpperBottom=zoneBottom;
+         bestUpperStart=r[obShift].time;
+         bestUpperLabel=label;
+         bestUpperColor=clrOrange;
+        }
+
+      if(below &&
+         score>bestLowerScore)
+        {
+         bestLowerScore=score;
+         bestLowerTop=zoneTop;
+         bestLowerBottom=zoneBottom;
+         bestLowerStart=r[obShift].time;
+         bestLowerLabel=label;
+         bestLowerColor=clrDodgerBlue;
+        }
+     }
+
+// ---------------------------------------------------------
+// STRUCTURE FALLBACK ZONES
+// Only if no qualified FVG/OB exists.
+// ---------------------------------------------------------
+
+   double zoneATR=
+      STB_VizATR(
+         r,
+         1,
+         14
+      );
+
+   if(zoneATR<=0.0)
+      zoneATR=MathAbs(
+                 high1.price-low1.price
+              )*0.10;
+
+   if(zoneATR<=0.0)
+      zoneATR=SymbolInfoDouble(
+                 _Symbol,
+                 SYMBOL_POINT
+              )*20.0;
+
+   if(bestUpperScore<0.0 &&
+      high1.price>price)
+     {
+      bestUpperScore=78.0;
+      bestUpperTop=
+         high1.price+
+         zoneATR*0.12;
+      bestUpperBottom=
+         high1.price-
+         zoneATR*0.12;
+      bestUpperStart=high1.time;
+      bestUpperLabel="STRUCTURE";
+      bestUpperColor=clrOrange;
+     }
+
+   if(bestLowerScore<0.0 &&
+      low1.price<price)
+     {
+      bestLowerScore=78.0;
+      bestLowerTop=
+         low1.price+
+         zoneATR*0.12;
+      bestLowerBottom=
+         low1.price-
+         zoneATR*0.12;
+      bestLowerStart=low1.time;
+      bestLowerLabel="STRUCTURE";
+      bestLowerColor=clrDeepSkyBlue;
+     }
+
+// ---------------------------------------------------------
+// EXTEND ZONES RIGHT
+// ---------------------------------------------------------
+
+   int periodSeconds=
+      PeriodSeconds(tf);
+
+   if(periodSeconds<=0)
+      periodSeconds=900;
+
+   datetime rightTime=
+      iTime(_Symbol,tf,0)+
+      (datetime)(periodSeconds*80);
+
+   if(bestUpperScore>=78.0 &&
+      bestUpperStart>0 &&
+      bestUpperTop>bestUpperBottom)
+     {
+      DrawZone(
+         g_prefix+"VIS_ZONE_UPPER",
+         bestUpperStart,
+         bestUpperTop,
+         rightTime,
+         bestUpperBottom,
+         bestUpperColor
+      );
+
+      DrawTextMarker(
+         g_prefix+"VIS_ZONE_UPPER_TXT",
+         iTime(_Symbol,tf,1),
+         bestUpperTop,
+         bestUpperLabel,
+         bestUpperColor
+      );
+     }
+
+   if(bestLowerScore>=78.0 &&
+      bestLowerStart>0 &&
+      bestLowerTop>bestLowerBottom)
+     {
+      DrawZone(
+         g_prefix+"VIS_ZONE_LOWER",
+         bestLowerStart,
+         bestLowerTop,
+         rightTime,
+         bestLowerBottom,
+         bestLowerColor
+      );
+
+      DrawTextMarker(
+         g_prefix+"VIS_ZONE_LOWER_TXT",
+         iTime(_Symbol,tf,1),
+         bestLowerBottom,
+         bestLowerLabel,
+         bestLowerColor
+      );
+     }
+  }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-
-
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
+void DrawSetupVisuals()
+  {
+// Professional display-only visualization engine.
+// No orders, no trade-state mutation.
+   STB_DrawProfessionalVisualEngine();
+  }
 
 //==================================================================
 // BAR DETECTION
@@ -8607,6 +10622,21 @@ bool NewM15Bar()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool NewChartBar()
+  {
+   datetime current=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
+
+   if(current==0)
+      return false;
+
+   if(current!=g_lastChartBar)
+     {
+      g_lastChartBar=current;
+      return true;
+     }
+
+   return false;
+  }
 
 //==================================================================
 // INIT
@@ -8655,12 +10685,15 @@ bool ValidateInputs()
       return false;
    if(InpPatternWindowBars<1)
       return false;
-   if(InpManualSaveStepPips<0.0)
+   if(InpAutoTriggerPips<0.0 ||
+      InpAutoLockPips<0.0 ||
+      InpManualSaveStepPips<0.0)
       return false;
-   if(InpTrendlineTolerancePips<0.0 ||
-       InpTrailStartPips<0.0 ||
-       InpLiveTrailDistancePips<0.0 ||
-       InpTrailStepPips<0.0)
+   if(InpTrendlineWidth<1 ||
+      InpTrendlineTolerancePips<0.0 ||
+      InpTrailStartPips<0.0 ||
+      InpTrailCandleShift<1 ||
+      InpTrailBufferPips<0.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
@@ -8669,53 +10702,6 @@ bool ValidateInputs()
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0)
       return false;
-
-   // Risk-sizing mode must not silently become a no-trade mode because a
-   // stale .set file supplies zero risk.
-   if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
-      return false;
-
-   // Reject NaN/Infinity for every floating-point input before range checks.
-   if(
-      !MathIsValidNumber(InpScannerMinQuality) ||
-      !MathIsValidNumber(InpScannerMinScore) ||
-      !MathIsValidNumber(InpScannerMinTopGap) ||
-      !MathIsValidNumber(InpManualPendingGapPips) ||
-      !MathIsValidNumber(InpRSIBuyLevel) ||
-      !MathIsValidNumber(InpRSISellLevel) ||
-      !MathIsValidNumber(InpCCIBuyLevel) ||
-      !MathIsValidNumber(InpCCISellLevel) ||
-      !MathIsValidNumber(InpRSIWeight) ||
-      !MathIsValidNumber(InpCCIWeight) ||
-      !MathIsValidNumber(InpMaxSpreadPips) ||
-      !MathIsValidNumber(InpAdaptiveBaseScore) ||
-      !MathIsValidNumber(InpAdaptiveMinScore) ||
-      !MathIsValidNumber(InpAdaptiveMaxScore) ||
-      !MathIsValidNumber(InpAdaptiveStep) ||
-      !MathIsValidNumber(InpAdaptiveWeakWinRate) ||
-      !MathIsValidNumber(InpAdaptiveStrongWinRate) ||
-      !MathIsValidNumber(InpAdaptiveHalfLifeDays) ||
-      !MathIsValidNumber(InpAdaptiveUCBExploration) ||
-      !MathIsValidNumber(InpEntryBufferPips) ||
-      !MathIsValidNumber(InpPendingTrailMaxRiskExpansion) ||
-      !MathIsValidNumber(InpPipPointsOverride) ||
-      !MathIsValidNumber(InpSLBufferPips) ||
-      !MathIsValidNumber(InpInitialSLBufferPips) ||
-      !MathIsValidNumber(InpMaxInitialSLPips) ||
-      !MathIsValidNumber(InpMinimumRR) ||
-      !MathIsValidNumber(InpManualSaveStepPips) ||
-      !MathIsValidNumber(InpTrendlineTolerancePips) ||
-      !MathIsValidNumber(InpTrailStartPips) ||
-      !MathIsValidNumber(InpLiveTrailDistancePips) ||
-      !MathIsValidNumber(InpTrailStepPips) ||
-      !MathIsValidNumber(InpRiskPercent) ||
-      !MathIsValidNumber(InpMaxRiskVolume) ||
-      !MathIsValidNumber(InpBaseLots) ||
-      !MathIsValidNumber(InpTrendLotMultiplier) ||
-      !MathIsValidNumber(InpUniversalLotMultiplier)
-     )
-      return false;
-
    if(InpScannerMinQuality<0.0 ||
       InpScannerMinQuality>100.0 ||
       InpScannerMinScore<0.0 ||
@@ -8747,7 +10733,49 @@ bool ValidateInputs()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+/*
 
+long g_cs_autoscroll=-9999;
+long g_cs_shift     =-9999;
+long g_cs_first     =-9999;
+
+
+
+void STB_ChartStateLog(const string ev)
+  {
+   long scale     =ChartGetInteger(0,CHART_SCALE);
+   long autoscroll=ChartGetInteger(0,CHART_AUTOSCROLL);
+   long shift     =ChartGetInteger(0,CHART_SHIFT);
+
+   long visible   =ChartGetInteger(0,CHART_VISIBLE_BARS);
+   long width     =ChartGetInteger(0,CHART_WIDTH_IN_BARS);
+   int  objects   =ObjectsTotal(0,-1,-1);
+
+
+      first==g_cs_first && visible==g_cs_visible && width==g_cs_width)
+      return;
+
+   string t=TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS);
+
+   Print("[STB][CHARTSTATE] BEFORE time=",t," chart=",ChartID()," event=",ev,
+         " symbol=",_Symbol," period=",EnumToString((ENUM_TIMEFRAMES)_Period),
+         " scale=",g_cs_scale," autoscroll=",g_cs_autoscroll," shift=",g_cs_shift,
+         " first=",g_cs_first," visible=",g_cs_visible," width=",g_cs_width,
+
+
+         " symbol=",_Symbol," period=",EnumToString((ENUM_TIMEFRAMES)_Period),
+         " scale=",scale," autoscroll=",autoscroll," shift=",shift,
+         " first=",first," visible=",visible," width=",width,
+
+
+         " dScale=",scale-g_cs_scale," dAutoscroll=",autoscroll-g_cs_autoscroll,
+         " dShift=",shift-g_cs_shift," dFirst=",first-g_cs_first,
+
+
+   g_cs_scale=scale; g_cs_autoscroll=autoscroll; g_cs_shift=shift;
+
+
+*/
 
 int OnInit()
   {
@@ -8768,7 +10796,7 @@ int OnInit()
       // Tester runs must never depend on stale terminal GlobalVariables or
       // on a missing/malformed .set toggle. The explicit tester override is
       // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading ||
+      g_autoTrading=(InpAutoTrading &&
                      InpTesterForceAutoTrading);
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
       STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
@@ -8776,8 +10804,7 @@ int OnInit()
    else
       if(!InpAutoTrading)
         {
-         // Input=false forces AUTO OFF at initialization. The chart's
-         // explicit AUTO button remains a deliberate runtime override.
+         // Input=false is a hard safety gate.
          g_autoTrading=false;
          GlobalVariableSet(g_autoStateName,0.0);
         }
@@ -8800,8 +10827,7 @@ int OnInit()
    Print("STB TRADE ENV terminal=",
          TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "ON":"OFF",
          " program=",MQLInfoInteger(MQL_TRADE_ALLOWED) ? "ON":"OFF",
-         " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
-          " accountTrade=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ON":"OFF",
+         " account=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
          " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
 
    Print("STB INIT symbol=",_Symbol,
@@ -8822,7 +10848,7 @@ int OnInit()
          " oscHardFilter=",InpOscillatorHardFilter ? "ON":"OFF",
          " adaptiveParams=",InpAdaptiveParameterLearning ? "ON":"OFF",
          " warmup=",IntegerToString(InpAdaptiveWarmupPerProfile),
-         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2)); Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
+         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2)); Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1)," (legacy InpAutoTriggerPips/InpAutoLockPips are informational only)");
 
 // Keep the six dedicated EA controls in the upper-right, away from
 // the native MT5 one-click panel. Button handlers only dispatch to
@@ -8837,12 +10863,9 @@ int OnInit()
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
 
    UpdateButtons();
-    ResetLastError();
-    if(!EventSetTimer(MathMax(1,InpScanSeconds)))
-      {
-       Print("STB INIT FAILED: EventSetTimer failed err=",GetLastError());
-       return INIT_FAILED;
-      }
+
+   EventSetTimer(MathMax(1,InpScanSeconds));
+
    g_lastChartBar=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,0);
    g_lastM15Bar=iTime(_Symbol,PERIOD_M15,0);
 
@@ -8853,27 +10876,19 @@ int OnInit()
 
 
 
-// P9 restart/reinitialize recovery: rebuild pending-trail state for EVERY
-// managed pending type before the first management cycle. This prevents the
-// first cycle from registering/trailing recovered orders before a clean rebuild.
-   STB_PendingTrailRebuildFromTerminal();
-
-// Seed the per-ticket geometry/override registry before any write is attempted.
-// This closes the attach/restart window in which a manual SL/TP edit could be
-// mistaken for an unknown baseline because the first timer reconciliation had
-// not yet run.
-   STB_ReconcileTradeRegistry();
-
-// Harden restart/reattach protection: do not wait for the first Tick/Timer.
-// Every currently open position is checked immediately through the one cycle.
-   STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
-
-   // Scanner discovery is independent of account-wide exposure. Execution
-   // still checks managed exposure for the candidate's own symbol.
    STB_ScannerRun();
    g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
-
    UpdatePanel();
+
+// Harden restart/reattach protection: do not wait for the first Tick/Timer.
+// Every currently open position is checked immediately after initialization.
+   STB_RunManagementCycle(); // Blueprint 30/33: enter management through the single cycle
+
+// P9 restart/reinitialize recovery: rebuild pending-trail state for EVERY
+// managed pending type (EA, manual/mobile, other EA, pre-existing) from the
+// terminal before the first Tick/Timer is processed.
+   STB_PendingTrailRebuildFromTerminal();
+
    return INIT_SUCCEEDED;
   }
 
@@ -8948,7 +10963,7 @@ double OnTester()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   STB_ReleaseAllSymbolManagement(); // P10 release every symbol lease owned by this chart
+   STB_ReleaseSymbolManagement(_Symbol); // P10 release this chart's symbol writer lease
 
    ObjectDelete(0,g_prefix+"BUY_STOP");
    ObjectDelete(0,g_prefix+"SELL_STOP");
@@ -8987,22 +11002,1360 @@ void OnDeinit(const int reason)
    STB PENDING TRAIL SERVICES
    Included after the EA's global declarations and before events.
    ============================================================== */
-#include <STB\STB_PendingDistanceResolver.mqh>
-#include <STB\STB_PendingTrail.mqh>
-void STB_RecordPendingInitialSLFailure(const int stateIdx)
+
+// ===== BEGIN INLINE STB PENDING DISTANCE RESOLVER =====
+//+------------------------------------------------------------------+
+//| STB_PendingDistanceResolver.mqh                                  |
+//| Safe-integration distance service for SmartTradingBot.           |
+//|                                                                  |
+//| NOT an EA. NOT an Adaptive Engine.                               |
+//| This module is a SPECIALIZED SERVICE: it consumes the EXISTING   |
+//| STB adaptive context (STB_EffectiveEntryBuffer /                 |
+//| STB_EffectiveSLBuffer) and EXISTING broker helpers               |
+//| (TradeMinDistance, NormalizePrice) and produces broker-validated |
+//| Entry / SL geometry for EVERY supported pending type:            |
+//|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
+//|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
+//|                                                                  |
+//| Responsibilities:                                                |
+//|   EntryOffset, SLBuffer, Broker validation, Tick alignment,      |
+//|   Final Entry, Final SL                                          |
+//| The broker minimum distance is only a VALIDITY FLOOR, never the  |
+//| strategy SL target.                                              |
+//+------------------------------------------------------------------+
+#ifndef _STB_PENDING_DISTANCE_RESOLVER_MQH
+#define _STB_PENDING_DISTANCE_RESOLVER_MQH
+
+//--- Broker symbol limits snapshot ---------------------------------
+struct STBBrokerLimits
+{
+   string symbol;
+   double point;          // SYMBOL_POINT
+   int    digits;         // SYMBOL_DIGITS
+   double tickSize;       // SYMBOL_TRADE_TICK_SIZE
+   long   stopsLevel;     // SYMBOL_TRADE_STOPS_LEVEL
+   long   freezeLevel;    // SYMBOL_TRADE_FREEZE_LEVEL
+   double minDistance;    // existing STB broker minimum distance
+   bool   valid;
+};
+
+//--- Resolver output -------------------------------------------------
+struct STBPendingResolution
+{
+   bool   valid;
+   string reason;
+   double entry;             // validated entry (tick aligned)
+   double sl;                // validated SL (tick aligned)
+   double entryOffset;       // applied entry offset (price units)
+   double slBuffer;          // applied SL buffer (price units)
+   double brokerMinDistance; // broker minimum distance (price units)
+};
+
+//--- Read symbol broker constraints --------------------------------
+bool STB_ReadBrokerLimits(const string symbol, STBBrokerLimits &bl)
+{
+   ZeroMemory(bl);
+
+   bl.symbol=      symbol;
+   bl.point=       SymbolInfoDouble(symbol,SYMBOL_POINT);
+   bl.digits=      (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+   bl.tickSize=    SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   bl.stopsLevel=  (long)SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL);
+   bl.freezeLevel= (long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
+   bl.minDistance= TradeMinDistance(symbol);
+
+   bl.valid=(bl.point>0.0 && bl.minDistance>0.0);
+   return bl.valid;
+}
+
+//--- Tick-size alignment (NormalizeDouble alone is NOT sufficient) ----
+double STB_TickAlignPrice(const string symbol,const double price)
+{
+   if(price<=0.0)
+      return 0.0;
+
+   STBBrokerLimits bl;
+   if(!STB_ReadBrokerLimits(symbol,bl))
+      return NormalizePrice(symbol,price);
+
+   if(bl.tickSize<=0.0)
+      return NormalizePrice(symbol,price);
+
+   double aligned=MathRound(price/bl.tickSize)*bl.tickSize;
+
+   return NormalizePrice(symbol,aligned);
+}
+
+//--- Pending classification (single source of truth) ---------------
+bool STB_PendingIsBuySide(const ENUM_ORDER_TYPE orderType)
+{
+   return orderType==ORDER_TYPE_BUY_STOP       ||
+          orderType==ORDER_TYPE_BUY_LIMIT      ||
+          orderType==ORDER_TYPE_BUY_STOP_LIMIT;
+}
+
+bool STB_PendingIsSellSide(const ENUM_ORDER_TYPE orderType)
+{
+   return orderType==ORDER_TYPE_SELL_STOP      ||
+          orderType==ORDER_TYPE_SELL_LIMIT     ||
+          orderType==ORDER_TYPE_SELL_STOP_LIMIT;
+}
+
+// STOP-kind orders enter on a breakout; LIMIT-kind orders enter on a pullback.
+bool STB_PendingIsStopKind(const ENUM_ORDER_TYPE orderType)
+{
+   return orderType==ORDER_TYPE_BUY_STOP       ||
+          orderType==ORDER_TYPE_SELL_STOP      ||
+          orderType==ORDER_TYPE_BUY_STOP_LIMIT ||
+          orderType==ORDER_TYPE_SELL_STOP_LIMIT;
+}
+
+//--- Entry offset sign relative to the tracked anchor extreme ------
+//   +1 => entry sits ABOVE the anchor
+//         (BUY STOP, BUY STOP-LIMIT, SELL LIMIT)
+//   -1 => entry sits BELOW the anchor
+//         (SELL STOP, SELL STOP-LIMIT, BUY LIMIT)
+int STB_PendingEntryOffsetSign(const ENUM_ORDER_TYPE orderType)
+{
+   if(orderType==ORDER_TYPE_BUY_STOP       ||
+      orderType==ORDER_TYPE_BUY_STOP_LIMIT ||
+      orderType==ORDER_TYPE_SELL_LIMIT)
+      return 1;
+
+   if(orderType==ORDER_TYPE_SELL_STOP      ||
+      orderType==ORDER_TYPE_SELL_STOP_LIMIT ||
+      orderType==ORDER_TYPE_BUY_LIMIT)
+      return -1;
+
+   return 0;
+}
+
+//--- Resolve Entry / SL for any supported pending type -------------
+// Inputs:
+//   symbol                  - target symbol
+//   orderType               - BUY/SELL STOP, BUY/SELL LIMIT, STOP-LIMIT
+//   extreme                 - tracked anchor extreme
+//                             (live Bid for BUY side, live Ask for SELL side)
+//   configuredBaseDistance  - caller override in pips; <=0 means use the
+//                             EXISTING STB adaptive entry/SL buffers
+// Outputs (validated):
+//   entry, sl, entryOffset, slBuffer, brokerMinDistance
+bool STB_ResolvePendingDistance(const string symbol,
+                                const ENUM_ORDER_TYPE orderType,
+                                const double extreme,
+                                const double configuredBaseDistance,
+                                STBPendingResolution &r,
+                                const double configuredSLBufferPips=-1.0)
+{
+   ZeroMemory(r);
+   r.valid=false;
+   r.reason="UNRESOLVED";
+
+   if(symbol=="" || extreme<=0.0)
+   {
+      r.reason="IDENTITY_INVALID";
+      return false;
+   }
+
+   bool isBuy =STB_PendingIsBuySide(orderType);
+   bool isSell=STB_PendingIsSellSide(orderType);
+   bool isStop=STB_PendingIsStopKind(orderType);
+   int  offSign=STB_PendingEntryOffsetSign(orderType);
+
+   if((!isBuy && !isSell) || offSign==0)
+   {
+      r.reason="IDENTITY_INVALID";
+      return false;
+   }
+
+   STBBrokerLimits bl;
+   if(!STB_ReadBrokerLimits(symbol,bl))
+   {
+      r.reason="BROKER_LIMITS_UNAVAILABLE";
+      return false;
+   }
+
+   // Adaptive context remains available for Strategy-owned callers. Lifecycle
+   // managers can pass immutable stored buffers and therefore do not need
+   // Adaptive access.
+   double entryOffsetPips=STB_EffectiveEntryBuffer();
+   double slBufferPips   =STB_EffectiveSLBuffer();
+
+   if(configuredBaseDistance>0.0)
+      entryOffsetPips=configuredBaseDistance;
+
+   if(configuredSLBufferPips>=0.0)
+      slBufferPips=configuredSLBufferPips;
+   else if(configuredBaseDistance>0.0)
+      slBufferPips=configuredBaseDistance;
+
+   // STB configuration values are expressed in pips, not raw broker points.
+   // Use the EA's canonical PipSize() so XAU/XAG/3-5 digit symbols receive
+   // the intended price distance.
+   double pip=PipSize(symbol);
+   if(pip<=0.0)
+   {
+      r.reason="PIP_SIZE_INVALID";
+      return false;
+   }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick))
+   {
+      r.reason="NO_TICK";
+      return false;
+   }
+
+   // Broker validity floor for the entry offset. The configured buffer is a
+   // preference; the broker minimum distance is the hard validity floor. For
+   // STOP-kind geometry the pending entry must also clear the current spread
+   // relative to the near-side market price.
+   double spread=MathMax(0.0,tick.ask-tick.bid);
+   double minOffset=(isStop ? (spread+bl.minDistance+bl.point)
+                            : (bl.minDistance+bl.point));
+   double effectiveOffset=MathMax(entryOffsetPips*pip,minOffset);
+
+   // The entry keeps a fixed offset from the tracked anchor extreme; the offset
+   // sign encodes stop (breakout) vs limit (pullback) geometry per side.
+   double rawEntry=extreme+offSign*effectiveOffset;
+
+   //--- Broker validity floor for STOP-kind entries (BUY STOP / SELL STOP and
+   //--- their stop-limit variants): the closed-candle anchor can already sit
+   //--- behind the live market when the market outran the candle. Instead of
+   //--- aborting the whole trail cycle, clamp the entry to the nearest price
+   //--- the broker still accepts as a pending STOP, so Entry and SL can keep
+   //--- moving together in the allowed direction. Invalid prices are never
+   //--- forced on the broker: the clamped geometry is still re-validated below.
+   if(isStop)
+     {
+      double stopFloor=(isBuy ? tick.ask+bl.minDistance+bl.point
+                              : tick.bid-bl.minDistance-bl.point);
+
+      if(isBuy)
+        {
+         if(rawEntry<stopFloor)
+           {
+            Print("STB PENDING ENTRY CLAMPED symbol=",symbol,
+                  " type=",(isBuy ? "BUY_STOP":"SELL_STOP"),
+                  " rawEntry=",DoubleToString(rawEntry,bl.digits),
+                  " floor=",DoubleToString(stopFloor,bl.digits),
+                  " ask=",DoubleToString(tick.ask,bl.digits),
+                  " bid=",DoubleToString(tick.bid,bl.digits));
+
+            rawEntry=stopFloor;
+           }
+        }
+      else
+        {
+         if(rawEntry>stopFloor)
+           {
+            Print("STB PENDING ENTRY CLAMPED symbol=",symbol,
+                  " type=",(isBuy ? "BUY_STOP":"SELL_STOP"),
+                  " rawEntry=",DoubleToString(rawEntry,bl.digits),
+                  " floor=",DoubleToString(stopFloor,bl.digits),
+                  " ask=",DoubleToString(tick.ask,bl.digits),
+                  " bid=",DoubleToString(tick.bid,bl.digits));
+
+            rawEntry=stopFloor;
+           }
+        }
+     }
+
+   // Pending SL distance is measured from the pending Entry itself and the SL
+   // sits on the risk side of the order direction (BUY below, SELL above).
+   //--- STOP-kind SL buffer must also clear the broker floor measured from the
+   //--- FAR quote, otherwise the moved SL is rejected as inside the stops /
+   //--- freeze zone. The buffer is only ever raised for the current quote, so
+   //--- |Entry-SL| never shrinks and the SL always stays on the risk side of the
+   //--- order and at a valid distance from the market.
+   if(isStop)
+     {
+      double slFloor=(isBuy ? (rawEntry-tick.bid)+bl.minDistance+bl.point
+                            : (tick.ask-rawEntry)+bl.minDistance+bl.point);
+
+      if(slFloor>slBufferPips*pip)
+         slBufferPips=slFloor/pip;
+     }
+
+   double rawSL=(isBuy ? rawEntry-slBufferPips*pip
+                       : rawEntry+slBufferPips*pip);
+
+   double entry=STB_TickAlignPrice(symbol,rawEntry);
+   double sl   =STB_TickAlignPrice(symbol,rawSL);
+
+   if(entry<=0.0 || sl<=0.0)
+   {
+      r.reason="PRICE_INVALID";
+      return false;
+   }
+
+   // Broker validation, per pending geometry:
+   //   BUY  STOP      : sl < bid < ask < entry          (breakout above)
+   //   BUY  LIMIT     : sl < entry < bid                (pullback below)
+   //   SELL STOP      : entry < bid < ask < sl          (breakout below)
+   //   SELL LIMIT     : bid < ask < entry < sl          (pullback above)
+   if(isBuy)
+   {
+      if(sl>=entry-bl.minDistance)
+      {
+         r.reason="BUY_SL_TOO_CLOSE_TO_ENTRY";
+         return false;
+      }
+
+      if(sl>tick.bid-bl.minDistance)
+      {
+         r.reason="BUY_SL_INSIDE_BROKER_ZONE";
+         return false;
+      }
+
+      if(isStop)
+      {
+         if(entry<=tick.ask+bl.minDistance)
+         {
+            r.reason="BUY_ENTRY_INSIDE_BROKER_ZONE";
+            return false;
+         }
+      }
+      else
+      {
+         if(entry>=tick.bid-bl.minDistance)
+         {
+            r.reason="BUY_ENTRY_INSIDE_BROKER_ZONE";
+            return false;
+         }
+      }
+   }
+   else
+   {
+      if(sl<=entry+bl.minDistance)
+      {
+         r.reason="SELL_SL_TOO_CLOSE_TO_ENTRY";
+         return false;
+      }
+
+      if(sl<tick.ask+bl.minDistance)
+      {
+         r.reason="SELL_SL_INSIDE_BROKER_ZONE";
+         return false;
+      }
+
+      if(isStop)
+      {
+         if(entry>=tick.bid-bl.minDistance)
+         {
+            r.reason="SELL_ENTRY_INSIDE_BROKER_ZONE";
+            return false;
+         }
+      }
+      else
+      {
+         if(entry<=tick.ask+bl.minDistance)
+         {
+            r.reason="SELL_ENTRY_INSIDE_BROKER_ZONE";
+            return false;
+         }
+      }
+   }
+
+   r.entry=entry;
+   r.sl=sl;
+   r.entryOffset=effectiveOffset;
+   r.slBuffer=slBufferPips*pip;
+   r.brokerMinDistance=bl.minDistance;
+   r.valid=true;
+   r.reason="OK";
+   return true;
+}
+
+#endif
+// ===== END INLINE STB PENDING DISTANCE RESOLVER =====
+
+
+// ===== BEGIN INLINE STB PENDING TRAIL =====
+double STB_ParsePendingEntryBufferPips(const string comment,const double fallback)
+{
+   int pos=StringFind(comment,"|EB");
+   if(pos<0) return fallback;
+   int start=pos+3;
+   int end=StringFind(comment,"|",start);
+   string raw=(end>=0 ? StringSubstr(comment,start,end-start)
+                      : StringSubstr(comment,start));
+   double value=StringToDouble(raw);
+   return (MathIsValidNumber(value) && value>=0.0) ? value:fallback;
+}
+
+//+------------------------------------------------------------------+
+//| STB_PendingTrail.mqh                                             |
+//| Safe-integration Pending Trail service for SmartTradingBot.      |
+//|                                                                  |
+//| NOT an EA. NOT a Trade Manager.                                  |
+//| This module OWNS the pre-trigger lifecycle of EVERY supported    |
+//| pending type through ONE engine:                                 |
+//|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
+//|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
+//|   - ticket-based state (never symbol-only state)                 |
+//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
+//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - other pending types retain live Bid/Ask extreme trailing     |
+//|   - broker validation via STB_PendingDistanceResolver            |
+//|   - restart recovery (state rebuilt from terminal orders)        |
+//|   - multi-ticket isolation                                       |
+//|   - P4: this module only PROPOSES geometry. The single pending   |
+//|     geometry writer is STB_ModifyPendingOrderGeometry() (EA).    |
+//|   - P4: bounded time throttle + failure backoff per ticket.      |
+//|   - P4: entry Step + monotonic trackedExtreme.                   |
+//|   - trigger handoff: PENDING_TRIGGERED then                      |
+//|     PENDING_TRAIL_STOPPED handoff=TRADE_MANAGEMENT               |
+//|                                                                  |
+//| After trigger this module MUST NOT touch the resulting position. |
+//+------------------------------------------------------------------+
+#ifndef _STB_PENDING_TRAIL_MQH
+#define _STB_PENDING_TRAIL_MQH
+
+//--- P4: proposal source + modify result classification -------------
+enum ENUM_STB_PENDING_SRC
+{
+   STB_PEND_SRC_INITIAL=0,
+   STB_PEND_SRC_TRAIL=1
+};
+
+enum ENUM_STB_PENDING_RESULT
+{
+   STB_PEND_RES_SUCCESS=0,
+   STB_PEND_RES_NO_CHANGE=1,
+   STB_PEND_RES_TEMPORARY_FAILURE=2,
+   STB_PEND_RES_INVALID_STOPS=3,
+   STB_PEND_RES_INVALID_PRICE=4,
+   STB_PEND_RES_FREEZE_LEVEL=5,
+   STB_PEND_RES_TOO_MANY_REQUESTS=6,
+   STB_PEND_RES_ORDER_GONE=7,
+   STB_PEND_RES_OTHER_FAILURE=8
+};
+
+//--- P4: bounded retry policy (never retry every tick) --------------
+#define STB_PEND_TRAIL_COOLDOWN_SEC   2
+#define STB_PEND_BACKOFF_1_SEC        5
+#define STB_PEND_BACKOFF_2_SEC        15
+#define STB_PEND_BACKOFF_3_SEC        60
+
+//--- P4: pending geometry proposal (Entry and SL resolved apart) ----
+struct STBPendingGeometryProposal
+{
+   bool   valid;
+   double entry;
+   double sl;
+   double tp;
+   int    source;
+   string reason;
+};
+
+//--- Ticket-based pending trail state --------------------------------
+struct STBPendingTrailState
+{
+   ulong    ticket;
+   string   symbol;
+   long     orderType;   // BUY/SELL STOP, BUY/SELL LIMIT, STOP-LIMIT
+   string   source;      // AUTO | UI_MANUAL | HEDGE | TERMINAL_SCAN | RESTART_RECOVERY
+   double   trackedExtreme;
+   double   lastEntry;
+   double   lastSL;
+   datetime lastModifyTime;
+   datetime lastNoNewExtremeLogBar;
+   datetime lastProcessedM5Bar; // latest closed M5 candle considered for STOP-order trailing
+   datetime lastFailLogBar;
+   int      lastProcessedCycle;
+   double   entryBufferPips;
+   double   slBufferPips;
+   int      failureCount;   // P4 failure backoff counter
+   datetime nextRetryTime;  // P4 earliest next modify attempt
+   bool     active;
+};
+
+//--- Single central instance -----------------------------------------
+STBPendingTrailState g_stbPendingTrail[];
+int g_stbPendingTrailCycle=0;
+
+int STB_PendingTrailFind(const ulong ticket)
+{
+   for(int i=0;i<ArraySize(g_stbPendingTrail);i++)
+      if(g_stbPendingTrail[i].ticket==ticket)
+         return i;
+
+   return -1;
+}
+
+void STB_PendingTrailClear()
+{
+   ArrayResize(g_stbPendingTrail,0);
+   g_stbPendingTrailCycle=0;
+}
+
+// Drop completed/cancelled order records. Without compaction, every historical
+// pending ticket would remain in this per-cycle array for the EA's lifetime.
+void STB_PendingTrailPruneInactive()
+{
+   for(int i=ArraySize(g_stbPendingTrail)-1;i>=0;i--)
+      if(!g_stbPendingTrail[i].active)
+         ArrayRemove(g_stbPendingTrail,i,1);
+}
+
+// Every supported pending geometry is managed by the same trail engine:
+// BUY/SELL STOP, BUY/SELL LIMIT and BUY/SELL STOP-LIMIT.
+bool STB_PendingTrailIsManagedType(const long orderType)
+{
+   return orderType==(long)ORDER_TYPE_BUY_STOP       ||
+          orderType==(long)ORDER_TYPE_SELL_STOP      ||
+          orderType==(long)ORDER_TYPE_BUY_LIMIT      ||
+          orderType==(long)ORDER_TYPE_SELL_LIMIT     ||
+          orderType==(long)ORDER_TYPE_BUY_STOP_LIMIT ||
+          orderType==(long)ORDER_TYPE_SELL_STOP_LIMIT;
+}
+
+// +1 => BUY side (anchor = live Bid low), -1 => SELL side (anchor = live Ask high).
+int STB_PendingTrailDirection(const long orderType)
+{
+   ENUM_ORDER_TYPE t=(ENUM_ORDER_TYPE)orderType;
+
+   if(STB_PendingIsBuySide(t))
+      return 1;
+
+   if(STB_PendingIsSellSide(t))
+      return -1;
+
+   return 0;
+}
+
+string STB_PendingTrailTypeName(const long orderType)
+{
+   if(orderType==(long)ORDER_TYPE_BUY_STOP)
+      return "BUY_STOP";
+
+   if(orderType==(long)ORDER_TYPE_SELL_STOP)
+      return "SELL_STOP";
+
+   if(orderType==(long)ORDER_TYPE_BUY_LIMIT)
+      return "BUY_LIMIT";
+
+   if(orderType==(long)ORDER_TYPE_SELL_LIMIT)
+      return "SELL_LIMIT";
+
+   if(orderType==(long)ORDER_TYPE_BUY_STOP_LIMIT)
+      return "BUY_STOP_LIMIT";
+
+   if(orderType==(long)ORDER_TYPE_SELL_STOP_LIMIT)
+      return "SELL_STOP_LIMIT";
+
+   return "UNKNOWN";
+}
+
+//--- Rate-limited diagnostics ---------------------------------------
+// A blocked trail used to be totally silent: the module returned true/false
+// without any journal line, so a stalled pending order was invisible. Every
+// skip path now reports one structured line per ticket + reason + M15 bar
+// (never per tick). Event identifiers follow the project PENDING_* log style:
+//   PENDING_TRAIL_SKIPPED reason=UNMANAGED_SYMBOL|WRONG_TYPE|MANUAL_OVERRIDE|
+//                         NO_INITIAL_SL|NO_NEW_CLOSED_BAR|NO_M5_HISTORY|
+//                         M5_OHLC_UNAVAILABLE|GEOMETRY_UNAVAILABLE|NO_TICK|
+//                         EXTREME_INVALID|ALREADY_TRACKED|THROTTLE_COOLDOWN|
+//                         THROTTLE_BACKOFF|STEP_FILTER
+//   PENDING_TRAIL_PROPOSAL validated proposal forwarded to the writer
+#define STB_PEND_SKIP_RING 16
+
+ulong    g_stbPendingSkipTicket[STB_PEND_SKIP_RING];
+string   g_stbPendingSkipReason[STB_PEND_SKIP_RING];
+datetime g_stbPendingSkipBar[STB_PEND_SKIP_RING];
+int      g_stbPendingSkipNext=0;
+
+bool STB_PendingTrailLogGate(const ulong ticket,const string reason,
+                             const string symbol)
   {
-   if(stateIdx<0 || stateIdx>=ArraySize(g_stbPendingTrail))
+   if(ticket==0 || reason=="")
+      return false;
+
+   datetime bar=0;
+
+   if(symbol!="")
+      bar=iTime(symbol,PERIOD_M15,1);
+
+   if(bar<=0)
+      bar=TimeCurrent();
+
+   for(int i=0;i<STB_PEND_SKIP_RING;i++)
+      if(g_stbPendingSkipTicket[i]==ticket && g_stbPendingSkipReason[i]==reason)
+        {
+         if(g_stbPendingSkipBar[i]==bar)
+            return false;
+
+         g_stbPendingSkipBar[i]=bar;
+         return true;
+        }
+
+   int slot=g_stbPendingSkipNext%STB_PEND_SKIP_RING;
+   g_stbPendingSkipNext++;
+   g_stbPendingSkipTicket[slot]=ticket;
+   g_stbPendingSkipReason[slot]=reason;
+   g_stbPendingSkipBar[slot]=bar;
+
+   return true;
+  }
+
+//--- Diagnostic that never changes a condition it is embedded in ----
+// Used inside existing boolean conditions: it emits the same rate-limited
+// PENDING_TRAIL_SKIPPED report as STB_PendingTrailLogSkip() and always
+// returns 0, so "x < step" stays "x < step + 0".
+int STB_PendingTrailNote(const ulong ticket,const string symbol,
+                         const string reason)
+  {
+   STB_PendingTrailLogSkip(ticket,symbol,reason);
+   return 0;
+  }
+
+void STB_PendingTrailLogSkip(const ulong ticket,const string symbol,
+                             const string reason)
+  {
+   if(!STB_PendingTrailLogGate(ticket,reason,symbol))
       return;
 
-   g_stbPendingTrail[stateIdx].failureCount++;
+   int idx=STB_PendingTrailFind(ticket);
 
-   int fc=g_stbPendingTrail[stateIdx].failureCount;
+   Print("PENDING_TRAIL_SKIPPED ticket=",IntegerToString((int)ticket),
+         " symbol=",symbol,
+         " type=",(idx>=0 ? STB_PendingTrailTypeName(g_stbPendingTrail[idx].orderType)
+                          : "UNTRACKED"),
+         " reason=",reason);
+  }
+
+//--- P4: classify the last modify outcome (policy only, no new logs) -
+int STB_PendingClassifyResult(const bool ok)
+{
+   if(ok)
+      return STB_PEND_RES_SUCCESS;
+
+   uint ret=(uint)trade.ResultRetcode();
+
+   switch(ret)
+   {
+      case TRADE_RETCODE_DONE:
+      case TRADE_RETCODE_DONE_PARTIAL:
+         return STB_PEND_RES_SUCCESS;
+      case TRADE_RETCODE_NO_CHANGES:
+         return STB_PEND_RES_NO_CHANGE;
+      case TRADE_RETCODE_INVALID_STOPS:
+         return STB_PEND_RES_INVALID_STOPS;
+      case TRADE_RETCODE_INVALID_PRICE:
+         return STB_PEND_RES_INVALID_PRICE;
+      case TRADE_RETCODE_TOO_MANY_REQUESTS:
+         return STB_PEND_RES_TOO_MANY_REQUESTS;
+      case TRADE_RETCODE_MARKET_CLOSED:
+         return STB_PEND_RES_TEMPORARY_FAILURE;
+   }
+
+   return STB_PEND_RES_OTHER_FAILURE;
+}
+
+//--- Register a real terminal pending order --------------------------
+// Called ONLY after the terminal confirmed the ticket. BUY STOP / SELL STOP
+// state anchors use the latest closed M5 candle; other pending types retain
+// their existing geometry/live-quote anchor and one-way trailing path.
+// Universal intake: EA-created, manual/mobile, other-EA and restart-recovered
+// tickets all register through this single entry point.
+bool STB_PendingTrailRegister(const ulong ticket,const string source)
+{
+   if(ticket>0 && OrderSelect(ticket) && !IsManagedOrder(ticket))
+      STB_PendingTrailLogSkip(ticket,OrderGetString(ORDER_SYMBOL),
+                              "UNMANAGED_SYMBOL");
+
+   if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
+      return false;
+
+   long orderType=OrderGetInteger(ORDER_TYPE);
+   if(!STB_PendingTrailIsManagedType(orderType))
+      STB_PendingTrailLogSkip(ticket,OrderGetString(ORDER_SYMBOL),"WRONG_TYPE");
+
+   if(!STB_PendingTrailIsManagedType(orderType))
+      return false;
+
+   if(STB_PendingTrailFind(ticket)>=0)
+      STB_PendingTrailLogSkip(ticket,OrderGetString(ORDER_SYMBOL),"ALREADY_TRACKED");
+
+   int existing=STB_PendingTrailFind(ticket);
+   if(existing>=0)
+   {
+      if(!g_stbPendingTrail[existing].active)
+      {
+         g_stbPendingTrail[existing].active=true;
+         g_stbPendingTrail[existing].source=source;
+         g_stbPendingTrail[existing].lastProcessedCycle=-1;
+      }
+      return true;
+   }
+
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double pip=PipSize(symbol);
+
+   if(symbol=="" || point<=0.0 || pip<=0.0)
+      return false;
+
+   string comment=OrderGetString(ORDER_COMMENT);
+   double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double currentSL=OrderGetDouble(ORDER_SL);
+
+   // P4 EB contract: this EA writes the effective offset to the order comment.
+   // For older manual/foreign orders without EB, infer a stable offset from
+   // their current entry versus the appropriate live quote. This avoids
+   // snapping an inherited order toward the EA's tiny default buffer.
+   double fallbackEntryBufferPips=MathMax(0.0,InpEntryBufferPips);
+   if(StringFind(comment,"|EB")<0 && currentEntry>0.0)
+     {
+      MqlTick currentTick;
+      if(!SymbolInfoTick(symbol,currentTick) || pip<=0.0)
+         return false;
+
+      bool buySide=STB_PendingIsBuySide((ENUM_ORDER_TYPE)orderType);
+      // The pending trail's canonical anchor is Bid for BUY-side orders and
+      // Ask for SELL-side orders, regardless of STOP vs LIMIT geometry.
+      double anchorQuote=buySide ? currentTick.bid:currentTick.ask;
+      fallbackEntryBufferPips=MathAbs(currentEntry-anchorQuote)/pip;
+
+      double minDistance=TradeMinDistance(symbol);
+      if(minDistance>0.0)
+         fallbackEntryBufferPips=MathMax(fallbackEntryBufferPips,
+                                         minDistance/pip);
+     }
+
+   // Persisted manual authority means the user may have changed entry/SL/TP
+   // since the original comment was written. On recovery, re-anchor to the
+   // current geometry rather than trusting a stale historical EB value.
+   double entryBufferPips=0.0;
+   if(STB_ManualOverrideIs(ticket) || StringFind(comment,"|EB")<0)
+      entryBufferPips=fallbackEntryBufferPips;
+   else
+      entryBufferPips=STB_ParsePendingEntryBufferPips(comment,
+                                                     fallbackEntryBufferPips);
+
+   if(entryBufferPips<0.0 || !MathIsValidNumber(entryBufferPips))
+      return false;
+
+   // P4 STB-002: the pending SL distance is the STRUCTURAL risk of the order
+   // (|Entry-SL|), never an arbitrary constant. A constant could otherwise
+   // expand risk beyond the structural floor. If the order has no SL yet the
+   // trail may create the initial structural SL using the configured fallback.
+   double structuralRiskPips=(currentEntry>0.0 && currentSL>0.0)
+                             ? MathAbs(currentEntry-currentSL)/pip
+                             : 0.0;
+
+   // Pending protection is independent from whether live trailing is
+   // disabled. If no SL exists yet, reserve a positive structural-buffer
+   // fallback; the EA's initial-protection path must install the real SL.
+   double slBufferPips=(structuralRiskPips>0.0)
+                        ? structuralRiskPips
+                        : MathMax(1.0,
+                                  MathMax(InpInitialSLBufferPips,
+                                          InpSLBufferPips));
+
+   int direction=STB_PendingTrailDirection(orderType);
+   int offSign  =STB_PendingEntryOffsetSign((ENUM_ORDER_TYPE)orderType);
+
+   if(direction==0 || offSign==0)
+      return false;
+
+   // Recover the anchor extreme from the live pending geometry:
+   //   entry = extreme + offSign*offset  =>  extreme = entry - offSign*offset.
+   double inferredExtreme=currentEntry-offSign*entryBufferPips*pip;
+
+   // STOP orders use the latest CLOSED M5 candle as their initial structural
+   // anchor. Subsequent trailing is evaluated once per newly closed M5 bar.
+   if(orderType==(long)ORDER_TYPE_BUY_STOP)
+     {
+      double m5Low=iLow(symbol,PERIOD_M5,1);
+      if(m5Low>0.0)
+         inferredExtreme=m5Low;
+     }
+   else if(orderType==(long)ORDER_TYPE_SELL_STOP)
+     {
+      double m5High=iHigh(symbol,PERIOD_M5,1);
+      if(m5High>0.0)
+         inferredExtreme=m5High;
+     }
+
+   if(inferredExtreme<=0.0)
+      return false;
+
+   STBPendingTrailState st;
+   ZeroMemory(st);
+
+   st.ticket=ticket;
+   st.symbol=symbol;
+   st.orderType=orderType;
+   st.source=source;
+   st.trackedExtreme=inferredExtreme;
+   st.lastEntry=currentEntry;
+   st.lastSL=currentSL;
+   st.lastModifyTime=0;
+   st.lastNoNewExtremeLogBar=0;
+   st.lastProcessedM5Bar=iTime(symbol,PERIOD_M5,1);
+   st.lastFailLogBar=0;
+   st.lastProcessedCycle=-1;
+   st.entryBufferPips=entryBufferPips;
+   st.slBufferPips=slBufferPips;
+   st.failureCount=0;
+   st.nextRetryTime=0;
+   st.active=true;
+
+   int n=ArraySize(g_stbPendingTrail);
+   ArrayResize(g_stbPendingTrail,n+1);
+   g_stbPendingTrail[n]=st;
+
+   int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+
+   Print("PENDING_CREATED ticket=",IntegerToString((int)ticket),
+         " symbol=",symbol,
+         " type=",STB_PendingTrailTypeName(orderType),
+         " source=",source,
+         " trackedExtreme=",DoubleToString(st.trackedExtreme,digits),
+         " entryBufferPips=",DoubleToString(st.entryBufferPips,4),
+         " structuralRiskPips=",DoubleToString(st.slBufferPips,4),
+         " entry=",DoubleToString(st.lastEntry,digits),
+         " sl=",DoubleToString(st.lastSL,digits));
+
+   STBPendingResolution res;
+   bool distanceOK=
+      STB_ResolvePendingDistance(symbol,
+                                 (ENUM_ORDER_TYPE)st.orderType,
+                                 st.trackedExtreme,
+                                 st.entryBufferPips,
+                                 res,
+                                 st.slBufferPips);
+
+   if(distanceOK && res.valid)
+   {
+      Print("PENDING_DISTANCE ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " entryOffset=",DoubleToString(res.entryOffset,digits),
+            " slBuffer=",DoubleToString(res.slBuffer,digits),
+            " brokerMinDistance=",DoubleToString(res.brokerMinDistance,digits));
+   }
+
+   return true;
+}
+
+//--- Rate-limited NO_NEW_EXTREME log --------------------------------
+void STB_PendingTrailLogNoNewExtreme(const ulong ticket,
+                                     const string symbol,
+                                     const int logIdx)
+{
+   datetime bar=iTime(symbol,PERIOD_M15,1);
+
+   if(bar<=0)
+      bar=TimeCurrent();
+
+   if(logIdx>=0 && g_stbPendingTrail[logIdx].lastNoNewExtremeLogBar==bar)
+      return;
+
+   if(logIdx>=0)
+      g_stbPendingTrail[logIdx].lastNoNewExtremeLogBar=bar;
+
+   Print("PENDING_TRAIL_NO_NEW_EXTREME ticket=",IntegerToString((int)ticket),
+         " symbol=",symbol);
+}
+
+//--- P4 central submit gate: throttle + backoff + Step + state --------
+// This gate NEVER talks to the broker. It applies the time throttle, the
+// failure backoff and the meaningful Step gate, then forwards the proposal
+// to the single pending geometry writer STB_ModifyPendingOrderGeometry().
+// Returns true only when the writer confirmed the change.
+bool STB_SubmitPendingTrailGeometry(const ulong ticket,
+                                    const double propEntry,
+                                    const double propSL,
+                                    const double propTP,
+                                    const bool manual=false)
+{
+   int idx=STB_PendingTrailFind(ticket);
+
+   if(idx<0 || !g_stbPendingTrail[idx].active)
+      return false;
+
+   string symbol=g_stbPendingTrail[idx].symbol;
+   double pip=PipSize(symbol);
+   datetime now=TimeCurrent();
+
+   bool candleStop=(g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_BUY_STOP ||
+                    g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_SELL_STOP);
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
+                              "MANUAL_OVERRIDE");
+
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      return false; // M5 candle-follow remains active for BUY STOP / SELL STOP
+
+   // Diagnostic mirror of the throttle below (rate-limited per ticket/M15 bar):
+   // it shows when a validated proposal was swallowed by the cooldown/backoff.
+   if(g_stbPendingTrail[idx].nextRetryTime>0 &&
+      now<g_stbPendingTrail[idx].nextRetryTime)
+      STB_PendingTrailLogSkip(ticket,symbol,"THROTTLE_BACKOFF");
+   else
+      if(g_stbPendingTrail[idx].lastModifyTime>0 &&
+         now<g_stbPendingTrail[idx].lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC)
+         STB_PendingTrailLogSkip(ticket,symbol,"THROTTLE_COOLDOWN");
+
+   // Time throttle: at most one modification per cooldown window.
+   if(g_stbPendingTrail[idx].nextRetryTime>0 &&
+      now<g_stbPendingTrail[idx].nextRetryTime)
+      return false;
+
+   if(g_stbPendingTrail[idx].lastModifyTime>0 &&
+      now<g_stbPendingTrail[idx].lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC)
+      return false;
+
+   // Step gate: skip a proposal whose protection improvement is below the
+   // configured meaningful step (existing input, no new input introduced).
+   if(OrderSelect(ticket) && pip>0.0)
+   {
+      double step=MathMax(0.0,InpTrailStepPips)*pip;
+      double curEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+      double curSL=OrderGetDouble(ORDER_SL);
+
+      if(step>0.0 &&
+         MathAbs(propEntry-curEntry)<step &&
+         MathAbs(propSL-curSL)<step && STB_PendingTrailNote(ticket,symbol,"STEP_FILTER")>=0)
+         return false;
+   }
+
+   //--- Diagnostic: a broker-validated proposal exists and is being forwarded
+   //--- to the single geometry writer (rate-limited per ticket/M15 bar).
+   if(STB_PendingTrailLogGate(ticket,"PROPOSAL_FORWARDED",symbol))
+     {
+      int propDigits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+
+      Print("PENDING_TRAIL_PROPOSAL ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(g_stbPendingTrail[idx].orderType),
+            " entry=",DoubleToString(propEntry,propDigits),
+            " sl=",DoubleToString(propSL,propDigits),
+            " tp=",DoubleToString(propTP,propDigits),
+            " manual=",(manual ? "true":"false"));
+     }
+
+   // Forward to the ONE central pending geometry writer.
+   bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP,manual);
+   int cls=STB_PendingClassifyResult(ok);
+
+   if(ok)
+   {
+      if(manual)
+         STB_ManualOverrideSet(ticket); // MANUAL_OVERRIDE: user PEND_TRAIL command is final
+      // SUCCESS (or broker NO_CHANGE accepted): reset failure backoff.
+      g_stbPendingTrail[idx].failureCount=0;
+      g_stbPendingTrail[idx].nextRetryTime=0;
+      g_stbPendingTrail[idx].lastModifyTime=TimeCurrent();
+
+      if(OrderSelect(ticket))
+      {
+         g_stbPendingTrail[idx].lastEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+         g_stbPendingTrail[idx].lastSL=OrderGetDouble(ORDER_SL);
+      }
+
+      return true;
+   }
+
+   if(cls==STB_PEND_RES_ORDER_GONE)
+   {
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   // Failure: bounded exponential-ish backoff. Never retry every tick.
+   g_stbPendingTrail[idx].failureCount++;
+
+   int fc=g_stbPendingTrail[idx].failureCount;
    int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
                          : (fc==2 ? STB_PEND_BACKOFF_2_SEC
                                   : STB_PEND_BACKOFF_3_SEC));
 
-   g_stbPendingTrail[stateIdx].nextRetryTime=TimeCurrent()+backoffSec;
-  }
+   g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
+
+   return false;
+}
+
+//--- Proposal-only pipeline for ONE ticket ---------------------------
+// Reads, verifies ownership, reads geometry, reads the tracked extreme,
+// calculates a candidate, validates it and returns a PROPOSAL. It never
+// calls the broker itself.
+bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
+{
+   int idx=STB_PendingTrailFind(ticket);
+
+   if(idx<0 || !g_stbPendingTrail[idx].active)
+      return false;
+
+   if(!OrderSelect(g_stbPendingTrail[idx].ticket))
+   {
+      // Terminal no longer exposes this order: filled (triggered),
+      // cancelled or deleted. The trail stops here; the existing
+      // STB Trade Manager owns any resulting position.
+      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " reason=ORDER_NOT_ON_TERMINAL");
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   if(!IsManagedOrder(ticket))
+   {
+      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " reason=OWNERSHIP_LOST");
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   long orderType=OrderGetInteger(ORDER_TYPE);
+
+   // BUY STOP / SELL STOP orders explicitly opt into the M5 candle-follow
+   // lifecycle, including orders created by the chart buttons. Preserve the
+   // existing manual-override pause for LIMIT and STOP-LIMIT orders.
+   bool candleStop=(orderType==(long)ORDER_TYPE_BUY_STOP ||
+                    orderType==(long)ORDER_TYPE_SELL_STOP);
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
+                              "MANUAL_OVERRIDE");
+
+   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
+      return true;
+
+   if(!STB_PendingTrailIsManagedType(orderType))
+      STB_PendingTrailLogSkip(ticket,OrderGetString(ORDER_SYMBOL),"WRONG_TYPE");
+
+   if(!STB_PendingTrailIsManagedType(orderType))
+   {
+      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " reason=ORDER_TYPE_CHANGED");
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   if(OrderGetString(ORDER_SYMBOL)!=g_stbPendingTrail[idx].symbol)
+   {
+      Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " reason=SYMBOL_CHANGED");
+      g_stbPendingTrail[idx].active=false;
+      return false;
+   }
+
+   // Initial structural protection owns unprotected pending orders. Do not
+   // let the trail fallback silently install a generic fixed-distance SL.
+   if(OrderGetDouble(ORDER_SL)<=0.0)
+      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
+                              "NO_INITIAL_SL");
+
+   if(OrderGetDouble(ORDER_SL)<=0.0)
+      return true;
+
+   g_stbPendingTrail[idx].orderType=orderType;
+
+   //--- Live structural risk owns the SL distance. The buffer captured at
+   //--- registration can be stale when the SL arrived later (manual/terminal
+   //--- order protected afterwards) or when the user changed the order, so the
+   //--- step's |Entry-SL| is re-anchored to the real live geometry before any
+   //--- proposal is built: Entry and SL then move together and a trail step can
+   //--- never tighten the stop toward the entry.
+   {
+      string liveSymbol=g_stbPendingTrail[idx].symbol;
+      double liveRisk=MathAbs(OrderGetDouble(ORDER_PRICE_OPEN)-
+                              OrderGetDouble(ORDER_SL));
+      double livePip=PipSize(liveSymbol);
+
+      if(liveRisk>0.0 && livePip>0.0)
+         g_stbPendingTrail[idx].slBufferPips=liveRisk/livePip;
+   }
+
+   string symbol=g_stbPendingTrail[idx].symbol;
+   int direction=STB_PendingTrailDirection(orderType);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+
+   if(direction==0 || point<=0.0)
+      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
+                              "GEOMETRY_UNAVAILABLE");
+
+   if(direction==0 || point<=0.0)
+      return true;
+
+   // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
+   // BUY STOP moves only after a bearish M5 candle and anchors to its low.
+   // SELL STOP moves only after a bullish M5 candle and anchors to its high.
+   // Other pending types retain their previous live-extreme behavior.
+   double extreme=0.0;
+   if(candleStop)
+     {
+      datetime closedBar=iTime(symbol,PERIOD_M5,1);
+      if(closedBar<=0 || closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
+         STB_PendingTrailLogSkip(ticket,symbol,
+                                 closedBar<=0 ? "NO_M5_HISTORY"
+                                              : "NO_NEW_CLOSED_BAR");
+
+      if(closedBar<=0 ||
+         closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
+         return true;
+
+      double barOpen=iOpen(symbol,PERIOD_M5,1);
+      double barClose=iClose(symbol,PERIOD_M5,1);
+      double barLow=iLow(symbol,PERIOD_M5,1);
+      double barHigh=iHigh(symbol,PERIOD_M5,1);
+      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+         STB_PendingTrailLogSkip(ticket,symbol,"M5_OHLC_UNAVAILABLE");
+
+      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+         return true;
+
+      // Consume the closed bar only after its OHLC data passed validation.
+      // If history is temporarily unavailable, the same bar can be retried.
+      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+
+      if(orderType==(long)ORDER_TYPE_BUY_STOP)
+        {
+         if(barClose>=barOpen)
+            return true; // only a completed bearish candle may move BUY STOP down
+         extreme=barLow;
+        }
+      else
+        {
+         if(barClose<=barOpen)
+            return true; // only a completed bullish candle may move SELL STOP up
+         extreme=barHigh;
+        }
+     }
+   else
+     {
+      MqlTick liveTick;
+      if(!SymbolInfoTick(symbol,liveTick))
+         STB_PendingTrailLogSkip(ticket,symbol,"NO_TICK");
+
+      if(!SymbolInfoTick(symbol,liveTick))
+         return true;
+      extreme=(direction>0 ? liveTick.bid:liveTick.ask);
+     }
+
+   if(extreme<=0.0)
+      STB_PendingTrailLogSkip(ticket,symbol,"EXTREME_INVALID");
+
+   if(extreme<=0.0)
+      return true;
+
+   // P4 monotonic trackedExtreme: BUY side only moves down, SELL side only up.
+   bool isNewExtreme=false;
+
+   if(direction>0)
+      isNewExtreme=(extreme < g_stbPendingTrail[idx].trackedExtreme-point*0.5);
+   else
+      isNewExtreme=(extreme > g_stbPendingTrail[idx].trackedExtreme+point*0.5);
+
+   if(!isNewExtreme)
+   {
+      // 2) No new extreme -> NO MODIFY (rate-limited).
+      STB_PendingTrailLogNoNewExtreme(ticket,symbol,
+                                      STB_PendingTrailFind(ticket));
+      return true;
+   }
+
+   // 3) Build a PROPOSAL: resolve entry + SL via the immutable metadata.
+   STBPendingResolution res;
+
+   bool resolved=
+      STB_ResolvePendingDistance(symbol,
+                                 (ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType,
+                                 extreme,
+                                 g_stbPendingTrail[idx].entryBufferPips,
+                                 res,
+                                 g_stbPendingTrail[idx].slBufferPips);
+
+   if(!resolved || !res.valid)
+   {
+      datetime bar=iTime(symbol,PERIOD_M15,1);
+
+      if(bar<=0)
+         bar=TimeCurrent();
+
+      if(g_stbPendingTrail[idx].lastFailLogBar!=bar)
+      {
+         g_stbPendingTrail[idx].lastFailLogBar=bar;
+
+         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " stage=RESOLVE",
+               " reason=",res.reason);
+      }
+
+      // State NOT committed as success.
+      return true;
+   }
+
+   STBPendingGeometryProposal prop;
+   ZeroMemory(prop);
+   prop.valid=true;
+   prop.entry=res.entry;
+   prop.sl=res.sl;
+   prop.tp=OrderGetDouble(ORDER_TP);
+   prop.source=STB_PEND_SRC_TRAIL;
+   prop.reason=res.reason;
+
+   int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+
+   // 4) Forward the proposal to the central submit gate. The gate applies
+   //    throttle / backoff / Step and then calls the single writer.
+   bool committed=STB_SubmitPendingTrailGeometry(ticket,
+                                                 prop.entry,
+                                                 prop.sl,
+                                                 prop.tp,
+                                                 manual);
+
+   if(committed)
+   {
+      // P4: trackedExtreme advances only in the favorable direction.
+      if(direction>0)
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMin(g_stbPendingTrail[idx].trackedExtreme,extreme);
+      else
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMax(g_stbPendingTrail[idx].trackedExtreme,extreme);
+
+      Print("PENDING_TRAIL_UPDATE ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " entry=",DoubleToString(prop.entry,digits),
+            " sl=",DoubleToString(prop.sl,digits),
+            " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,digits));
+   }
+
+   return true;
+}
+
+//--- Per-cycle processing (OnTick / OnTimer with cycle dedup) ---------
+int STB_PendingTrailProcess(const bool manual=false)
+{
+   STB_PendingTrailPruneInactive();
+   g_stbPendingTrailCycle++;
+   int moved=0;
+
+   // Registration pass: TERMINAL-SCAN every managed pending order type that
+   // is not yet tracked (multi-ticket + manual/mobile/other-EA discovery).
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong ticket=OrderGetTicket(i);
+
+      if(ticket==0)
+         continue;
+
+      if(!OrderSelect(ticket))
+         continue;
+
+      if(!STB_PendingTrailIsManagedType(OrderGetInteger(ORDER_TYPE)))
+         continue;
+
+      if(!IsManagedOrder(ticket))
+         continue;
+
+      if(STB_PendingTrailFind(ticket)>=0)
+         continue;
+
+      STB_PendingTrailRegister(ticket,"TERMINAL_SCAN");
+   }
+
+   // Manage pass: maximum ONE modify per ticket per cycle.
+   for(int i=0;i<ArraySize(g_stbPendingTrail);i++)
+   {
+      if(!g_stbPendingTrail[i].active)
+         continue;
+
+      if(g_stbPendingTrail[i].lastProcessedCycle==g_stbPendingTrailCycle)
+         continue;
+
+      ulong ticket=g_stbPendingTrail[i].ticket;
+      datetime previousModifyTime=g_stbPendingTrail[i].lastModifyTime;
+      g_stbPendingTrail[i].lastProcessedCycle=g_stbPendingTrailCycle;
+
+      STB_PendingTrailManageOne(ticket,manual);
+
+      int updatedIdx=STB_PendingTrailFind(ticket);
+      if(updatedIdx>=0 &&
+         g_stbPendingTrail[updatedIdx].lastModifyTime>previousModifyTime)
+         moved++;
+   }
+
+   STB_PendingTrailPruneInactive();
+   return moved;
+}
+
+//--- Trigger handoff -------------------------------------------------
+void STB_PendingTrailOnOrderFilled(const ulong ticket)
+{
+   if(ticket==0)
+      return;
+
+   int idx=STB_PendingTrailFind(ticket);
+
+   if(idx<0 || !g_stbPendingTrail[idx].active)
+      return;
+
+   Print("PENDING_TRIGGERED ticket=",IntegerToString((int)ticket),
+         " symbol=",g_stbPendingTrail[idx].symbol,
+         " type=",STB_PendingTrailTypeName(g_stbPendingTrail[idx].orderType));
+
+   Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+         " symbol=",g_stbPendingTrail[idx].symbol,
+         " handoff=TRADE_MANAGEMENT");
+
+   g_stbPendingTrail[idx].active=false;
+}
+
+//--- Restart recovery -------------------------------------------------
+// Registers / reconstructs state from terminal orders for every managed
+// pending type (EA-created, manual/mobile, other-EA, pre-existing). It NEVER
+// modifies an order by itself: a proposal is only produced when the live
+// market creates a new favorable extreme (see STB_PendingTrailManageOne).
+int STB_PendingTrailRebuildFromTerminal()
+{
+   STB_PendingTrailClear();
+
+   int recovered=0;
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      ulong ticket=OrderGetTicket(i);
+
+      if(ticket==0)
+         continue;
+
+      if(!OrderSelect(ticket))
+         continue;
+
+      if(!STB_PendingTrailIsManagedType(OrderGetInteger(ORDER_TYPE)))
+         continue;
+
+      if(!IsManagedOrder(ticket))
+         continue;
+
+      string symbol=OrderGetString(ORDER_SYMBOL);
+
+      if(STB_PendingTrailRegister(ticket,"RESTART_RECOVERY"))
+      {
+         recovered++;
+         Print("PENDING_RECOVERED ticket=",IntegerToString((int)ticket),
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(
+                  OrderGetInteger(ORDER_TYPE)));
+      }
+   }
+
+   return recovered;
+}
+
+#endif
+// ===== END INLINE STB PENDING TRAIL =====
 
 //==================================================================
 // COMMON POST-CREATION POINT (MASTER BLUEPRINT 10/11)
@@ -9010,151 +12363,6 @@ void STB_RecordPendingInitialSLFailure(const int stateIdx)
 // Every creator calls this exactly once after the broker confirmed the
 // ticket: Register + Initial Protection. Trade management itself runs ONLY
 // inside STB_RunManagementCycle().
-//==================================================================
-// CENTRAL DELETE PATH (MASTER BLUEPRINT 34) - the ONLY OrderDelete writer
-//==================================================================
-enum ENUM_STB_DELETE_REASON
-  {
-   STB_DEL_AUTO_ROLLBACK=0,          // creator rollback (server accept but invalid)
-   STB_DEL_SERVER_ACCEPT_INVALID=1,  // accepted then rejected geometry
-   STB_DEL_EXPLICIT_USER_COMMAND=2,  // user-issued delete
-   STB_DEL_SERVER_EXPIRATION=3,      // server-side explicit expiration
-   STB_DEL_EXPLICIT_CLEANUP=4        // housekeeping cleanup
-  };
-
-bool STB_ExecuteOrderDelete(const ulong ticket,
-                            const ENUM_STB_DELETE_REASON reason,
-                            const string source)
-  {
-   if(ticket==0 || !OrderSelect(ticket))
-      return false;
-
-   ENUM_ORDER_TYPE deleteType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-   bool isPending=(deleteType==ORDER_TYPE_BUY_LIMIT ||
-                   deleteType==ORDER_TYPE_SELL_LIMIT ||
-                   deleteType==ORDER_TYPE_BUY_STOP ||
-                   deleteType==ORDER_TYPE_SELL_STOP ||
-                   deleteType==ORDER_TYPE_BUY_STOP_LIMIT ||
-                   deleteType==ORDER_TYPE_SELL_STOP_LIMIT);
-   if(!isPending)
-      return false;
-
-   string orderComment=OrderGetString(ORDER_COMMENT);
-   datetime setupTime=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
-   ENUM_ORDER_TYPE_TIME timeType=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
-   datetime expiry=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
-   bool stbComment=(StringFind(orderComment,"STB|")==0);
-   bool hedgeCreated=(StringFind(orderComment,"STB|HEDGE|")==0);
-   bool autoCreated=(StringFind(orderComment,"STB|B|")==0 ||
-                     StringFind(orderComment,"STB|S|")==0);
-   bool authorized=false;
-
-   if(reason==STB_DEL_AUTO_ROLLBACK || reason==STB_DEL_SERVER_ACCEPT_INVALID)
-     {
-      bool knownCreator=(source=="OneClickHedge" ||
-                         source=="PlaceSetup" ||
-                         source=="PlaceManual");
-      // Rollback is narrowly scoped to a fresh STB order. Manual orders may
-      // use magic 0, so the explicit STB comment + exact creator source is
-      // the authorization signal rather than magic number alone.
-      bool creatorCommentMatches=
-         (source=="OneClickHedge" && hedgeCreated) ||
-         (source=="PlaceSetup" && autoCreated) ||
-         (source=="PlaceManual" &&
-          StringFind(orderComment,"STB|M|")==0);
-      authorized=knownCreator && stbComment && creatorCommentMatches &&
-                 setupTime>0 && setupTime<=TimeCurrent()+5 &&
-                 TimeCurrent()-setupTime<=120;
-     }
-   else if(reason==STB_DEL_SERVER_EXPIRATION)
-     {
-      // Expiry deletion is only valid through the owned pending manager.
-      // Recheck scope and lease at the final writer boundary, not only in
-      // ManagePendingOrders before it calls this function.
-      string symbol=OrderGetString(ORDER_SYMBOL);
-      bool expiryAuthority=(source=="ManagePendingOrders" &&
-                           IsManagedOrder(ticket) &&
-                           STB_SymbolManagementOwnedVerified(symbol));
-      if(expiryAuthority)
-        {
-         bool serverExpired=(timeType==ORDER_TIME_SPECIFIED &&
-                             expiry>0 && TimeCurrent()>=expiry);
-         bool localAgeExpired=false;
-         if(autoCreated && !STB_ManualOverrideIs(ticket) && setupTime>0)
-           {
-            int maxBars=InpMaxPendingBars;
-            int profileId=STB_AdaptiveParseProfileFromComment(orderComment);
-            if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
-              {
-               STB_AP_SetActive(profileId);
-               maxBars=STB_EffectiveMaxPendingBars();
-               STB_AP_ClearActive();
-              }
-            localAgeExpired=(maxBars>0 &&
-                             TimeCurrent()-setupTime>=maxBars*15*60);
-           }
-         // Server expiry remains honored for allowed managed orders;
-         // local-age expiry remains restricted to unoverridden EA creations.
-         authorized=serverExpired || localAgeExpired;
-        }
-     }
-
-   if(!authorized)
-     {
-      Print("STB DELETE BLOCKED ticket=",IntegerToString((int)ticket),
-            " reason=",IntegerToString((int)reason),
-            " source=",source,
-            " comment=",orderComment,
-            " reason=UNAUTHORIZED_OR_UNVERIFIED");
-      return false;
-     }
-
-   trade.SetAsyncMode(false);
-   trade.SetExpertMagicNumber(InpMagic);
-
-   bool requestOK=trade.OrderDelete(ticket);
-   uint ret=trade.ResultRetcode();
-   string retText=trade.ResultRetcodeDescription();
-
-   // CTrade::OrderDelete returning true only confirms the local request
-   // structure. Require both a server-success retcode and disappearance of
-   // this active ticket before treating deletion as complete.
-   if(!requestOK ||
-      (ret!=TRADE_RETCODE_DONE && ret!=TRADE_RETCODE_DONE_PARTIAL))
-     {
-      Print("STB DELETE REJECTED ticket=",IntegerToString((int)ticket),
-            " reason=",IntegerToString((int)reason),
-            " source=",source,
-            " ret=",ret," ",retText,
-            " requestOK=",requestOK ? "YES":"NO");
-      return false;
-     }
-
-   if(OrderSelect(ticket))
-     {
-      Print("STB DELETE NOT CONFIRMED ticket=",IntegerToString((int)ticket),
-            " reason=",IntegerToString((int)reason),
-            " source=",source,
-            " ret=",ret," ",retText,
-            " reason=ORDER_STILL_ACTIVE");
-      return false;
-     }
-
-   Print("STB DELETE CONFIRMED ticket=",IntegerToString((int)ticket),
-         " reason=",IntegerToString((int)reason),
-         " source=",source,
-         " ret=",ret);
-   return true;
-  }
-
-// Single controlled entry used by every permitted pending delete.
-bool STB_RequestOrderDelete(const ulong ticket,
-                            const ENUM_STB_DELETE_REASON reason,
-                            const string source)
-  {
-   return STB_ExecuteOrderDelete(ticket,reason,source);
-  }
-
 void STB_AfterExposureCreated(const ulong ticket,const string source)
   {
    if(ticket==0)
@@ -9167,7 +12375,7 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
       return;
      }
 
-   if(PositionSelectByTicket(ticket) && STB_IsProtectionPosition(ticket))
+   if(PositionSelectByTicket(ticket) && IsManagedPosition(ticket))
      {
       EnsureInitialSL(ticket);
       return;
@@ -9181,36 +12389,34 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
 // this and never run a management engine directly.
 void STB_RunManagementCycle()
   {
-   if(g_stbManagementCycleActive)
-     {
-      g_stbManagementCyclePending=true;
-      return;
-     }
-   g_stbManagementCycleActive=true;
-   int pass=0;
-   do
-     {
-      g_stbManagementCyclePending=false;
-      STB_BeginCycle();
-      ManagePositions();
-      ManagePendingOrders();
-      STB_PendingTrailProcess();
-      pass++;
-     }
-   while(g_stbManagementCyclePending && pass<2);
-   g_stbManagementCycleActive=false;
+   ManagePositions();
+   ManagePendingOrders();
+   STB_PendingTrailProcess();
   }
 
 void OnTick()
   {
-   STB_RunManagementCycle();
+   STB_RunManagementCycle(); // Blueprint 33: single management cycle
+
+
+
+
    bool m15Bar=NewM15Bar();
+
+
+
+
+
+
+
    if(m15Bar)
-      STB_ReconcileTradeRegistry();
-   ulong cycleBefore=g_scannerCycle;
-   STB_ScannerRun();
-   if(g_scannerCycle!=cycleBefore)
      {
+
+
+
+
+      STB_ReconcileTradeRegistry();
+      STB_ScannerRun();
       STB_ExecuteTopCandidate();
       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
       UpdatePanel();
@@ -9224,17 +12430,40 @@ void OnTick()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-void OnTimer()
+void STB_TimerPositionRecovery(){ if(iTime(_Symbol,PERIOD_M15,0)!=g_lastM15Bar) ManagePositions(); } /* P3: OnTimer recovery cadence - continuous management owned by OnTick */ void OnTimer()
   {
-   STB_RunManagementCycle();
-   STB_ReconcileTradeRegistry();
-   ulong cycleBefore=g_scannerCycle;
-   STB_ScannerRun();
-   if(g_scannerCycle!=cycleBefore)
+
+   STB_RunManagementCycle(); // Blueprint 32/33: single cycle (no second engine)
+
+
+
+STB_ReconcileTradeRegistry();
+
+
+
+
+
+
+
+   bool newSignalBar=NewM15Bar();
+
+   if(newSignalBar)
      {
+
+
+
+
+      STB_ScannerRun();
       STB_ExecuteTopCandidate();
       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
      }
+
+
+
+
+
+
+
    UpdatePanel();
    UpdateButtons();
   }
@@ -9261,35 +12490,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    string comment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
    long magic=HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
    long entryType=HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
-   string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
-   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
-
-   // Reconcile per-ticket protection state before filtering by deal magic:
-   // a manual/foreign-magic deal can partially or fully close a managed
-   // netting position. Preserve state after partial OUT/OUT_BY while the
-   // position still exists; clear it on full close or direction reversal.
-   if(entryType==DEAL_ENTRY_OUT ||
-      entryType==DEAL_ENTRY_OUT_BY ||
-      entryType==DEAL_ENTRY_INOUT)
-     {
-      ulong closedTicket=trans.position;
-      if(closedTicket>0)
-        {
-         bool positionRemains=PositionSelectByTicket(closedTicket);
-         bool exposureReversed=(entryType==DEAL_ENTRY_INOUT);
-         if(exposureReversed || !positionRemains)
-           {
-            GlobalVariableDel(TicketLockName(closedTicket));
-            GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
-           }
-        }
-     }
 
    if(magic!=(long)InpMagic)
       return;
 
 // Hedges use the same magic but are not strategy-profile observations.
    bool isHedge=STB_AdaptiveIsHedgeComment(comment);
+
+   string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
+   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
 
    if(entryType==DEAL_ENTRY_IN && !isHedge && positionId>0)
      {
@@ -9346,6 +12555,18 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    if(isHedge)
       return;
+
+   if(entryType==DEAL_ENTRY_OUT || entryType==DEAL_ENTRY_OUT_BY)
+     {
+      ulong closedTicket=trans.position;
+      if(closedTicket>0)
+        {
+         GlobalVariableDel(TicketLockName(closedTicket));
+   // P5 STB-010: TRAIL_ cleanup removed (no writer/reader in FINAL - dead state)
+         GlobalVariableDel(ScopedStateName("MODFAIL_"+(string)closedTicket));
+   // P5 STB-010: COMM_ cleanup removed (FINAL computes commission directly - dead state)
+        }
+     }
 
    if(entryType!=DEAL_ENTRY_OUT &&
       entryType!=DEAL_ENTRY_OUT_BY &&
@@ -9544,12 +12765,6 @@ void OnChartEvent(const int id,
      {
       g_autoTrading=!g_autoTrading;
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-
-      // Manual overrides are released ONLY when AUTO is explicitly enabled.
-      // Turning AUTO OFF must not erase a user's persisted per-ticket authority.
-      if(g_autoTrading)
-         STB_ManualOverrideClearAll();
-
       g_dashboardLastAction=(g_autoTrading ?
                              "AUTO TRADING ENABLED" :
                              "AUTO TRADING DISABLED");
