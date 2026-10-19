@@ -2,6 +2,7 @@ name: MQL5 static audit (not a compiler)
 on:
   push:
     branches:
+      - main
       - audit/expose-cleaned-source-20261009
       - 'fix/**'
   pull_request:
