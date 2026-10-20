@@ -9164,8 +9164,19 @@ void STB_ScannerRun()
          candidate.regime=regime.regime;
          candidate.regimeStrength=regime.strength;
          candidate.regimeScore=STB_RegimeFitScore(candidate,regime);
-         candidate.setupAgeBars=(int)MathMax(0,
-                                             (long)((TimeCurrent()-setup.setupTime)/900));
+         int setupBarShift=iBarShift(symbol,PERIOD_M15,setup.setupTime,true);
+         if(setupBarShift<1)
+           {
+            Print("STB SCANNER REJECT stage=DISCOVERY_AGE symbol=",symbol,
+                  " reason=SETUP_BAR_SHIFT_UNAVAILABLE",
+                  " setupTime=",(string)setup.setupTime);
+            continue;
+           }
+
+         // Count actual M15 bars, not elapsed wall-clock seconds. A BOS on
+         // the most recently closed bar has age 0; weekends/session gaps do
+         // not artificially age a setup.
+         candidate.setupAgeBars=(int)MathMax(0,setupBarShift-1);
 
          double preliminary=0.65*candidate.strategyScore+
                             0.20*candidate.marketQualityScore+
@@ -9250,8 +9261,17 @@ void STB_ScannerRun()
       c.regimeStrength=rr.strength;
       c.regimeScore=STB_RegimeFitScore(c,rr);
 
-      c.setupAgeBars=(int)MathMax(0,
-                                  (long)((TimeCurrent()-c.setup.setupTime)/900));
+      int setupBarShift=iBarShift(c.symbol,PERIOD_M15,c.setup.setupTime,true);
+      if(setupBarShift<1)
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_AGE symbol=",c.symbol,
+               " reason=SETUP_BAR_SHIFT_UNAVAILABLE",
+               " setupTime=",(string)c.setup.setupTime);
+         continue;
+        }
+
+      // Use the same bar-based age contract during final watchlist ranking.
+      c.setupAgeBars=(int)MathMax(0,setupBarShift-1);
 
       if(InpMaxSetupAgeBars>0 &&
          c.setupAgeBars>InpMaxSetupAgeBars)
