@@ -3913,11 +3913,15 @@ void STB_ReconcileTradeRegistry()
       // Seed recovery state from the actual terminal geometry. Otherwise the
       // registry's initial zero values can misclassify the next routine server
       // POSITION update as an external/manual geometry edit.
-      STB_ExposureEnsure(ticket,true); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
-      STB_GeomStore(ticket,true,
-                    PositionGetDouble(POSITION_PRICE_OPEN),
-                    PositionGetDouble(POSITION_SL),
-                    PositionGetDouble(POSITION_TP));
+      int exposureIdx=STB_ExposureEnsure(ticket,true); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
+      // Reconcile may run before a delayed POSITION transaction is consumed.
+      // Seed only an unknown baseline; do not overwrite a known snapshot, or a
+      // later intake callback may miss an external/manual geometry change.
+      if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)
+         STB_GeomStore(ticket,true,
+                       PositionGetDouble(POSITION_PRICE_OPEN),
+                       PositionGetDouble(POSITION_SL),
+                       PositionGetDouble(POSITION_TP));
      }
 
    for(int i=0;i<OrdersTotal();i++)
@@ -3930,11 +3934,15 @@ void STB_ReconcileTradeRegistry()
 
       // Seed recovery state from the actual pending-order geometry.
       STB_PendingTrailRegister(ticket,"RECONCILE");
-      STB_ExposureEnsure(ticket,false); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
-      STB_GeomStore(ticket,false,
-                    OrderGetDouble(ORDER_PRICE_OPEN),
-                    OrderGetDouble(ORDER_SL),
-                    OrderGetDouble(ORDER_TP));
+      int exposureIdx=STB_ExposureEnsure(ticket,false); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
+      // Preserve a known intake/own-write baseline across periodic Reconcile.
+      // This lets ORDER_UPDATE compare the new server geometry with the last
+      // observed baseline instead of a snapshot already overwritten here.
+      if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)
+         STB_GeomStore(ticket,false,
+                       OrderGetDouble(ORDER_PRICE_OPEN),
+                       OrderGetDouble(ORDER_SL),
+                       OrderGetDouble(ORDER_TP));
      }
 
    // SIMPLIFIED: origin registry prune loop removed.
