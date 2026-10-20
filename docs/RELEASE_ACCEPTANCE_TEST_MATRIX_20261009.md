@@ -148,3 +148,12 @@ All rows below are **functional tests**. Passing CI compilation or static string
 - Provenance: source SHA-256 `EC95BAE59896D1E8227F87A71D299720A8A3571045BEFD4EEEB0A4B3C7B3A259`; EX5 SHA-256 `99229960CD83699225ED6318791B4BB2929CA580AA7B0283130DF4252243B602`; MetaEditor `5.0.0.6274`.
 - Static source/invariant audit passed ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)); trading safety defaults passed ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)).
 - The compile artifact is a CI test artifact, not a terminal deployment. Scanner tests SCN-03 through SCN-08 and all Strategy Tester/out-of-sample/demo gates remain NOT RUN. Release decision remains **BLOCKED / NOT VERIFIED**; do not copy this source/EX5 to the active terminal or merge to main before the functional release gates pass.
+
+
+## I. M15 structure-trigger validity — required before release
+
+| ID | Scenario | Procedure | Expected result | Status |
+|---|---|---|---|---|
+| STR-07 | Fresh BOS crossing, not persistent state | Replay a bullish/bearish pivot with (a) prior close on the original side and current closed bar across it, (b) multiple closes already beyond the level, and (c) a return across then a genuine re-cross | Only the actual close-crossing bar qualifies as a fresh break; sustained closes beyond an old pivot cannot refresh setup age or produce repeat setups; a later genuine re-cross may qualify if all other filters pass | NOT RUN |
+| STR-08 | Structure window boundary | Set InpStructureWindowBars at and beyond the available rates-array boundary | No out-of-range access; scan is bounded to bars with a valid immediately older closed bar | NOT RUN |
+| STR-09 | CHoCH/BOS semantic distinction | Replay a genuine M15 trend reversal that produces CHoCH then a separate continuation BOS, plus a single-break-only case | Record whether strategy requires both events. Current detector validates one fresh structure break; it does not independently prove a two-event CHoCH-then-BOS sequence. Strategy acceptance requires this policy to be made explicit before release | NOT RUN |

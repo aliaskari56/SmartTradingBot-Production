@@ -146,6 +146,8 @@ def main() -> int:
     on_init = source_region(source, "int OnInit()", "// DEINIT")
     on_tick = source_region(source, "void OnTick()", "// TIMER")
     on_timer = source_region(source, "void OnTimer()", "// CHART EVENTS")
+    detect_structure = source_region(
+        source, "bool DetectStructure(", "// FVG / DISPLACEMENT ENGINE")
     quote_validator = source_region(
         source, "bool STB_ScannerQuoteValid(", "bool STB_ScannerDataEligible(")
     scanner_data = source_region(
@@ -211,7 +213,11 @@ def main() -> int:
           "if(clear && g_scannerWatchlistCount>1)" in scanner_run and
           "g_scannerWatchlist[1].opportunityScore" in scanner_run and
           "if(clear && g_scannerTop10Count>1)" not in scanner_run),
-        ("OnTick and OnTimer execute only after a new completed scanner cycle",
+        ("M15 structure trigger requires a fresh close-crossing of a confirmed swing",
+          "r[s].close>highs[i].price && r[s+1].close<=highs[i].price" in detect_structure and
+          "r[s].close<lows[i].price && r[s+1].close>=lows[i].price" in detect_structure and
+          detect_structure.count("s+1<ArraySize(r)") == 2),
+         ("OnTick and OnTimer execute only after a new completed scanner cycle",
          "ulong cycleBefore=g_scannerCycle;" in on_tick and
          "if(g_scannerCycle!=cycleBefore)" in on_tick and
          "ulong cycleBefore=g_scannerCycle;" in on_timer and

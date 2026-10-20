@@ -81,3 +81,10 @@ The fresh compile artifact is [artifact 12280695788](https://github.com/aliaskar
 The source correction is committed as `ea67c43b92cb5b9c65ee7d170de7795561f37672`. Its exact source compiled with MetaEditor `5.0.0.6274` with **0 errors, 0 warnings** ([run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457)); the static scanner/architecture audit passed ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)); trading safety defaults passed ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)). Build provenance and a fresh EX5 are archived in [artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788).
 
 The code change adds shared quote-integrity validation, finite-market-metric rejection and full-watchlist competition-gap evaluation. It does not change the existing 65/20/10/5 ranking weights, hard-spread threshold or regime thresholds. Deterministic scanner cases SCN-03 through SCN-07 and the frozen baseline/candidate Strategy Tester comparison SCN-08 remain **NOT RUN**. Static/compile pass is not runtime or profitability evidence; the branch remains **NOT release-ready**.
+
+
+## Strategy audit checkpoint — fresh M15 structure break
+
+A source-level defect was identified and corrected in DetectStructure(): prior logic accepted any closed bar still above a bullish swing high (or below a bearish swing low). That could relabel an old break as a new setup, refresh setupTime, and undermine InpMaxSetupAgeBars. The detector now requires the current closed bar to cross the pivot relative to the immediately older closed bar, and its loop boundary guarantees that older bar exists.
+
+This prevents stale levels from being treated as fresh break events. It does not yet implement a distinct two-event CHoCH-then-BOS sequence. That remaining strategy-policy issue is explicitly tracked as STR-09. Source compile/static CI and Strategy Tester cases STR-07–STR-09 are required; the functional cases remain NOT RUN until actually executed.

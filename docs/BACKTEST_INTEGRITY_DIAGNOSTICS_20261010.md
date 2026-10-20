@@ -73,3 +73,12 @@ A targeted source review on the development branch identified two scanner-integr
 The source change is on `fix/structure-first-fvg-trailing-20261020` only; `main` is not modified. The source commit `ea67c43b92cb5b9c65ee7d170de7795561f37672` passed MetaEditor compile with **0 errors, 0 warnings** ([run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457)), passed the static source/invariant audit ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)), and passed the trading-safety-default guard ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)). Provenance and the fresh EX5 are archived in [artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788); the build is not deployed to the active terminal.
 
 No scanner strategy weights were changed. Functional scanner cases SCN-01–SCN-08 and the baseline-equivalence Strategy Tester gate remain **NOT RUN** until real execution evidence is recorded.
+
+
+## Follow-up strategy correction — M15 break event freshness
+
+The source-level M15 structure detector now requires a fresh closed-bar crossing of the selected confirmed swing: BUY requires the older close at or below the swing high and the current close above it; SELL requires the older close at or above the swing low and the current close below it. Scan bounds also reserve the immediately older closed bar.
+
+Reason: merely remaining above/below a broken swing could previously be mistaken for a newly formed structure break, refreshing setup age and allowing late/duplicate setups to be rebuilt from the same level. The targeted correction does not change H4 alignment, FVG/OB gates, score weights or risk controls.
+
+Validation requirements: STR-07 through STR-09 in the acceptance matrix. STR-09 remains an open strategy-definition issue because current source does not independently require a separate CHoCH event followed by a distinct BOS event. No profitability conclusion is implied.

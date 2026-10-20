@@ -2828,7 +2828,7 @@ bool DetectStructure(const string symbol,
 
    if(direction>0)
      {
-      for(int s=1;s<=structureWindowBars && s<ArraySize(r);s++)
+      for(int s=1;s<=structureWindowBars && s+1<ArraySize(r);s++)
         {
          // Find the newest confirmed high that already existed before
          // this closed breakout candle. No same/younger pivot can be used.
@@ -2846,7 +2846,7 @@ bool DetectStructure(const string symbol,
             if(pivotShift-s>structureWindowBars)
                continue;
 
-            if(r[s].close>highs[i].price)
+            if(r[s].close>highs[i].price && r[s+1].close<=highs[i].price)
               {
                chochShift=pivotShift;
                bosShift=s;
@@ -2858,7 +2858,7 @@ bool DetectStructure(const string symbol,
      }
    else
      {
-      for(int s=1;s<=structureWindowBars && s<ArraySize(r);s++)
+      for(int s=1;s<=structureWindowBars && s+1<ArraySize(r);s++)
         {
          for(int i=nl-1;i>=0;i--)
            {
@@ -2873,7 +2873,7 @@ bool DetectStructure(const string symbol,
             if(pivotShift-s>structureWindowBars)
                continue;
 
-            if(r[s].close<lows[i].price)
+            if(r[s].close<lows[i].price && r[s+1].close>=lows[i].price)
               {
                chochShift=pivotShift;
                bosShift=s;
