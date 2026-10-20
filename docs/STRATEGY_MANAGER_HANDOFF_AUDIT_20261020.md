@@ -110,11 +110,11 @@
 
 ### STR-AUD-10 — Protection eligibility is broader than strategy-managed eligibility
 
-**Evidence:** `STB_IsProtectionPosition(ticket)` accepts a broader set of live account positions than `IsManagedPosition()`, which applies the symbol allow-list. Transaction intake can call immediate management after the protection-scope check.
+**Evidence:** `STB_IsProtectionPosition(ticket)` accepts every live account position outside the explicit tester chart-only isolation case. In contrast, `IsManagedPosition()` checks `STB_IsSymbolAllowed()`, which permits the chart symbol plus the configured scanner universe (or all symbols when that list is empty). `ManagePositions()`, `AutoProfitProtection()`, and transaction intake use the broad protection predicate; manual command `ManualSavePlus20()` uses the narrower managed predicate.
 
-**Impact:** Manual or foreign-symbol positions may enter the protection/management path even when they are not eligible for strategy entry management. This may be intentional account-protection policy, but the ownership boundary is not self-evident.
+**Impact:** The same position can be eligible for automatic SL/TP/trailing/profit-protection management but excluded from a user-invoked manual management command. Positions with foreign magic numbers and symbols outside the configured scanner universe can still enter the broad automatic management path. The code comment describes broad live-account protection as intentional, so this is a policy-contract mismatch to resolve—not a confirmed defect that should be silently narrowed.
 
-**Disposition:** Define separate contracts for protection scope and strategy-management scope. Test manual, foreign-magic, disallowed-symbol, tester chart-only, netting, and hedging cases before narrowing either predicate.
+**Disposition:** Explicitly approve one of these contracts: (A) all live account positions receive automatic protection while manual commands are symbol-scoped; or (B) automatic management is also constrained by the managed-symbol predicate. Then test manual, foreign-magic, disallowed-symbol, tester chart-only, netting, and hedging cases. Do not change the predicate until the contract is approved.
 
 ### STR-AUD-11 — Symbol-management lease expiry depends on server time
 
@@ -304,6 +304,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A32 | Structure, FVG, and origin-candle patterns occur in nearby but different impulses | Candidate is accepted/rejected according to an explicit shared BOS/displacement contract; unrelated pattern combination is rejected if contract requires event identity | CONTRACT/TEST NOT DEFINED |
 | STR-A33 | BOS occurs before a weekend/session gap; wall-clock age would exceed observed bar age | Discovery and watchlist age agree with M15 bar shifts; missing exact setup bar is explicitly rejected | SOURCE PATCHED; TEST NOT RUN |
 | STR-A34 | Watchlist refresh changes setup, market-quality, or regime score after discovery stability was calculated | Final stability and opportunity score use refreshed values while retaining the documented previous-scan identity contract | SOURCE PATCHED; TEST NOT RUN |
+| STR-A35 | Automatic protection and manual commands process the same foreign-magic or disallowed-symbol position | Observed scope matches the explicitly approved broad-protection vs symbol-managed contract; verify SL/TP/trailing and manual SAVE behavior separately | CONTRACT/TEST NOT DEFINED |
 
 ## Exit criteria
 
