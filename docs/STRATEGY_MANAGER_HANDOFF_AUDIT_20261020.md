@@ -327,6 +327,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 | STR-A46 | Exposure registry allocation fails under memory/resource pressure | `STB_ExposureEnsure()` now checks `ArrayResize()` and returns `-1` with a diagnostic instead of indexing a potentially unallocated slot; source call-site review found most state writes re-enter through guarded `STB_GeomStore()`, but immediate management still proceeds after a failed ensure and requires fault-injection/runtime validation | SOURCE PATCHED/FETCH-BACK VERIFIED; METAEDITOR COMPILE 0 ERRORS/0 WARNINGS; STATIC AUDIT PASS; RUNTIME/ALLOCATION-FAILURE TEST NOT RUN |
 
+| STR-A47 | Exposure allocation failure during geometry intake / immediate position handoff | `STB_GeomIsKnown()` currently calls `STB_GeomStore()` when no registry row exists and then returns `true` even if `STB_ExposureEnsure()` failed inside the store; this can suppress change detection without establishing a baseline. `STB_ManagePositionImmediately()` also continues into the management cycle after its ensure/store attempt fails. Define fail-closed behavior and test allocation failure before patching; avoid treating missing state as a confirmed matching geometry | SOURCE PATH REVIEWED; RUNTIME/FAULT-INJECTION TEST NOT RUN |
+
 ## Exit criteria
 
 - Decide and document CHoCH/BOS semantics before changing structure behavior.
