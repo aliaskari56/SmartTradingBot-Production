@@ -98,3 +98,29 @@ Two additional source-derived strategy items are now tracked:
 - Input-policy interaction: with `InpRequireH4TrendAlignment=true`, an H4-misaligned setup is rejected even if `InpAllowUniversal=true`; the latter only matters when the hard H4-alignment requirement is disabled. Confirm the intended meaning through STR-11 before altering defaults.
 
 STR-07–STR-12 remain test requirements, not completed runtime results. The branch remains NOT release-ready until the applicable deterministic and Strategy Tester gates are run.
+
+
+## Integrated scanner-to-manager robustness checkpoint — 2026-10-20
+
+- Canonical EA remains `MQL5/Experts/SmartTradingBot_FINAL.mq5`; no replacement EA was created.
+- Integrated source blob: `3d0d67850fa9444f06da27dea7aa7e62c78cfa80` (source change commit `661f678a83b6afee0f3f7410b21ad1f2b3fec563` plus the validation tree's unchanged source).
+- Compile: MetaEditor `5.0.0.6274`, **0 errors, 0 warnings**; validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036`, run `39492814185`, artifact `12295809473`.
+- Static audit passed: run `39492814244`. Safety-default checks passed: run `39492814033`.
+
+### Integrated correctness changes in this checkpoint
+
+1. Scanner dynamic-array growth is checked at prior-snapshot, universe, candidate, watchlist and execution Top-N stages. Allocation failure clears candidate outputs, marks `ALLOCATION_FAILED`, restores temporary symbol selections where safe, and does not advance the completed scanner-cycle counter; therefore OnTick/OnTimer cannot execute an incomplete scan.
+2. Dashboard BUY/SELL readiness counts are derived from the final revalidated watchlist rather than discovery-stage candidates.
+3. Final scanner-to-execution revalidation recalculates setup age using closed M15 bars and rejects stale setups before geometry validation.
+4. Diagnostic-state and indicator-cache allocation are guarded; indicator handles are released on cache insertion failure. Swing buffers fail closed on reset/append failure.
+5. Management lease tracking failure now releases its own writer-owner claim with compare-and-swap; it does not overwrite a concurrent owner's lease timestamp.
+6. `PlaceSetup()` repeats trade permission, direction, spread, pending-geometry, directional-volume, entry-lock, symbol-writer-lease and managed-exposure checks at the broker-submit boundary.
+
+### Still required before release
+
+- Deterministic runtime/fault-injection tests for each allocation-failure path and scanner rejection/fallback branches.
+- Integrated tests from candidate discovery through final revalidation, order submission, transaction intake, pending-to-position handoff, and manager lifecycle.
+- Strategy Tester baseline/candidate comparison, held-out out-of-sample analysis, and demo lifecycle/reattach/restart tests.
+- CHoCH/BOS and Universal/H4 policy decisions remain explicit open items; this checkpoint did not change strategy weights or attempt to optimize trading returns.
+
+**Status: source compile/static/safety checks passed; runtime behavior and release readiness remain NOT VERIFIED.** The EX5 in artifact `12295809473` is a CI validation artifact, not a deployed terminal binary.
