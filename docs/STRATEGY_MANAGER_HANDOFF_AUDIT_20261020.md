@@ -92,6 +92,14 @@
 
 **Disposition:** Make the confluence contract explicit: if FVG and OB must belong to the same impulse, record the impulse/event identity and test that relationship; if independent but nearby zones are allowed, document the permitted temporal/spatial relationship and test its boundaries. Do not tighten the pattern rule without an approved definition.
 
+### STR-AUD-29 — FVG and origin-candle checks do not share an explicit displacement identity
+
+**Evidence:** `FindFVG()` limits its displacement candle to within two shifts of `bosShift`. `FindOriginCandle()` accepts `bosShift` but not the detected `breakSwing.price` or `fvgShift`; it scans older candles beginning at `bosShift+1`, tests an opposite candle followed immediately by a directional displacement, and checks that the displacement close exceeds that origin candle's high/low. It does not explicitly prove that the displacement used for the origin candle is the same displacement used for the FVG, or that the origin/displacement pair itself crosses the detected break-swing level.
+
+**Impact:** A setup may combine individually valid structure, FVG, and origin-candle findings without an explicit shared-event identity. The current source does not prove this is a runtime defect for every setup; the missing invariant is the issue.
+
+**Disposition:** Do not add a hard rejection or change strategy semantics until the intended contract is agreed. Define whether the OB displacement must be the BOS candle, precede the BOS within a bounded sequence, and/or be the same displacement candle as the FVG. Then pass the relevant event identity/price into the pattern functions and add positive/negative fixtures.
+
 ### STR-AUD-10 — Protection eligibility is broader than strategy-managed eligibility
 
 **Evidence:** `STB_IsProtectionPosition(ticket)` accepts a broader set of live account positions than `IsManagedPosition()`, which applies the symbol allow-list. Transaction intake can call immediate management after the protection-scope check.
@@ -277,6 +285,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A29 | Partial exits, duplicate close processing, and restart between PnL accumulation/consume | Closed-lifecycle PnL and adaptive observations are idempotent | NOT RUN |
 | STR-A30 | Watchlist revalidation changes market-quality/regime scores after initial stability calculation | Final ranking follows the documented stability-score contract | NOT RUN |
 | STR-A31 | Top candidate fails final validation while fallback has insufficient gap to next candidate | Fallback is blocked; no candidate with uncleared confidence is submitted | SOURCE PATCHED; TEST NOT RUN |
+| STR-A32 | Structure, FVG, and origin-candle patterns occur in nearby but different impulses | Candidate is accepted/rejected according to an explicit shared BOS/displacement contract; unrelated pattern combination is rejected if contract requires event identity | CONTRACT/TEST NOT DEFINED |
 
 ## Exit criteria
 
