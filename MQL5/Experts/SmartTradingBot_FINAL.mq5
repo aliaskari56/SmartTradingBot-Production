@@ -19,7 +19,7 @@ input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
-input string  InpScannerSymbols         = "";   // empty = selected Market Watch; comma/semicolon separated
+input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols   // empty = selected Market Watch; comma/semicolon separated
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 45.0;
@@ -1882,9 +1882,8 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    //--- P4 central writer: verify symbol, re-read geometry, validate
    //--- broker constraints, monotonic entry direction and risk floor.
    long stbOt=OrderGetInteger(ORDER_TYPE);
-   bool stbCandleStop=(stbOt==ORDER_TYPE_BUY_STOP || stbOt==ORDER_TYPE_SELL_STOP);
-   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
-      return false; // M5 candle-follow owns BUY STOP / SELL STOP pre-trigger geometry
+   // Manual/mobile/foreign pending orders remain under the universal manager.
+   // Override metadata may control local expiry policy, never SL/trailing protection.
    double stbCurEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double stbCurSL=OrderGetDouble(ORDER_SL);
    double stbCurTP=OrderGetDouble(ORDER_TP);
@@ -1976,9 +1975,8 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
-      return false;
-
+   // Do not re-enable a manual-override pause after OrderCheck: every
+   // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double latestSL=OrderGetDouble(ORDER_SL);
    double latestTP=OrderGetDouble(ORDER_TP);
@@ -3723,10 +3721,10 @@ bool STB_IsSymbolAllowed(const string s)
    if(s==_Symbol)
       return true;
 
-   // An empty scanner list means other currently selected Market Watch symbols,
-   // not every symbol known to the broker.
+   // Universal management scope: an empty list means every symbol that has
+   // an account position or pending order, not only selected Market Watch symbols.
    if(StringLen(InpScannerSymbols)==0)
-      return (bool)SymbolInfoInteger(s,SYMBOL_SELECT);
+      return true;
 
    string parts[];
    string cfg=InpScannerSymbols;
@@ -5999,10 +5997,6 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 
    if(currentSL>0.0)
       return VerifyPendingInitialSL(ticket);
-
-   // Do not impose protection on an order explicitly assigned to the user.
-   if(STB_ManualOverrideIs(ticket))
-      return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL);
 
