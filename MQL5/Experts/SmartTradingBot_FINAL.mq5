@@ -5491,7 +5491,10 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
    return true;
   }
 
-/* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
+/* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,
+                      const double newSL,
+                      const bool isUserAction=false,
+                      const double requestedTP=-1.0)
   {
    g_modifyWasNoChanges=false;
    if(ticket==0 || !STB_IsProtectionPosition(ticket))
@@ -5574,18 +5577,30 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
       !STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
+   double targetTP=latestTP;
+   if(latestTP<=0.0 && requestedTP>=0.0)
+      targetTP=requestedTP; // only fill an absent TP; never replace an explicit one
+
    return STB_PositionModifyBrokerVerified(ticket,
                                            latestEntry,
                                            latestSL,
                                            latestTP,
                                            newSL,
-                                           latestTP,
+                                           targetTP,
                                            gv,
-                                           "SL");
+                                           (targetTP!=latestTP ? "SL+TP":"SL"));
   }
 
 // Resolve all automatic candidates after the three managers have run.
 // The selected write is revalidated by ModifyPositionSL against live terminal state.
+bool STB_CalculatePositionTPFromStructure(const string symbol,
+                                          const long positionType,
+                                          const double entry,
+                                          const double sl,
+                                          const double minimumRR,
+                                          double &tp,
+                                          string &source);
+
 void STB_FlushPositionSLProposals()
   {
    g_stbCollectingSLProposals=false;
@@ -5642,7 +5657,27 @@ void STB_FlushPositionSLProposals()
       for(int j=0;j<count;j++)
          if(props[j].valid && props[j].hasSL && props[j].source==STB_SL_SRC_PROFIT_PROTECTION)
             hasProfitCandidate=true;
-      if(!ModifyPositionSL(ticket,chosenSL,false) || !PositionSelectByTicket(ticket)) continue;
+      // If no TP exists, calculate a target from the same chosen SL and attach
+      // it to this single verified modify request. This prevents a continuously
+      // improving trail from starving the missing-TP manager every cycle.
+      double currentTP=PositionGetDouble(POSITION_TP);
+      double tpForRequest=-1.0; // negative sentinel = preserve the live TP
+      if(currentTP<=0.0)
+        {
+         tpForRequest=0.0;
+         double proposedTP=0.0;
+         string tpSource="";
+         if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL,
+                                                  InpMinimumRR,proposedTP,tpSource))
+           {
+            tpForRequest=proposedTP;
+            Print("STB SL+TP ARBITRATION target ticket=",ticket,
+                  " source=",tpSource,
+                  " TP=",DoubleToString(proposedTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+           }
+        }
+      if(!ModifyPositionSL(ticket,chosenSL,false,tpForRequest) ||
+         !PositionSelectByTicket(ticket)) continue;
       double actualSL=PositionGetDouble(POSITION_SL);
       // A missing SL must never be treated as a confirmed protective stop;
       // this is especially important for SELL-side lock-pips bookkeeping.
@@ -7037,7 +7072,7 @@ bool EnsureInitialTPForPosition(const ulong ticket)
    double tp=0.0;
    string source="";
    if(!STB_CalculatePositionTPFromStructure(symbol,side,entry,sl,
-                                             STB_EffectiveMinimumRR(),tp,source))
+                                             InpMinimumRR,tp,source))
      {
       GlobalVariableSet(retryKey,(double)TimeCurrent());
       Print("STB AUTO TP UNAVAILABLE ticket=",ticket,
@@ -7087,7 +7122,7 @@ bool EnsureInitialTPForPendingOrder(const ulong ticket)
    double tp=0.0;
    string source="";
    if(!STB_CalculatePendingTPFromStructure(symbol,type,entry,sl,
-                                            STB_EffectiveMinimumRR(),tp,source))
+                                            InpMinimumRR,tp,source))
      {
       GlobalVariableSet(retryKey,(double)TimeCurrent());
       Print("STB PENDING TP UNAVAILABLE ticket=",ticket,
