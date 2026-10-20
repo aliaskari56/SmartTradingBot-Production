@@ -232,6 +232,14 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Disposition:** Add tests for multiple partial exits, duplicate/replayed close processing, delayed deal events, restart between accumulation and consumption, and repeated history reconciliation. If duplicate processing is in scope, persist a per-deal/per-lifecycle idempotency marker before updating learner statistics.
 
+### STR-AUD-27 — Status after source correction: stability is recomputed after watchlist refresh
+
+**Correction:** Commit `bf550687cab3c94313f0d2720531b905b6e5afea` recalculates the preliminary score using the refreshed setup score, market-quality score, and regime score, then calls `STB_CandidateStability()` again before final watchlist opportunity ranking. It also updates `c.strategyScore` from the revalidated setup score before recomputing the opportunity score.
+
+**Expected behavior:** The final watchlist score uses stability derived from the refreshed candidate state, while persistence comparison remains keyed to the previous scan's matching symbol/direction/setup identity. Score weights are unchanged.
+
+**Verification status:** Updated source was fetched back from GitHub and the new block was confirmed. Compile, ranking fixtures, and Strategy Tester coverage remain NOT RUN.
+
 ### STR-AUD-28 — Fallback candidate could inherit confidence clearance from the original winner
 
 **Evidence:** Before the source correction, `STB_ExecuteTopCandidate()` checked `g_scannerConfidence` once against the first two candidates, then iterated through Top-N and could continue to a lower-ranked candidate after an earlier candidate failed final revalidation or the final gate. The fallback's own score gap against the next revalidated watchlist candidate was not checked at that point.
@@ -295,6 +303,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A31 | Top candidate fails final validation while fallback has insufficient gap to next candidate | Fallback is blocked; no candidate with uncleared confidence is submitted | SOURCE PATCHED; TEST NOT RUN |
 | STR-A32 | Structure, FVG, and origin-candle patterns occur in nearby but different impulses | Candidate is accepted/rejected according to an explicit shared BOS/displacement contract; unrelated pattern combination is rejected if contract requires event identity | CONTRACT/TEST NOT DEFINED |
 | STR-A33 | BOS occurs before a weekend/session gap; wall-clock age would exceed observed bar age | Discovery and watchlist age agree with M15 bar shifts; missing exact setup bar is explicitly rejected | SOURCE PATCHED; TEST NOT RUN |
+| STR-A34 | Watchlist refresh changes setup, market-quality, or regime score after discovery stability was calculated | Final stability and opportunity score use refreshed values while retaining the documented previous-scan identity contract | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
