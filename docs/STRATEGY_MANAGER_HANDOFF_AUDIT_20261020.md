@@ -126,13 +126,15 @@
 
 **Disposition:** Test two EA instances with active quotes, quiet markets, stale quotes, restart, and lease-owner disappearance. Document whether expiry is intended to follow server time or wall-clock time.
 
-### STR-AUD-12 — Partial fills need explicit pending-trail lifecycle coverage
+### STR-AUD-12 — Partial-fill pending-trail handoff guard added
 
-**Evidence:** Pending trail handling is deactivated on the first `DEAL_ADD`; the periodic pending-trail processor may discover and register a still-existing remainder through terminal order enumeration.
+**Evidence:** Commit `a4db8b5c5069e3b739191acaca9ca068cb991c8c` updates `STB_PendingTrailOnOrderFilled()`: on `DEAL_ADD`, if the same ticket still exists as a managed supported pending order, it logs the remaining volume and leaves the pending-trail state active. It deactivates the state only when the active pending ticket is no longer present at that check.
 
-**Impact:** Correctness depends on transaction ordering and subsequent reconciliation when a pending order partially fills and leaves a remainder.
+**Impact:** This avoids prematurely disabling trailing for a remainder when the partial-fill order is still visible at transaction intake. Transaction arrival order can still race with terminal state updates, so the subsequent manager pass and stale-state cleanup must be tested.
 
-**Disposition:** Add partial-fill tests that verify remainder tracking, protection initialization for the filled volume, and cleanup only when the remainder is gone. This is a conditional lifecycle risk, not a confirmed defect.
+**Verification status:** Source fetched back from GitHub; the active-order guard and early return before the handoff were confirmed. Partial-fill, delayed transaction, and restart tests remain NOT RUN.
+
+**Disposition:** Test partial fills where the remainder is present, delayed order removal, full fill, immediate disappearance, and restart. Verify filled-volume position protection independently from remainder trailing.
 
 ### STR-AUD-13 — Transaction intake does not explicitly branch on every transaction type
 
@@ -309,6 +311,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A35 | Automatic protection and manual commands process the same foreign-magic or disallowed-symbol position | Observed scope matches the explicitly approved broad-protection vs symbol-managed contract; verify SL/TP/trailing and manual SAVE behavior separately | CONTRACT/TEST NOT DEFINED |
 | STR-A36 | Two chart instances contend for the symbol lease during quiet quotes, restart, or local-clock adjustment | Only the CAS owner writes; stale reclaim follows the 90-second local-clock TTL without duplicate writers | SOURCE PATCHED; TEST NOT RUN |
 | STR-A37 | Pending OrderModify returns failure/timeout after server-side state may have changed | The ticket consumes its write quota before the request and receives no second geometry write in the same cycle | SOURCE PATCHED; TEST NOT RUN |
+| STR-A38 | Pending order emits DEAL_ADD while an unfilled remainder may still be active | Existing managed pending ticket keeps trail state active; state is handed off only after the pending ticket is absent | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
