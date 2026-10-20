@@ -48,7 +48,7 @@ input double  InpCCIWeight                  = 8.0;
 input bool    InpOscillatorHardFilter       = false;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
 input int     InpSetupCooldownMinutes  = 15;
-input int     InpMaxSetupAgeBars       = 0;     // 0 = disabled; M15 bars
+input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
 input bool    InpUseRiskSizing         = false; // false preserves fixed-lot mode
 input double  InpRiskPercent           = 0.50;  // account equity risk per setup
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
@@ -317,7 +317,7 @@ string STB_AP_Key(const string symbol,
                   const int profile=-1)
   {
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
-              (string)InpMagic+"|AP2|"+symbol+"|"+
+              (string)InpMagic+"|AP3|"+symbol+"|"+
               (direction>0 ? "B":"S")+"|"+
               scope+"|"+(string)profile;
 
@@ -325,7 +325,7 @@ string STB_AP_Key(const string symbol,
    if(MQLInfoInteger(MQL_TESTER))
       raw+="|TESTER";
 
-   return "STB_AP2_"+(string)STB_AP_Hash(raw);
+   return "STB_AP3_"+(string)STB_AP_Hash(raw);
   }
 
 //+------------------------------------------------------------------+
@@ -1002,7 +1002,7 @@ void STB_AdaptiveRememberPositionProfile(const ulong positionId,
 string STB_AdaptiveOrderRaw(const ulong orderTicket)
   {
    return (string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
-          (string)InpMagic+"|AP2|ORDER|"+(string)orderTicket;
+          (string)InpMagic+"|AP3|ORDER|"+(string)orderTicket;
   }
 
 //+------------------------------------------------------------------+
@@ -1086,7 +1086,7 @@ void STB_AdaptiveDeleteOrderState(const ulong orderTicket)
 string STB_AdaptivePositionRaw(const ulong positionId)
   {
    return (string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
-          (string)InpMagic+"|AP2|POS|"+(string)positionId;
+          (string)InpMagic+"|AP3|POS|"+(string)positionId;
   }
 
 //+------------------------------------------------------------------+
@@ -1140,13 +1140,12 @@ double STB_AdaptiveReadProfileR(const string symbol,
   {
    double decay=STB_AP_Decay(symbol,direction,profile);
    double sumR=STB_AP_Read(symbol,direction,"RSUM",profile,0.0)*decay;
+   double rObservations=STB_AP_Read(symbol,direction,"RCOUNT",profile,0.0)*decay;
 
-   double wins=0.0;
-   double losses=0.0;
-   STB_AP_ReadProfileStats(symbol,direction,profile,wins,losses);
-
-   observations=wins+losses;
-
+   // R expectancy is averaged only over closed trades whose initial
+   // monetary risk was captured reliably. Missing risk must not dilute the
+   // average toward zero through the win/loss denominator.
+   observations=MathMax(0.0,rObservations);
    if(observations<=0.0)
       return 0.0;
 
@@ -1162,7 +1161,7 @@ int STB_AdaptiveReadPositionProfile(const ulong positionId)
       return -1;
 
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
-              (string)InpMagic+"|AP2|POS|"+(string)positionId;
+              (string)InpMagic+"|AP3|POS|"+(string)positionId;
 
    int profile=(int)MathRound(
                   STB_AP_Read("POSITION",1,raw,0,-1.0));
@@ -1180,7 +1179,7 @@ void STB_AdaptiveDeletePositionProfile(const ulong positionId)
       return;
 
    string raw=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"|"+
-              (string)InpMagic+"|AP2|POS|"+(string)positionId;
+              (string)InpMagic+"|AP3|POS|"+(string)positionId;
 
    GlobalVariableDel(STB_AP_Key("POSITION",1,raw,0));
   }
@@ -1214,7 +1213,8 @@ void STB_AdaptiveRecordClosedDeal(const string symbol,
                                   const int direction,
                                   const double profit,
                                   const int profileId,
-                                  const double rMultiple)
+                                  const double rMultiple,
+                                  const bool hasValidRiskSample)
   {
    if(!InpAdaptiveLearning || direction==0)
       return;
@@ -1240,11 +1240,19 @@ void STB_AdaptiveRecordClosedDeal(const string symbol,
          double decay=STB_AP_Decay(symbol,direction,profileId);
          double oldRSum=STB_AP_Read(symbol,direction,
                                     "RSUM",profileId,0.0)*decay;
+         double oldRCount=STB_AP_Read(symbol,direction,
+                                      "RCOUNT",profileId,0.0)*decay;
 
-         if(MathIsValidNumber(rMultiple))
+         // R statistics are updated only when the initial risk denominator
+         // is known and finite. Win/loss observations remain independent.
+         if(hasValidRiskSample && MathIsValidNumber(rMultiple))
+           {
             oldRSum+=rMultiple;
+            oldRCount+=1.0;
+           }
 
          STB_AP_Write(symbol,direction,"RSUM",profileId,oldRSum);
+         STB_AP_Write(symbol,direction,"RCOUNT",profileId,oldRCount);
          STB_AP_Write(symbol,direction,"T",profileId,(double)TimeCurrent());
         }
      }
@@ -9910,7 +9918,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                                       originalDirection,
                                       lifecyclePnl,
                                       profileId,
-                                      rMultiple);
+                                      rMultiple,
+                                      riskMoney>0.0 && MathIsValidNumber(riskMoney));
         }
 
       STB_AdaptiveDeletePositionProfile(positionId);
@@ -9978,7 +9987,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                                 originalDirection,
                                 cumulative,
                                 profileId,
-                                rMultiple);
+                                rMultiple,
+                                riskMoney>0.0 && MathIsValidNumber(riskMoney));
 
    STB_AdaptiveDeletePositionProfile(positionId);
    STB_AdaptiveDeletePositionRisk(positionId);
