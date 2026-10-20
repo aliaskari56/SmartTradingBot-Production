@@ -315,6 +315,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 | STR-A39 | Restart occurs during pending-trail retry backoff | Recovered ticket is re-registered with failureCount=0 and nextRetryTime=0; confirm this reset is an intentional policy or persist retry state, and verify no immediate retry storm after repeated restarts | CONTRACT/TEST NOT DEFINED |
 
+| STR-A40 | Pending order has no initial SL; initial-protection repair and trailing are both eligible, including OrderCheck rejection or ambiguous broker response | Central writer allows at most one broker geometry write per ticket per cycle; retry backoff and next-cycle reconciliation remain consistent with actual terminal geometry | SOURCE PATH REVIEWED; TEST NOT RUN |
+
 ## Exit criteria
 
 - Decide and document CHoCH/BOS semantics before changing structure behavior.
