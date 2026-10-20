@@ -238,6 +238,8 @@ def main() -> int:
           'STB_ScannerAllocationAbort("INITIAL_WATCHLIST"' in source and
           'STB_ScannerAllocationAbort("FINAL_WATCHLIST"' in source and
           'STB_ScannerAllocationAbort("EXECUTION_TOPN"' in source and
+          scanner_run.index("ArrayFree(wasSelected);") <
+          scanner_run.index('STB_ScannerAllocationAbort("SYMBOL_SELECTION_SNAPSHOT"') and
           "ArrayFree(g_scannerTop10);" in source and
           "ArrayFree(g_scannerWatchlist);" in source and
           "ArrayFree(g_scannerCurrent);" in source and
