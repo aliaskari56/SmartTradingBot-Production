@@ -348,3 +348,12 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Static audit in progress; release status remains NOT VERIFIED.** This document records code paths and test obligations; it does not certify runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
+
+
+### STR-A54 — An allocated but unseeded geometry row could be misread as a manual edit
+
+**Evidence:** `STB_ManualOverrideIntake()` ensures an Exposure Registry row before calling `STB_GeomIsKnown()`. When that row already exists but still has the zero-entry sentinel, the old implementation compared the real terminal entry against zero and could report a geometry change. In the pending-order branch that can reach `STB_ManualOverrideSet()` even though the snapshot was only being observed for the first time.
+
+**Correction:** `STB_GeomIsKnown()` now detects an existing row with `entry<=0.0` and a valid observed `entry>0.0`, seeds entry/SL/TP from the current terminal snapshot, logs `FIRST_VALID_SNAPSHOT`, and returns true. Later snapshots continue through the normal tolerance comparison, preserving detection of subsequent geometry changes. Allocation failure remains a separate false/deferred path.
+
+**Verification status:** Source patch commit `9be5577f6541e46173612995f46596c25fa1fa2f`; fetch-back verified with blob `5491c308fd06241362afc391b1664e779dfb5b4f`. Exact-source compile/static checks for this new commit are pending; runtime/manual-edit/restart tests have not been run.
