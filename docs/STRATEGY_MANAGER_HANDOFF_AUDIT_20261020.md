@@ -345,7 +345,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 ## Current status
 
-**Latest source compile and static audit passed; release status remains NOT VERIFIED.** The exact source file at commit `9be5577f6541e46173612995f46596c25fa1fa2f` was included unchanged in validation commit `994b9d462bd5d953e65ec2edbcee88dd1e010e14`: MetaEditor 5.0.0.6274 reports 0 errors and 0 warnings (workflow `39490351228`); static audit and safety-default workflow checks succeeded. This does not certify runtime behavior or trading performance.
+**Release status remains NOT VERIFIED.** The prior exact-source tree compiled with MetaEditor 5.0.0.6274 at 0 errors/0 warnings (workflow `39490351228`), and its static/safety checks passed. A newer scanner allocation fail-closed patch is now under fresh exact-tree compile and static/safety validation; those results must be checked before calling this checkpoint compile-verified. No compile or static result certifies runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
 
@@ -357,3 +357,12 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Correction:** `STB_GeomIsKnown()` now detects an existing row with `entry<=0.0` and a valid observed `entry>0.0`, seeds entry/SL/TP from the current terminal snapshot, logs `FIRST_VALID_SNAPSHOT`, and returns true. Later snapshots continue through the normal tolerance comparison, preserving detection of subsequent geometry changes. Allocation failure remains a separate false/deferred path.
 
 **Verification status:** Source patch commit `9be5577f6541e46173612995f46596c25fa1fa2f`; fetch-back verified with blob `5491c308fd06241362afc391b1664e779dfb5b4f`. The source file was compiled unchanged in validation commit `994b9d462bd5d953e65ec2edbcee88dd1e010e14`: MetaEditor 5.0.0.6274 reports 0 errors and 0 warnings (workflow `39490351228`); static audit and safety-default checks succeeded. Runtime/manual-edit/restart tests have not been run.
+
+
+### STR-A55 — Scanner pipeline array-allocation failures could leave an incomplete candidate set
+
+**Evidence:** `STB_ScannerRun()` resized several dynamic arrays without checking the result: prior-scan snapshot, explicit/Market-Watch universe accumulation, candidate append, initial/final watchlist, and execution Top-N. A resource-allocation failure could leave the pipeline incomplete or permit an invalid index write instead of producing an explicit fail-closed scan result.
+
+**Correction:** `STB_ScannerAllocationAbort()` now releases temporary symbol selections where safe, clears current/watchlist/Top-N candidates and dashboard readiness, sets scanner status to `ALLOCATION_FAILED`, records a diagnostic, and returns without leaving a candidate available for execution. The scanner checks resize results at each listed stage and invokes the abort path on failure. Added a static-audit regression assertion for the fail-closed behavior.
+
+**Verification status:** Source commit `00eb7d0d706d64144d902e962f96c9f15a806b65`; fetch-back verified at blob `6559da7d692260b01cd10e3cf966fac590603c76`. Initial static audit for the source commit passed (run `39491472637`); the dedicated regression assertion was then added in commit `ff6774ae091d16c08470148ea8000f278c7031a6`. Re-run compile/static/safety workflows for the latest branch head before accepting this correction. Runtime allocation-fault injection and end-to-end scanner/manager tests NOT RUN.
