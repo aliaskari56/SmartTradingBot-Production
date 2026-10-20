@@ -495,11 +495,6 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return false;
 
-   // Honor per-ticket backoff before rebuilding an actionable-bar proposal.
-   // Failed candidates must not spin on every tick while waiting to retry.
-   if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())
-      return true;
-
    if(!OrderSelect(g_stbPendingTrail[idx].ticket))
    {
       // Terminal no longer exposes this order: filled (triggered),
@@ -520,6 +515,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       g_stbPendingTrail[idx].active=false;
       return false;
    }
+
+   // After lifecycle/ownership checks, honor per-ticket backoff before
+   // rebuilding an actionable-bar proposal.
+   if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())
+      return true;
 
    long orderType=OrderGetInteger(ORDER_TYPE);
 
