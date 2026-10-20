@@ -9277,8 +9277,28 @@ void STB_ScannerRun()
          c.setupAgeBars>InpMaxSetupAgeBars)
          continue;
 
+      // Recompute stability from the refreshed watchlist inputs. The
+      // stability component compares the current preliminary score with the
+      // previous scan's score for this exact symbol/direction/setup identity.
+      // Carrying the discovery-stage value here would mix stale and refreshed
+      // market/regime components in the final ranking.
+      double refreshedStrategyScore=
+         MathMax(0.0,MathMin(100.0,c.setup.score));
+      double refreshedPreliminary=
+         0.65*refreshedStrategyScore+
+         0.20*c.marketQualityScore+
+         0.10*c.regimeScore+
+         0.05*55.0;
+
+      c.stabilityScore=
+         STB_CandidateStability(c.symbol,c.direction,c.setup.setupTime,
+                                refreshedPreliminary,
+                                c.previousScore,c.previousRank);
+
+      c.strategyScore=refreshedStrategyScore;
+
       c.opportunityScore=
-         0.65*MathMax(0.0,MathMin(100.0,c.setup.score))+
+         0.65*c.strategyScore+
          0.20*c.marketQualityScore+
          0.10*c.regimeScore+
          0.05*c.stabilityScore;
