@@ -9100,6 +9100,46 @@ void STB_SortCandidates(STBCandidate &arr[])
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+void STB_ScannerAllocationAbort(const string stage,string &symbols[],bool &wasSelected[])
+  {
+   Print("STB SCANNER ABORT stage=",stage,
+         " reason=ARRAY_ALLOCATION_FAILED; no candidate may be executed");
+
+   for(int i=0;i<ArraySize(symbols) && i<ArraySize(wasSelected);i++)
+      if(!wasSelected[i] && !STB_HasSymbolExposureForManagement(symbols[i]))
+         SymbolSelect(symbols[i],false);
+
+   ArrayFree(g_scannerCurrent);
+   ArrayFree(g_scannerWatchlist);
+   ArrayFree(g_scannerTop10);
+
+   g_scannerUniverseCount=0;
+   g_scannerEligibleCount=0;
+   g_scannerQualityCount=0;
+   g_scannerRegimeCount=0;
+   g_scannerBuyCount=0;
+   g_scannerSellCount=0;
+   g_scannerCandidateCount=0;
+   g_scannerWatchlistCount=0;
+   g_scannerTop10Count=0;
+   g_scannerConfidence="NO_CLEAR_WINNER";
+   g_scannerStatus="ALLOCATION_FAILED";
+   g_panelScanSymbols=0;
+   g_panelScanTradable=0;
+   g_panelScanBuyReady=0;
+   g_panelScanSellReady=0;
+   g_panelScanPlacements=0;
+   g_panelLastScanTime=TimeCurrent();
+   g_panelChartBuyReady=false;
+   g_panelChartSellReady=false;
+   g_panelChartBuyScore=0.0;
+   g_panelChartSellScore=0.0;
+   g_scannerLastRun=TimeCurrent();
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void STB_ScannerRun()
   {
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
@@ -9112,12 +9152,19 @@ void STB_ScannerRun()
 
    ulong started=(ulong)GetTickCount();
 
+   string symbols[];
+   bool wasSelected[];
+
    ArrayFree(g_scannerPrevious);
    int prevCount=ArraySize(g_scannerCurrent);
 
    if(prevCount>0)
      {
-      ArrayResize(g_scannerPrevious,prevCount);
+      if(ArrayResize(g_scannerPrevious,prevCount)!=prevCount)
+        {
+         STB_ScannerAllocationAbort("PREVIOUS_SNAPSHOT",symbols,wasSelected);
+         return;
+        }
       for(int p=0;p<prevCount;p++)
          g_scannerPrevious[p]=g_scannerCurrent[p];
      }
@@ -9138,12 +9185,16 @@ void STB_ScannerRun()
    g_scannerConfidence="NO_CLEAR_WINNER";
    g_scannerStatus="RUNNING";
 
-   string symbols[];
    ArrayResize(symbols,0);
+   bool universeAllocationFailed=false;
 
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
      {
-      ArrayResize(symbols,1);
+      if(ArrayResize(symbols,1)!=1)
+        {
+         STB_ScannerAllocationAbort("TESTER_UNIVERSE",symbols,wasSelected);
+         return;
+        }
       symbols[0]=_Symbol;
      }
    else if(StringLen(InpScannerSymbols)>0)
@@ -9176,7 +9227,12 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            Print("STB SCANNER UNIVERSE ALLOCATION FAILED symbol=",symbol);
+            universeAllocationFailed=true;
+            break;
+           }
          symbols[n]=symbol;
         }
      }
@@ -9192,15 +9248,29 @@ void STB_ScannerRun()
             continue;
 
          int n=ArraySize(symbols);
-         ArrayResize(symbols,n+1);
+         if(ArrayResize(symbols,n+1)!=n+1)
+           {
+            Print("STB SCANNER UNIVERSE ALLOCATION FAILED symbol=",symbol);
+            universeAllocationFailed=true;
+            break;
+           }
          symbols[n]=symbol;
         }
      }
 
+   if(universeAllocationFailed)
+     {
+      STB_ScannerAllocationAbort("UNIVERSE_LIST",symbols,wasSelected);
+      return;
+     }
+
    g_scannerUniverseCount=ArraySize(symbols);
 
-   bool wasSelected[];
-   ArrayResize(wasSelected,g_scannerUniverseCount);
+   if(ArrayResize(wasSelected,g_scannerUniverseCount)!=g_scannerUniverseCount)
+     {
+      STB_ScannerAllocationAbort("SYMBOL_SELECTION_SNAPSHOT",symbols,wasSelected);
+      return;
+     }
 
    for(int i=0;i<g_scannerUniverseCount;i++)
      {
@@ -9208,6 +9278,8 @@ void STB_ScannerRun()
       if(!wasSelected[i])
          SymbolSelect(symbols[i],true);
      }
+
+   bool candidateAllocationFailed=false;
 
    for(int i=0;i<ArraySize(symbols);i++)
      {
@@ -9311,7 +9383,13 @@ void STB_ScannerRun()
             continue;
 
          int idx=ArraySize(g_scannerCurrent);
-         ArrayResize(g_scannerCurrent,idx+1);
+         if(ArrayResize(g_scannerCurrent,idx+1)!=idx+1)
+           {
+            Print("STB SCANNER CANDIDATE ALLOCATION FAILED symbol=",symbol,
+                  " direction=",direction);
+            candidateAllocationFailed=true;
+            break;
+           }
          g_scannerCurrent[idx]=candidate;
 
          if(direction>0)
@@ -9319,6 +9397,15 @@ void STB_ScannerRun()
          else
             g_scannerSellCount++;
         }
+
+      if(candidateAllocationFailed)
+         break;
+     }
+
+   if(candidateAllocationFailed)
+     {
+      STB_ScannerAllocationAbort("CANDIDATE_LIST",symbols,wasSelected);
+      return;
      }
 
    g_scannerCandidateCount=ArraySize(g_scannerCurrent);
@@ -9327,7 +9414,11 @@ void STB_ScannerRun()
    int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,50));
    int watchCount=MathMin(watchLimit,ArraySize(g_scannerCurrent));
 
-   ArrayResize(g_scannerWatchlist,watchCount);
+   if(ArrayResize(g_scannerWatchlist,watchCount)!=watchCount)
+     {
+      STB_ScannerAllocationAbort("INITIAL_WATCHLIST",symbols,wasSelected);
+      return;
+     }
 
    for(int i=0;i<watchCount;i++)
       g_scannerWatchlist[i]=g_scannerCurrent[i];
@@ -9422,14 +9513,22 @@ void STB_ScannerRun()
       validWatch++;
      }
 
-   ArrayResize(g_scannerWatchlist,validWatch);
+   if(ArrayResize(g_scannerWatchlist,validWatch)!=validWatch)
+     {
+      STB_ScannerAllocationAbort("FINAL_WATCHLIST",symbols,wasSelected);
+      return;
+     }
    STB_SortCandidates(g_scannerWatchlist);
    g_scannerWatchlistCount=ArraySize(g_scannerWatchlist);
 
    int topCount=MathMin(MathMax(1,InpScannerTopN),10);
    topCount=MathMin(topCount,g_scannerWatchlistCount);
 
-   ArrayResize(g_scannerTop10,topCount);
+   if(ArrayResize(g_scannerTop10,topCount)!=topCount)
+     {
+      STB_ScannerAllocationAbort("EXECUTION_TOPN",symbols,wasSelected);
+      return;
+     }
 
    for(int i=0;i<topCount;i++)
       g_scannerTop10[i]=g_scannerWatchlist[i];
