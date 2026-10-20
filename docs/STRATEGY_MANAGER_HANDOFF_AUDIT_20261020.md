@@ -142,13 +142,13 @@
 
 **Disposition:** Test order delete/cancel/expiry, deal add/update, delayed event ordering, and restart reconciliation. Confirm that stale registry and pending-trail entries are removed deterministically.
 
-### STR-AUD-14 — Pending-order write quota is consumed after verification
+### STR-AUD-14 — Pending-order write quota now consumed before broker request
 
-**Evidence:** The central pending-order writer records its write quota after a successful result and geometry verification, unlike the position bridge path that consumes quota before sending.
+**Evidence:** Commit `0b3230d6bcf9cc26a2be115db0030332a38346db` adds `STB_CycleMarkWritten(ticket)` immediately before `trade.OrderModify()`, after the final snapshot, ownership, geometry, and risk-floor checks. The existing post-verification mark remains as an idempotent confirmation of the same cycle budget.
 
-**Impact:** If a request has an ambiguous outcome, another write may be attempted in the same cycle because the first write was not recorded as consuming the quota. Whether this is possible depends on the trade API outcome path.
+**Impact:** A failed, timed-out, or ambiguous modification attempt no longer leaves the ticket eligible for another geometry write in the same cycle. A no-change failure is deferred to a later management cycle; this favors avoiding duplicate writes over immediate same-cycle retry.
 
-**Disposition:** Test success, explicit rejection, timeout/ambiguous result, geometry mismatch, and order disappearance. Do not change quota semantics until ambiguous outcomes are specified.
+**Verification status:** Updated source was fetched back from GitHub and ordering of the quota mark before `trade.OrderModify()` was confirmed. Compile and failure-injection tests remain NOT RUN.
 
 ### STR-AUD-15 — Pending writer postcondition needs ambiguous-result tests
 
@@ -308,6 +308,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A34 | Watchlist refresh changes setup, market-quality, or regime score after discovery stability was calculated | Final stability and opportunity score use refreshed values while retaining the documented previous-scan identity contract | SOURCE PATCHED; TEST NOT RUN |
 | STR-A35 | Automatic protection and manual commands process the same foreign-magic or disallowed-symbol position | Observed scope matches the explicitly approved broad-protection vs symbol-managed contract; verify SL/TP/trailing and manual SAVE behavior separately | CONTRACT/TEST NOT DEFINED |
 | STR-A36 | Two chart instances contend for the symbol lease during quiet quotes, restart, or local-clock adjustment | Only the CAS owner writes; stale reclaim follows the 90-second local-clock TTL without duplicate writers | SOURCE PATCHED; TEST NOT RUN |
+| STR-A37 | Pending OrderModify returns failure/timeout after server-side state may have changed | The ticket consumes its write quota before the request and receives no second geometry write in the same cycle | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
