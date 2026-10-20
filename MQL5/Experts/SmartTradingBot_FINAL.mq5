@@ -4883,7 +4883,12 @@ int STB_ExposureEnsure(const ulong ticket,const bool isPosition)
    if(idx<0)
      {
       idx=ArraySize(g_stbExposure);
-      ArrayResize(g_stbExposure,idx+1);
+      if(ArrayResize(g_stbExposure,idx+1)!=idx+1)
+        {
+         Print("STB exposure registry allocation failed ticket=",ticket,
+               " requestedSize=",idx+1);
+         return -1;
+        }
       g_stbExposure[idx].ticket=ticket;
       g_stbExposure[idx].manualOverride=false;
       g_stbExposure[idx].lastWriteCycle=0;
