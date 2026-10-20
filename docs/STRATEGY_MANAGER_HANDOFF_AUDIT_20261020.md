@@ -84,6 +84,14 @@
 
 **Disposition:** Add a regression test where candidate 1 initially clears the gap but fails final revalidation, while candidates 2 and 3 are closer than the required gap. The approved policy should either stop after the winner fails, or recompute eligibility/confidence from the remaining freshly validated candidates before considering a fallback. Do not treat the original `CLEAR` value as proof that every fallback is clear.
 
+### STR-AUD-09 — Local FVG and OB are not proven to belong to one common displacement/BOS event
+
+**Evidence:** `FindFVG()` restricts its impulse candle to within two shifts of `bosShift`. `FindOriginCandle()` searches backward from `bosShift` across the configured pattern window and accepts an opposite candle when the immediately following displacement candle closes beyond that opposite candle. The shown OB predicate does not explicitly require that the displacement candle break the same `breakSwing.price` that `DetectStructure()` identified, nor does it return a shared impulse/event identifier that can be compared with the FVG.
+
+**Impact:** A setup can potentially combine an FVG near the BOS with an OB that passes its local displacement predicate but is not explicitly proven to originate from the same structure-break sequence. Whether that is unacceptable depends on the intended pattern definition; static inspection alone does not establish how often such combinations occur.
+
+**Disposition:** Make the confluence contract explicit: if FVG and OB must belong to the same impulse, record the impulse/event identity and test that relationship; if independent but nearby zones are allowed, document the permitted temporal/spatial relationship and test its boundaries. Do not tighten the pattern rule without an approved definition.
+
 ## Required test cases
 
 | ID | Scenario | Expected result | Status |
@@ -104,6 +112,7 @@
 | STR-A14 | Final revalidation rejects a previously ranked candidate | Rejected candidate is not submitted; rejection stage/reason is logged | NOT RUN |
 | STR-A15 | Wall-clock time crosses a session gap while few/no M15 bars form | Setup-age behavior matches the documented age definition | NOT RUN |
 | STR-A16 | Top candidate fails final validation; fallback is close to runner-up | Fallback is attempted only if it independently satisfies the approved confidence policy | NOT RUN |
+| STR-A17 | FVG and OB pass individually but derive from different impulses | Acceptance follows the approved shared-event or independent-zone contract | NOT RUN |
 
 ## Exit criteria
 
