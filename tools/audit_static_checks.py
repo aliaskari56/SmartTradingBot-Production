@@ -398,6 +398,10 @@ def main() -> int:
         ("manager-generated position TP uses deterministic base RR, not stale active-profile state",
          "InpMinimumRR,tp,source" in source and
          "STB_EffectiveMinimumRR(),tp,source" not in source),
+        ("every position modify attempt consumes this cycle's write budget before the broker call",
+         "STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);" in source and
+         source.index("STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);") <
+         source.index("bool ModifyPositionSL(")),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
