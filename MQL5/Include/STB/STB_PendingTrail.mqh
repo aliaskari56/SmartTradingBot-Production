@@ -557,8 +557,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    string symbol=g_stbPendingTrail[idx].symbol;
    int direction=STB_PendingTrailDirection(orderType);
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double pip=PipSize(symbol);
 
-   if(direction==0 || point<=0.0)
+   if(direction==0 || point<=0.0 || pip<=0.0)
       return true;
 
    // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
