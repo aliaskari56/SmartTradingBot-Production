@@ -325,6 +325,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A43 | Manual pending-order geometry changes while Reconcile runs before delayed `TRADE_TRANSACTION_ORDER_UPDATE` intake | Original race hypothesis is addressed by STR-A44: Reconcile now seeds geometry only when the exposure registry has no known entry baseline. Verify delayed ORDER_UPDATE still detects the change and sets override under actual event ordering | SUPERSEDED BY STR-A44 PATCH; RUNTIME TEST NOT RUN |
 | STR-A42 | Pending trail lifecycle after fill/cancel/delete or ownership loss | ManageOne deactivates state when OrderSelect fails, order is no longer managed, type changes, or symbol differs; process prunes inactive records; verify transaction ordering, position handoff, and repeated restart/reconciliation with functional tests | SOURCE PATH REVIEWED; TEST NOT RUN |
 
+| STR-A46 | Exposure registry allocation fails under memory/resource pressure | `STB_ExposureEnsure()` now checks `ArrayResize()` and returns `-1` with a diagnostic instead of indexing a potentially unallocated slot; callers must tolerate the failure and avoid partial state transitions | SOURCE PATCHED/FETCH-BACK VERIFIED; COMPILE/RUNTIME TEST PENDING |
+
 ## Exit criteria
 
 - Decide and document CHoCH/BOS semantics before changing structure behavior.
