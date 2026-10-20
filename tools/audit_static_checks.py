@@ -384,6 +384,11 @@ def main() -> int:
         ("managed positions and pending orders select their symbols before market-data management",
          "SymbolSelect(symbol,true)" in source[source.index("void ManagePositions()"):source.index("void ManagePendingOrders()")] and
          "SymbolSelect(symbol,true)" in source[source.index("void ManagePendingOrders()"):source.index("double DirectionExposureVolume(")]),
+        ("scanner rejects excessive spread relative to M15 ATR before score ranking",
+         "InpMaxRelativeSpreadPct   = 10.0" in source and
+         'q.reason="REJECT_RELATIVE_SPREAD";' in source and
+         "q.relativeSpread>InpMaxRelativeSpreadPct" in source and
+         "!MathIsValidNumber(InpMaxRelativeSpreadPct)" in source),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
