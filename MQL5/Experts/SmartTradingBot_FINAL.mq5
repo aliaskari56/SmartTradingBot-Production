@@ -91,10 +91,17 @@ input double  InpMinimumRR              = 1.0;
 input int     InpMaxPendingBars         = 4;
 
 input group "=== FVG / OB ==="
-input bool    InpRequireFVG             = true;
-input bool    InpRequireOB              = true;
-input bool    InpStrictPatternFilters   = false; // true = FVG/OB mandatory; false = quality score only
+input bool    InpRequireFVG             = true;   // hard gate: missing local M15 FVG rejects the setup
+input bool    InpRequireOB              = true;   // hard gate: missing local M15 Order Block rejects the setup
+input bool    InpStrictPatternFilters   = false;  // legacy compatibility; true forces both local pattern gates
 input int     InpPatternWindowBars      = 12;
+input bool    InpRequireH4TrendAlignment = true;  // reject missing/contrary H4 directional context
+input bool    InpRequireHTFConfluence   = true;   // require valid higher-timeframe FVG + Order Block confluence
+input ENUM_TIMEFRAMES InpHTFPatternTF   = PERIOD_H1;
+input int     InpHTFLookbackBars        = 120;
+input int     InpHTFMaxZoneAgeBars      = 48;
+input double  InpHTFZoneMaxGapATR       = 0.50;   // allowed zone gap as a multiple of HTF ATR
+input double  InpHTFMinFVGWidthATR      = 0.05;   // reject near-zero-width HTF imbalances
 
 input group "=== PROFIT PROTECTION ==="
 input double  InpManualSaveStepPips     = 20.0;
@@ -112,8 +119,11 @@ input double  InpTrendlineTolerancePips = 10.0;
 
 input group "=== TRAILING ==="
 input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
-input double  InpTrailStartPips         = 150.0;
-input double  InpLiveTrailDistancePips   = 30.0;  // live trailing distance after +InpTrailStartPips, manual + EA
+input bool    InpUseStructuralTrailing  = true;  // use confirmed swing structure instead of live-price distance
+input double  InpStructuralTrailStartATR = 1.0;  // favorable move required before structural trailing starts
+input double  InpStructuralTrailBufferATR = 0.15; // SL buffer outside a confirmed swing
+input double  InpTrailStartPips         = 150.0;  // used only when structural trailing is disabled
+input double  InpLiveTrailDistancePips   = 30.0;  // legacy live-distance trail when structural mode is disabled
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
 bool g_modifyWasNoChanges=false;
@@ -3055,6 +3065,298 @@ bool FindOriginCandle(const string symbol,
   }
 
 //==================================================================
+// HIGHER-TIMEFRAME FVG + ORDER-BLOCK CONFLUENCE
+// All pattern decisions use closed candles and enforce confirmation time
+// against the latest closed M15 decision candle. No forming/future candle
+// is allowed to confirm a zone.
+//==================================================================
+
+bool STB_HTFPivotAtImpulse(const MqlRates &rates[],
+                           const int pivotShift,
+                           const bool wantHigh,
+                           const int leftBars,
+                           const int rightBars,
+                           const int impulseShift)
+  {
+   int n=ArraySize(rates);
+   if(pivotShift<1 || leftBars<1 || rightBars<1 ||
+      pivotShift+leftBars>=n ||
+      pivotShift-rightBars<=impulseShift)
+      return false; // pivot confirmation must predate the impulse candle
+
+   double pivot=(wantHigh ? rates[pivotShift].high:rates[pivotShift].low);
+   if(pivot<=0.0)
+      return false;
+
+   for(int k=1;k<=leftBars;k++)
+     {
+      if(wantHigh && pivot<=rates[pivotShift+k].high)
+         return false;
+      if(!wantHigh && pivot>=rates[pivotShift+k].low)
+         return false;
+     }
+   for(int k=1;k<=rightBars;k++)
+     {
+      if(wantHigh && pivot<=rates[pivotShift-k].high)
+         return false;
+      if(!wantHigh && pivot>=rates[pivotShift-k].low)
+         return false;
+     }
+   return true;
+  }
+
+bool STB_HTFImpulseBrokePriorSwing(const MqlRates &rates[],
+                                  const int impulseShift,
+                                  const int direction,
+                                  const int leftBars,
+                                  const int rightBars)
+  {
+   int n=ArraySize(rates);
+   if(impulseShift<1 || (direction!=1 && direction!=-1))
+      return false;
+
+   // Smallest eligible shift = most recent prior swing whose right-side
+   // confirmation candles had all closed before this impulse opened.
+   for(int p=impulseShift+rightBars+1;p+leftBars<n;p++)
+     {
+      if(direction>0 && STB_HTFPivotAtImpulse(rates,p,true,leftBars,rightBars,impulseShift))
+         return rates[impulseShift].close>rates[p].high;
+      if(direction<0 && STB_HTFPivotAtImpulse(rates,p,false,leftBars,rightBars,impulseShift))
+         return rates[impulseShift].close<rates[p].low;
+     }
+   return false;
+  }
+
+double STB_RangeGap(const double lowA,const double highA,
+                    const double lowB,const double highB)
+  {
+   if(lowA<=0.0 || highA<lowA || lowB<=0.0 || highB<lowB)
+      return DBL_MAX;
+   if(highA<lowB)
+      return lowB-highA;
+   if(highB<lowA)
+      return lowA-highB;
+   return 0.0;
+  }
+
+bool STB_CheckHTFConfluence(const string symbol,
+                            const int direction,
+                            const datetime decisionTime,
+                            const double m15OriginLow,
+                            const double m15OriginHigh,
+                            string &reason)
+  {
+   reason="HTF_CONFLUENCE_UNAVAILABLE";
+   if(symbol=="" || (direction!=1 && direction!=-1) ||
+      decisionTime<=0 || m15OriginLow<=0.0 ||
+      m15OriginHigh<m15OriginLow)
+     {
+      reason="HTF_INPUT_INVALID";
+      return false;
+     }
+
+   int tfSeconds=PeriodSeconds(InpHTFPatternTF);
+   if(tfSeconds<PeriodSeconds(PERIOD_H1))
+     {
+      reason="HTF_TIMEFRAME_MUST_BE_H1_OR_HIGHER";
+      return false;
+     }
+
+   int requestedBars=(int)MathMax(64,InpHTFLookbackBars+32);
+   MqlRates r[];
+   if(!GetRates(symbol,InpHTFPatternTF,requestedBars,r))
+     {
+      reason="HTF_DATA_UNAVAILABLE";
+      return false;
+     }
+
+   double currentATR=LocalATR(r,1,14);
+   if(currentATR<=0.0 || !MathIsValidNumber(currentATR))
+     {
+      reason="HTF_ATR_UNAVAILABLE";
+      return false;
+     }
+
+   int maxShift=(int)MathMin(InpHTFLookbackBars,ArraySize(r)-3);
+   if(maxShift<3)
+     {
+      reason="HTF_LOOKBACK_UNAVAILABLE";
+      return false;
+     }
+
+   double fvgLow=0.0,fvgHigh=0.0;
+   datetime fvgConfirmedAt=0;
+   bool haveFVG=false;
+
+   // Three-candle FVG: the middle candle must show displacement and the
+   // newest candle must be fully closed by decisionTime.
+   for(int s=1;s<=maxShift;s++)
+     {
+      int impulse=s+1;
+      datetime confirmedAt=r[s].time+tfSeconds;
+      if(r[s].time<=0 || confirmedAt>decisionTime)
+         continue;
+
+      int ageBars=(int)((decisionTime-confirmedAt)/tfSeconds);
+      if(ageBars<0 || ageBars>InpHTFMaxZoneAgeBars)
+         continue;
+
+      double zoneLow=0.0,zoneHigh=0.0,zoneATR=LocalATR(r,s+1,20);
+      if(zoneATR<=0.0)
+         continue;
+
+      if(direction>0)
+        {
+         zoneLow=r[s+2].high;
+         zoneHigh=r[s].low;
+         if(zoneHigh<=zoneLow ||
+            zoneHigh-zoneLow+1e-9<zoneATR*InpHTFMinFVGWidthATR ||
+            !IsBullishDisplacement(r,impulse))
+            continue;
+        }
+      else
+        {
+         zoneLow=r[s].high;
+         zoneHigh=r[s+2].low;
+         if(zoneHigh<=zoneLow ||
+            zoneHigh-zoneLow+1e-9<zoneATR*InpHTFMinFVGWidthATR ||
+            !IsBearishDisplacement(r,impulse))
+            continue;
+        }
+
+      bool fullyMitigated=false;
+      for(int j=s-1;j>=1;j--)
+        {
+         if(r[j].time+tfSeconds>decisionTime)
+            continue;
+         if(direction>0 && r[j].low<=zoneLow)
+           {
+            fullyMitigated=true;
+            break;
+           }
+         if(direction<0 && r[j].high>=zoneHigh)
+           {
+            fullyMitigated=true;
+            break;
+           }
+        }
+      if(fullyMitigated)
+         continue;
+
+      fvgLow=zoneLow;
+      fvgHigh=zoneHigh;
+      fvgConfirmedAt=confirmedAt;
+      haveFVG=true;
+      break; // latest valid, unmitigated FVG first
+     }
+
+   if(!haveFVG)
+     {
+      reason="HTF_FVG_MISSING_STALE_OR_MITIGATED";
+      return false;
+     }
+
+   double obLow=0.0,obHigh=0.0;
+   datetime obConfirmedAt=0;
+   bool haveOB=false;
+   int leftBars=MathMax(1,InpSwingLeft);
+   int rightBars=MathMax(1,InpSwingRight);
+   int maxOBShift=(int)MathMin(InpHTFLookbackBars,ArraySize(r)-2);
+
+   // Order Block: most recent opposite candle immediately preceding a
+   // directional displacement that closes beyond both the block and the
+   // most recent *already confirmed* prior swing.
+   for(int s=2;s<=maxOBShift;s++)
+     {
+      int impulse=s-1;
+      datetime confirmedAt=r[impulse].time+tfSeconds;
+      if(r[s].time<=0 || confirmedAt>decisionTime)
+         continue;
+
+      int ageBars=(int)((decisionTime-confirmedAt)/tfSeconds);
+      if(ageBars<0 || ageBars>InpHTFMaxZoneAgeBars)
+         continue;
+
+      bool opposite=(direction>0)
+                    ? (r[s].close<r[s].open)
+                    : (r[s].close>r[s].open);
+      if(!opposite)
+         continue;
+
+      bool displacement=(direction>0)
+                        ? IsBullishDisplacement(r,impulse)
+                        : IsBearishDisplacement(r,impulse);
+      if(!displacement)
+         continue;
+
+      bool closesBeyondBlock=(direction>0)
+                             ? (r[impulse].close>r[s].high)
+                             : (r[impulse].close<r[s].low);
+      if(!closesBeyondBlock ||
+         !STB_HTFImpulseBrokePriorSwing(r,impulse,direction,leftBars,rightBars))
+         continue;
+
+      double zoneLow=r[s].low;
+      double zoneHigh=r[s].high;
+      bool invalidated=false;
+      for(int j=impulse-1;j>=1;j--)
+        {
+         if(r[j].time+tfSeconds>decisionTime)
+            continue;
+         if(direction>0 && r[j].close<zoneLow)
+           {
+            invalidated=true;
+            break;
+           }
+         if(direction<0 && r[j].close>zoneHigh)
+           {
+            invalidated=true;
+            break;
+           }
+        }
+      if(invalidated)
+         continue;
+
+      obLow=zoneLow;
+      obHigh=zoneHigh;
+      obConfirmedAt=confirmedAt;
+      haveOB=true;
+      break; // latest valid, non-invalidated OB first
+     }
+
+   if(!haveOB)
+     {
+      reason="HTF_ORDER_BLOCK_MISSING_STALE_OR_INVALIDATED";
+      return false;
+     }
+
+   // The local M15 OB origin must be near both independently validated H1
+   // zones; simple score bonuses cannot compensate for absent confluence.
+   double allowedGap=currentATR*InpHTFZoneMaxGapATR;
+   double fvgGap=STB_RangeGap(m15OriginLow,m15OriginHigh,fvgLow,fvgHigh);
+   double obGap=STB_RangeGap(m15OriginLow,m15OriginHigh,obLow,obHigh);
+   double zoneGap=STB_RangeGap(fvgLow,fvgHigh,obLow,obHigh);
+   if(fvgGap>allowedGap || obGap>allowedGap || zoneGap>allowedGap)
+     {
+      reason="HTF_FVG_OB_M15_ORIGIN_NOT_CONFLUENT";
+      return false;
+     }
+
+   // Times are retained in diagnostics so future refinements can inspect
+   // the age relationship without relying on chart screenshots.
+   Print("STB HTF CONFLUENCE PASS symbol=",symbol,
+         " direction=",(direction>0 ? "BUY":"SELL"),
+         " tf=",EnumToString(InpHTFPatternTF),
+         " fvgFrom=",TimeToString(fvgConfirmedAt,TIME_DATE|TIME_MINUTES),
+         " obFrom=",TimeToString(obConfirmedAt,TIME_DATE|TIME_MINUTES),
+         " fvgGapATR=",DoubleToString(fvgGap/currentATR,3),
+         " obGapATR=",DoubleToString(obGap/currentATR,3),
+         " zonesGapATR=",DoubleToString(zoneGap/currentATR,3));
+   reason="";
+   return true;
+  }
+
+//==================================================================
 // SETUP BUILDER
 //==================================================================
 
@@ -3185,6 +3487,10 @@ bool BuildSetup(const string symbol,
       ((direction>0 && ti.bias=="BULLISH") ||
        (direction<0 && ti.bias=="BEARISH"));
 
+   if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))
+      return STB_BuildReject(symbol,direction,
+                             ti.valid ? "H4_DIRECTION_MISMATCH" : "H4_TREND_UNAVAILABLE");
+
    if(!aligned && !InpAllowUniversal)
       return STB_BuildReject(symbol,direction,"H4_ALIGNMENT_REQUIRED");
 
@@ -3203,8 +3509,8 @@ bool BuildSetup(const string symbol,
    int fvgShift=-1;
    bool hasFVG=FindFVG(symbol,direction,bosShift,fvgShift);
 
-   if(InpStrictPatternFilters && InpRequireFVG && !hasFVG)
-      return STB_BuildReject(symbol,direction,"FVG_REQUIRED");
+   if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)
+      return STB_BuildReject(symbol,direction,"M15_FVG_REQUIRED");
 
    int originShift=-1;
    double originHigh=0.0;
@@ -3214,11 +3520,25 @@ bool BuildSetup(const string symbol,
                                bosShift,originShift,
                                originHigh,originLow);
 
-   if(InpStrictPatternFilters && InpRequireOB && !hasOB)
-      return STB_BuildReject(symbol,direction,"OB_REQUIRED");
+   if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)
+      return STB_BuildReject(symbol,direction,"M15_ORDER_BLOCK_REQUIRED");
 
-   // If OB is optional and none is found, use the confirmed break swing as
-   // the structural fallback. The mandatory-OB case already rejected above.
+   if(InpRequireHTFConfluence)
+     {
+      datetime latestClosedM15=iTime(symbol,PERIOD_M15,1);
+      int m15Seconds=PeriodSeconds(PERIOD_M15);
+      if(latestClosedM15<=0 || m15Seconds<=0)
+         return STB_BuildReject(symbol,direction,"M15_DECISION_TIME_UNAVAILABLE");
+
+      datetime decisionTime=latestClosedM15+m15Seconds;
+      string htfReason="";
+      if(!STB_CheckHTFConfluence(symbol,direction,decisionTime,
+                                  originLow,originHigh,htfReason))
+         return STB_BuildReject(symbol,direction,htfReason);
+     }
+
+   // If local OBs are explicitly optional and HTF confluence is disabled,
+   // retain the historical structural fallback for compatibility.
    if(!hasOB)
      {
       originShift=breakSwing.shift;
@@ -5456,8 +5776,174 @@ void ManualSavePlus20()
    Print("STB SAVE +20 executed for managed positions count=",managed);
   }
 
+// Rate-limit structural-trailing WAIT messages per position.
+void STB_StructuralTrailWaitLog(const ulong ticket,
+                                const string reason,
+                                const double movePips,
+                                const double atr)
+  {
+   if(ticket==0 || reason=="")
+      return;
+   string key=ScopedStateName("STRUCTTRAIL_WAIT_"+(string)ticket);
+   datetime now=TimeCurrent();
+   if(GlobalVariableCheck(key) &&
+      now-(datetime)GlobalVariableGet(key)<60)
+      return;
+   GlobalVariableSet(key,(double)now);
+   string symbol="";
+   long side=-1;
+   if(PositionSelectByTicket(ticket))
+     {
+      symbol=PositionGetString(POSITION_SYMBOL);
+      side=PositionGetInteger(POSITION_TYPE);
+     }
+   Print("STB STRUCTURAL TRAIL WAIT ticket=",ticket,
+         " symbol=",symbol,
+         " side=",(side==POSITION_TYPE_BUY ? "BUY":
+                   side==POSITION_TYPE_SELL ? "SELL":"UNKNOWN"),
+         " reason=",reason,
+         " movePips=",DoubleToString(movePips,1),
+         " atr=",DoubleToString(atr,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " tf=",EnumToString(InpTrailTF));
+  }
+
+bool STB_CalculateStructuralTrailSL(const ulong ticket,
+                                    double &candidate,
+                                    string &reason,
+                                    double &atrOut)
+  {
+   candidate=0.0;
+   atrOut=0.0;
+   reason="STRUCTURAL_TRAIL_UNAVAILABLE";
+   if(ticket==0 || !STB_IsProtectionPosition(ticket) ||
+      !PositionSelectByTicket(ticket))
+     {
+      reason="POSITION_NOT_AVAILABLE";
+      return false;
+     }
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long side=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   if(entry<=0.0 || currentSL<=0.0)
+     {
+      reason="NO_INITIAL_SL";
+      return false; // initial SL must be confirmed before trailing can run
+     }
+
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double pip=PipSize(symbol);
+   double minDist=TradeMinDistance(symbol);
+   if(point<=0.0 || pip<=0.0 || minDist<=0.0)
+     {
+      reason="BROKER_GEOMETRY_UNAVAILABLE";
+      return false;
+     }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+     {
+      reason="LIVE_QUOTE_UNAVAILABLE";
+      return false;
+     }
+
+   int lookback=MathMax(80,InpLookbackM15);
+   MqlRates rates[];
+   if(!GetRates(symbol,InpTrailTF,lookback,rates))
+     {
+      reason="TRAIL_TIMEFRAME_DATA_UNAVAILABLE";
+      return false;
+     }
+
+   double atr=LocalATR(rates,1,14);
+   atrOut=atr;
+   if(atr<=0.0 || !MathIsValidNumber(atr))
+     {
+      reason="TRAIL_ATR_UNAVAILABLE";
+      return false;
+     }
+
+   double movePips=STB_PositionPriceMovePips(ticket);
+   double movePrice=movePips*pip;
+   if(movePrice<atr*InpStructuralTrailStartATR)
+     {
+      reason="ATR_ACTIVATION_NOT_REACHED";
+      return false;
+     }
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+   if(CollectSwings(symbol,InpTrailTF,lookback,highs,lows)<=0)
+     {
+      reason="CONFIRMED_SWINGS_UNAVAILABLE";
+      return false;
+     }
+
+   double buffer=MathMax(InpInitialSLBufferPips*pip,
+                         atr*InpStructuralTrailBufferATR);
+   double step=MathMax(0.0,InpTrailStepPips)*pip;
+   double locked=GetLockedPips(ticket);
+
+   if(side==POSITION_TYPE_BUY)
+     {
+      // CollectSwings returns older-to-newer pivots; inspect newest first.
+      for(int i=ArraySize(lows)-1;i>=0;i--)
+        {
+         double swing=lows[i].price;
+         if(swing<=0.0 || swing>=tick.bid)
+            continue;
+         double next=NormalizePrice(symbol,swing-buffer);
+         if(next<=0.0 || next>=tick.bid-minDist)
+            continue;
+         if(locked>0.0)
+            next=MathMax(next,NormalizePrice(symbol,entry+locked*pip));
+         if(next<=entry || (currentSL>0.0 && next<=currentSL))
+            continue;
+         if(currentSL>0.0 && next-currentSL+point*0.1<step)
+            continue;
+         if(!IsValidSLForPosition(symbol,side,next))
+            continue;
+         candidate=next;
+         reason="";
+         return true;
+        }
+     }
+   else if(side==POSITION_TYPE_SELL)
+     {
+      for(int i=ArraySize(highs)-1;i>=0;i--)
+        {
+         double swing=highs[i].price;
+         if(swing<=tick.ask)
+            continue;
+         double next=NormalizePrice(symbol,swing+buffer);
+         if(next<=tick.ask+minDist)
+            continue;
+         if(locked>0.0)
+            next=MathMin(next,NormalizePrice(symbol,entry-locked*pip));
+         if(next>=entry || (currentSL>0.0 && next>=currentSL))
+            continue;
+         if(currentSL>0.0 && currentSL-next+point*0.1<step)
+            continue;
+         if(!IsValidSLForPosition(symbol,side,next))
+            continue;
+         candidate=next;
+         reason="";
+         return true;
+        }
+     }
+   else
+     {
+      reason="UNSUPPORTED_POSITION_SIDE";
+      return false;
+     }
+
+   reason="NO_CONFIRMED_SWING_CAN_IMPROVE_VALID_SL";
+   return false;
+  }
+
 //==================================================================
-// M15 CLOSED-CANDLE TRAILING
+// M15 CLOSED-CANDLE / STRUCTURAL TRAILING
 //==================================================================
 
 //+------------------------------------------------------------------+
@@ -5482,6 +5968,31 @@ bool TrailPositionByLivePrice(const ulong ticket)
       return false;
 
    double profit=STB_PositionPriceMovePips(ticket);
+
+   if(InpUseStructuralTrailing)
+     {
+      double structuralSL=0.0;
+      double trailATR=0.0;
+      string waitReason="";
+      if(!STB_CalculateStructuralTrailSL(ticket,structuralSL,waitReason,trailATR))
+        {
+         STB_StructuralTrailWaitLog(ticket,waitReason,profit,trailATR);
+         return false;
+        }
+
+      // All automatic stop candidates still go through the existing shared
+      // proposal queue/resolver; never bypass SL arbitration or its broker checks.
+      bool submitted=STB_SubmitPositionSL(ticket,structuralSL,
+                                          STB_SL_SRC_TRAIL,"STRUCTURAL_TRAIL");
+      if(submitted && !g_stbCollectingSLProposals)
+         Print("STB STRUCTURAL TRAIL submitted ticket=",ticket,
+               " symbol=",symbol,
+               " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+               " movePips=",DoubleToString(profit,1),
+               " atr=",DoubleToString(trailATR,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " SL=",DoubleToString(structuralSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return submitted;
+     }
 
    if(profit < InpTrailStartPips)
       return false;
@@ -8647,14 +9158,21 @@ bool ValidateInputs()
       InpMinimumRR<=0.0 ||
       InpMaxPendingBars<0)
       return false;
-   if(InpPatternWindowBars<1)
+   if(InpPatternWindowBars<1 ||
+      InpHTFLookbackBars<60 ||
+      InpHTFMaxZoneAgeBars<1 ||
+      PeriodSeconds(InpHTFPatternTF)<PeriodSeconds(PERIOD_H1) ||
+      InpHTFZoneMaxGapATR<0.0 ||
+      InpHTFMinFVGWidthATR<0.0)
       return false;
    if(InpManualSaveStepPips<0.0)
       return false;
    if(InpTrendlineTolerancePips<0.0 ||
        InpTrailStartPips<0.0 ||
        InpLiveTrailDistancePips<0.0 ||
-       InpTrailStepPips<0.0)
+       InpTrailStepPips<0.0 ||
+       InpStructuralTrailStartATR<=0.0 ||
+       InpStructuralTrailBufferATR<0.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
@@ -8699,9 +9217,13 @@ bool ValidateInputs()
       !MathIsValidNumber(InpMinimumRR) ||
       !MathIsValidNumber(InpManualSaveStepPips) ||
       !MathIsValidNumber(InpTrendlineTolerancePips) ||
+      !MathIsValidNumber(InpHTFZoneMaxGapATR) ||
+      !MathIsValidNumber(InpHTFMinFVGWidthATR) ||
       !MathIsValidNumber(InpTrailStartPips) ||
       !MathIsValidNumber(InpLiveTrailDistancePips) ||
       !MathIsValidNumber(InpTrailStepPips) ||
+      !MathIsValidNumber(InpStructuralTrailStartATR) ||
+      !MathIsValidNumber(InpStructuralTrailBufferATR) ||
       !MathIsValidNumber(InpRiskPercent) ||
       !MathIsValidNumber(InpMaxRiskVolume) ||
       !MathIsValidNumber(InpBaseLots) ||
@@ -8809,6 +9331,14 @@ int OnInit()
          " strictFVGOB=",InpStrictPatternFilters ? "ON":"OFF",
          " requireFVG=",InpRequireFVG ? "ON":"OFF",
          " requireOB=",InpRequireOB ? "ON":"OFF",
+         " requireH4Align=",InpRequireH4TrendAlignment ? "ON":"OFF",
+         " requireHTFConfluence=",InpRequireHTFConfluence ? "ON":"OFF",
+         " htfTF=",EnumToString(InpHTFPatternTF),
+         " htfLookback=",IntegerToString(InpHTFLookbackBars),
+         " htfMaxAge=",IntegerToString(InpHTFMaxZoneAgeBars),
+         " structuralTrail=",InpUseStructuralTrailing ? "ON":"OFF",
+         " structuralTrailStartATR=",DoubleToString(InpStructuralTrailStartATR,2),
+         " structuralTrailBufferATR=",DoubleToString(InpStructuralTrailBufferATR,2),
          " maxSpreadPips=",DoubleToString(InpMaxSpreadPips,1),
          " adaptiveHalfLifeDays=",DoubleToString(InpAdaptiveHalfLifeDays,1),
          " RSIperiod=",IntegerToString(InpRSIPeriod),
