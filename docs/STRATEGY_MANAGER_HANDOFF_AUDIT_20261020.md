@@ -382,3 +382,11 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Correction:** Final revalidation now recomputes the M15 bar shift from the refreshed setup timestamp, rejects unavailable age data, recalculates `setupAgeBars`, and applies `STB_EffectiveMaxSetupAgeBars()` before pending geometry validation. The rejection reason is `REJECT_SETUP_TOO_OLD`. A static-audit regression assertion checks that this gate precedes geometry validation.
 
 **Verification status:** Source commit `fab942eec60775c8e1838352fc4329f11bf06835`; the final integrated source including this gate was fetched back at blob `21b834d0c33302e59dcbdd4c5ddf511de7c6c295`. Regression assertion is included in validation commit `6a27377536e1f5cc7220a0ceb10bc6310f38fa70`. MetaEditor compile passed with 0 errors/0 warnings; static audit and safety-default checks passed. Runtime scanner-to-execution age-boundary test NOT RUN.
+
+### STR-A58 — Remaining diagnostic, indicator-cache, and swing-buffer appends were unchecked
+
+**Evidence:** Source review found additional dynamic-array writes outside the scanner and previously hardened Exposure/Pending Trail/SL queue paths: setup diagnostic state, indicator handle cache, and swing-high/swing-low collection. Allocation failure could lead to indexing beyond the allocated array; indicator-cache failure could also leak newly created handles.
+
+**Correction:** Both diagnostic writers now return after a logged resize failure. Indicator-cache insertion releases newly created RSI/CCI handles and returns false when the cache cannot grow. Swing-buffer reset and append operations are checked; any append failure clears both swing arrays and returns no swing data. Lease-symbol tracking now logs allocation failure and relies on its bounded lease timeout for cleanup.
+
+**Verification status:** Source commit `11a73aa6bc4bc5511117deb1f7db64e1e000a03f`; fetch-back and exact-source compile/static/safety validation pending. Regression assertions added in static-audit commit `35e5284690ac0495335f0d2498a7e60dcd95c1e2`. Runtime allocation-fault injection NOT RUN.
