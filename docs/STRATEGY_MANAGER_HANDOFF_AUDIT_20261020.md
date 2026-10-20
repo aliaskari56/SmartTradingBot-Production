@@ -216,6 +216,16 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Disposition:** Add tests for multiple partial exits, duplicate/replayed close processing, delayed deal events, restart between accumulation and consumption, and repeated history reconciliation. If duplicate processing is in scope, persist a per-deal/per-lifecycle idempotency marker before updating learner statistics.
 
+### STR-AUD-28 — Fallback candidate could inherit confidence clearance from the original winner
+
+**Evidence:** Before the source correction, `STB_ExecuteTopCandidate()` checked `g_scannerConfidence` once against the first two candidates, then iterated through Top-N and could continue to a lower-ranked candidate after an earlier candidate failed final revalidation or the final gate. The fallback's own score gap against the next revalidated watchlist candidate was not checked at that point.
+
+**Impact:** The fallback could be submitted even though it did not independently satisfy the configured top-gap confidence rule. This is a confirmed control-flow inconsistency in the inspected source, not a claim about trade outcomes.
+
+**Correction:** Commit `e2b9bffc3eeb3dbf6682ce42f3fb9556e065c28a` adds a per-fallback check against the revalidated watchlist. If the candidate is missing from that list or does not independently satisfy the score/gap rule, execution stops rather than continuing to a lower candidate. The original top candidate continues to rely on the existing global confidence gate.
+
+**Verification status:** Source change was fetched back from GitHub and its presence confirmed. Compile and runtime tests have not yet been run; this is not a claim of compile or behavioral validation.
+
 ### STR-AUD-27 — Watchlist reranking refreshes market/regime inputs but carries forward the initial stability score
 
 **Evidence:** During initial candidate discovery, `STB_CandidateStability()` computes `stabilityScore` using the preliminary score and previous score/rank. During watchlist revalidation, the code refreshes setup, market-quality score, and regime score, then recalculates `opportunityScore`; it does not recompute `stabilityScore` using the refreshed inputs before sorting the watchlist again.
@@ -266,6 +276,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A28 | Missing profile/risk state during delayed fill or after restart | Invalid profile is excluded and unavailable R is never fabricated | NOT RUN |
 | STR-A29 | Partial exits, duplicate close processing, and restart between PnL accumulation/consume | Closed-lifecycle PnL and adaptive observations are idempotent | NOT RUN |
 | STR-A30 | Watchlist revalidation changes market-quality/regime scores after initial stability calculation | Final ranking follows the documented stability-score contract | NOT RUN |
+| STR-A31 | Top candidate fails final validation while fallback has insufficient gap to next candidate | Fallback is blocked; no candidate with uncleared confidence is submitted | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
