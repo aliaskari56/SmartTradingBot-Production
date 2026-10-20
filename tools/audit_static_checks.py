@@ -159,6 +159,14 @@ def main() -> int:
     final_revalidation = source_region(
         source, "bool STB_FinalCandidateRevalidation(",
         "// Serialize final scanner revalidation/submission")
+    collect_swings = source_region(
+        source, "int CollectSwings(", "// H4 TREND")
+    indicator_cache = source_region(
+        source, "bool EnsureIndicatorHandles(", "// SWING ENGINE")
+    diagnostic_reject = source_region(
+        source, "void STB_LogBuildReject(", "void STB_LogSetupReady(")
+    diagnostic_ready = source_region(
+        source, "void STB_LogSetupReady(", "//+------------------------------------------------------------------+")
     initial_pending_sl = source_region(
         source, "bool CalculateInitialPendingProtectionSL(",
         "bool VerifyPendingInitialSL(")
@@ -229,6 +237,26 @@ def main() -> int:
           'c.rejectReason="REJECT_SETUP_TOO_OLD";' in final_revalidation and
           final_revalidation.index("if(effectiveMaxAge>0 && c.setupAgeBars>effectiveMaxAge)") <
           final_revalidation.index("if(!ValidatePendingSetup(refreshed))")),
+        ("diagnostic state arrays check allocation before indexing",
+          "if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)" in diagnostic_reject and
+          "if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)" in diagnostic_ready and
+          "diagnostic state allocation failed" in diagnostic_reject and
+          "ready-state diagnostic allocation failed" in diagnostic_ready),
+        ("indicator cache allocation releases newly created handles on failure",
+          "if(ArrayResize(g_indicatorCache,n+1)!=n+1)" in indicator_cache and
+          indicator_cache.index("IndicatorRelease(hRsi);") <
+          indicator_cache.index("return false;") and
+          indicator_cache.index("IndicatorRelease(hCci);") <
+          indicator_cache.index("return false;")),
+        ("swing collection fails closed on reset or append allocation failure",
+          "if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)" in collect_swings and
+          "if(ArrayResize(highs,n+1)!=n+1)" in collect_swings and
+          "if(ArrayResize(lows,n+1)!=n+1)" in collect_swings and
+          collect_swings.count("ArrayFree(highs);") >= 2 and
+          collect_swings.count("ArrayFree(lows);") >= 2),
+        ("management lease tracking allocation failure is diagnosed",
+          "if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)" in source and
+          "STB management lease tracking allocation failed" in source),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
