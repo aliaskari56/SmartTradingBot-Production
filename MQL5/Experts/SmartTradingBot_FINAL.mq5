@@ -1897,6 +1897,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
+   if(STB_ExposureEnsure(ticket,false)<0)
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return false;
+     }
    if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
 
    //--- P4 central writer: verify symbol, re-read geometry, validate
@@ -5445,6 +5451,13 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
    if(ticket==0 || !PositionSelectByTicket(ticket) ||
       !STB_IsProtectionPosition(ticket))
       return false;
+
+   if(STB_ExposureEnsure(ticket,true)<0)
+     {
+      Print("STB POSITION MODIFY DEFERRED ticket=",ticket,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return false;
+     }
 
    string symbol=PositionGetString(POSITION_SYMBOL);
    if(symbol=="" || !STB_SymbolManagementOwnedVerified(symbol))
