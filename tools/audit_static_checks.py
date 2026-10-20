@@ -159,6 +159,8 @@ def main() -> int:
     final_revalidation = source_region(
         source, "bool STB_FinalCandidateRevalidation(",
         "// Serialize final scanner revalidation/submission")
+    place_setup = source_region(
+        source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
     indicator_cache = source_region(
@@ -263,6 +265,19 @@ def main() -> int:
           "STB management lease tracking allocation failed" in source and
           source.count("if(!STB_LeaseTrackSymbol(symbol))") == 3 and
           source.count("GlobalVariableSetOnCondition(ownerKey,0.0,me);") >= 4),
+        ("order submission rechecks volatile market, geometry, volume, permissions, and ownership",
+          all(token in place_setup for token in (
+              "TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT",
+              "DIRECTION_CHANGED_BEFORE_SUBMIT",
+              "SPREAD_CHANGED_BEFORE_SUBMIT",
+              "PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT",
+              'STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetupFinal")',
+              "ENTRY_LOCK_LOST_BEFORE_SUBMIT",
+              "SYMBOL_WRITER_LEASE_LOST",
+              "MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT")) and
+          place_setup.index("PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT") <
+          place_setup.index("bool ok=false;") <
+          place_setup.index("trade.BuyStop(volume,s.entry")),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
