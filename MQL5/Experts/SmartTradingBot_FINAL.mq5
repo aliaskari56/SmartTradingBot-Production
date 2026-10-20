@@ -46,7 +46,8 @@ input double  InpCCISellLevel               = -50.0;
 input double  InpRSIWeight                  = 7.0;
 input double  InpCCIWeight                  = 8.0;
 input bool    InpOscillatorHardFilter       = false;
-input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; broker-symbol specific
+input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolute symbol-specific cap
+input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
 input bool    InpUseRiskSizing         = false; // false preserves fixed-lot mode
@@ -8573,6 +8574,15 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
       return false;
      }
 
+   // High technical scores do not override excessive transaction friction.
+   // The ATR-relative cap adapts to each symbol's current M15 volatility.
+   if(InpMaxRelativeSpreadPct>0.0 &&
+      q.relativeSpread>InpMaxRelativeSpreadPct)
+     {
+      q.reason="REJECT_RELATIVE_SPREAD";
+      return false;
+     }
+
    if(q.activityRatio<0.10)
      {
       q.reason="REJECT_ACTIVITY";
@@ -9609,6 +9619,8 @@ bool ValidateInputs()
        InpStructuralTrailBufferATR>2.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
+      InpMaxRelativeSpreadPct<0.0 ||
+      InpMaxRelativeSpreadPct>100.0 ||
       InpSetupCooldownMinutes<0 ||
       InpMaxSetupAgeBars<0 ||
       InpPipPointsOverride<0.0 ||
@@ -9634,6 +9646,7 @@ bool ValidateInputs()
       !MathIsValidNumber(InpRSIWeight) ||
       !MathIsValidNumber(InpCCIWeight) ||
       !MathIsValidNumber(InpMaxSpreadPips) ||
+      !MathIsValidNumber(InpMaxRelativeSpreadPct) ||
       !MathIsValidNumber(InpAdaptiveBaseScore) ||
       !MathIsValidNumber(InpAdaptiveMinScore) ||
       !MathIsValidNumber(InpAdaptiveMaxScore) ||
@@ -9774,6 +9787,7 @@ int OnInit()
          " structuralTrailStartATR=",DoubleToString(InpStructuralTrailStartATR,2),
          " structuralTrailBufferATR=",DoubleToString(InpStructuralTrailBufferATR,2),
          " maxSpreadPips=",DoubleToString(InpMaxSpreadPips,1),
+         " maxRelativeSpreadPct=",DoubleToString(InpMaxRelativeSpreadPct,1),
          " adaptiveHalfLifeDays=",DoubleToString(InpAdaptiveHalfLifeDays,1),
          " RSIperiod=",IntegerToString(InpRSIPeriod),
          " CCIperiod=",IntegerToString(InpCCIPeriod),
