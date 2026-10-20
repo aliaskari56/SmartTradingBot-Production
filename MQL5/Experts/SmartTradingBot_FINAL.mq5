@@ -19,7 +19,7 @@ input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
-input string  InpScannerSymbols         = "";   // empty = selected Market Watch; comma/semicolon separated
+input string  InpScannerSymbols         = "";   // empty = universal exposure management; optional comma/semicolon allow-list
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 45.0;
@@ -2126,21 +2126,9 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
 
    string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
-   // BUY STOP / SELL STOP keep their automatic M5 candle-follow even when the
-   // ticket carries MANUAL_OVERRIDE: the pending-trail module exempts exactly
-   // these two types in STB_PendingTrailManageOne() and in
-   // STB_SubmitPendingTrailGeometry(). LIMIT and STOP-LIMIT keep the pause,
-   // and every other writer path stays unchanged.
-   long stbWriteType=OrderGetInteger(ORDER_TYPE);
-   bool stbCandleStop=(stbWriteType==(long)ORDER_TYPE_BUY_STOP ||
-                       stbWriteType==(long)ORDER_TYPE_SELL_STOP);
-
-   if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)
-     {
-      STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
-                                "MANUAL_OVERRIDE");
-      return false; // MANUAL_OVERRIDE: auto modify blocked
-     }
+   // Universal manager: automatic writes remain enabled for manual/mobile
+   // orders of every supported pending type. Existing explicit TP/SL is
+   // preserved unless absent or recalculated as part of structural trailing.
    if(!STB_SymbolManagementOwnedVerified(symbol))
      {
       STB_LogPendingWriterState("BLOCKED",ticket,newEntry,newSL,newTP,
@@ -5118,7 +5106,7 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool STB_IsSymbolAllowed(const string s){ if(s=="") return false; if(s==_Symbol) return true; if(StringLen(InpScannerSymbols)==0) return false; string parts[]; string cfg=InpScannerSymbols; StringReplace(cfg,";",","); ushort sep=StringGetCharacter(",",0); int n=StringSplit(cfg,sep,parts); for(int i=0;i<n;i++){ string it=parts[i]; StringTrimLeft(it); StringTrimRight(it); if(it!="" && it==s) return true; } return false; } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
+bool STB_IsSymbolAllowed(const string s){ if(s=="") return false; if(s==_Symbol) return true; if(StringLen(InpScannerSymbols)==0) return true; string parts[]; string cfg=InpScannerSymbols; StringReplace(cfg,";",","); ushort sep=StringGetCharacter(",",0); int n=StringSplit(cfg,sep,parts); for(int i=0;i<n;i++){ string it=parts[i]; StringTrimLeft(it); StringTrimRight(it); if(it!="" && it==s) return true; } return false; } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool IsManagedPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
    return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
@@ -5750,13 +5738,12 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
      }
   }
 
-enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 }; struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; }; bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource){ finalSL=0.0; finalSource=-1; if(ticket==0||!PositionSelectByTicket(ticket)) return false; long ptype=PositionGetInteger(POSITION_TYPE); double currentSL=PositionGetDouble(POSITION_SL); bool found=false; for(int i=0;i<count;i++){ if(!props[i].valid||!props[i].hasSL) continue; double c=props[i].sl; if(c<=0.0) continue; if(ptype==POSITION_TYPE_BUY){ if(currentSL>0.0 && c<=currentSL) continue; if(!found||c>finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } else if(ptype==POSITION_TYPE_SELL){ if(currentSL>0.0 && c>=currentSL) continue; if(!found||c<finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } } return found; } bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return false; STBSLProposal props[]; ArrayResize(props,1); props[0].valid=true; props[0].hasSL=(candidateSL>0.0); props[0].sl=candidateSL; props[0].source=source; props[0].reason=reason; double finalSL=0.0; int finalSource=-1; if(!STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)) return false; return ModifyPositionSL(ticket,finalSL,isUserAction); } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; if(STB_ManualOverrideIs(ticket)) return; /* MANUAL_OVERRIDE */ string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
+enum ENUM_STB_SL_SOURCE{ STB_SL_SRC_INITIAL=0, STB_SL_SRC_PROFIT_PROTECTION=1, STB_SL_SRC_TRAIL=2 }; struct STBSLProposal{ bool valid; bool hasSL; double sl; int source; string reason; }; bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int count,double &finalSL,int &finalSource){ finalSL=0.0; finalSource=-1; if(ticket==0||!PositionSelectByTicket(ticket)) return false; long ptype=PositionGetInteger(POSITION_TYPE); double currentSL=PositionGetDouble(POSITION_SL); bool found=false; for(int i=0;i<count;i++){ if(!props[i].valid||!props[i].hasSL) continue; double c=props[i].sl; if(c<=0.0) continue; if(ptype==POSITION_TYPE_BUY){ if(currentSL>0.0 && c<=currentSL) continue; if(!found||c>finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } else if(ptype==POSITION_TYPE_SELL){ if(currentSL>0.0 && c>=currentSL) continue; if(!found||c<finalSL){ finalSL=c; finalSource=props[i].source; found=true; } } } return found; } bool STB_SubmitPositionSL(const ulong ticket,const double candidateSL,const int source,const string reason,const bool isUserAction=false){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return false; STBSLProposal props[]; ArrayResize(props,1); props[0].valid=true; props[0].hasSL=(candidateSL>0.0); props[0].sl=candidateSL; props[0].source=source; props[0].reason=reason; double finalSL=0.0; int finalSource=-1; if(!STB_ResolvePositionSL(ticket,props,1,finalSL,finalSource)) return false; return ModifyPositionSL(ticket,finalSL,isUserAction); } void STB_ProfitProtectionOne(const ulong ticket){ if(ticket==0||!PositionSelectByTicket(ticket)||!IsManagedPosition(ticket)) return; string symbol=PositionGetString(POSITION_SYMBOL); long type=PositionGetInteger(POSITION_TYPE); double profit=PositionNetProfitPips(ticket); double locked=GetLockedPips(ticket); double triggerPips=STB_ProfitLockTriggerPips(); double lockPips=STB_ProfitLockLockPips(); if(profit>=triggerPips && locked<lockPips){ Print("STB AUTO PROFIT LOCK TRIGGER ticket=",ticket," symbol=",symbol," side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL")," profitPips=",DoubleToString(profit,1)," triggerPips=",DoubleToString(triggerPips,1)," lockPips=",DoubleToString(lockPips,1)," lockedPips=",DoubleToString(locked,1)); ApplyProfitLock(ticket,lockPips); } } /* P2 single-writer bridge */ bool ModifyPositionSL(const ulong ticket,const double newSL,const bool isUserAction=false)
   {
    g_modifyWasNoChanges=false;
 
-   if(!isUserAction && STB_ManualOverrideIs(ticket))
-      return false; // MANUAL_OVERRIDE: auto modify blocked
-
+   // Manual/mobile positions remain under universal management. Manual edits
+   // re-anchor the live geometry; they are not a permanent opt-out switch.
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
 
@@ -6305,10 +6292,12 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
    sl=0.0;
 
    long direction=(orderType==ORDER_TYPE_BUY_STOP ||
-                   orderType==ORDER_TYPE_BUY_LIMIT)
+                   orderType==ORDER_TYPE_BUY_LIMIT ||
+                   orderType==ORDER_TYPE_BUY_STOP_LIMIT)
                   ? POSITION_TYPE_BUY
                   : (orderType==ORDER_TYPE_SELL_STOP ||
-                     orderType==ORDER_TYPE_SELL_LIMIT)
+                     orderType==ORDER_TYPE_SELL_LIMIT ||
+                     orderType==ORDER_TYPE_SELL_STOP_LIMIT)
                   ? POSITION_TYPE_SELL
                   : -1;
 
@@ -6509,6 +6498,486 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
   }
 
 
+bool STB_CalculatePendingTPFromStructure(const string symbol,
+                                         const ENUM_ORDER_TYPE orderType,
+                                         const double entry,
+                                         const double sl,
+                                         const double minimumRR,
+                                         double &tp,
+                                         string &source)
+  {
+   tp=0.0;
+   source="UNAVAILABLE";
+
+   bool isBuy=(orderType==ORDER_TYPE_BUY_STOP ||
+               orderType==ORDER_TYPE_BUY_LIMIT ||
+               orderType==ORDER_TYPE_BUY_STOP_LIMIT);
+   bool isSell=(orderType==ORDER_TYPE_SELL_STOP ||
+                orderType==ORDER_TYPE_SELL_LIMIT ||
+                orderType==ORDER_TYPE_SELL_STOP_LIMIT);
+
+   if(symbol=="" || entry<=0.0 || sl<=0.0 || (!isBuy && !isSell))
+      return false;
+
+   double risk=(isBuy ? entry-sl : sl-entry);
+   double minDist=TradeMinDistance(symbol);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize<=0.0) tickSize=point;
+
+   if(risk<=0.0 || minDist<=0.0 || point<=0.0 || tickSize<=0.0)
+      return false;
+
+   double rr=MathMax(0.1,minimumRR);
+   double requiredReward=MathMax(risk*rr,minDist+tickSize);
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+   int swingCount=CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows);
+
+   if(isBuy)
+     {
+      double floorTP=entry+requiredReward;
+      double best=DBL_MAX;
+
+      if(swingCount>0)
+        {
+         for(int i=0;i<ArraySize(highs);i++)
+           {
+            double candidate=NormalizePrice(symbol,highs[i].price);
+            if(candidate<=entry ||
+               candidate-entry+point*0.1<risk*rr ||
+               candidate-entry<minDist)
+               continue;
+
+            if(candidate>=floorTP-point*0.1 && candidate<best)
+               best=candidate;
+           }
+        }
+
+      if(best<DBL_MAX && best>entry)
+        {
+         tp=best;
+         source="STRUCTURE_SWING";
+         return true;
+        }
+
+      for(int attempt=0;attempt<5;attempt++)
+        {
+         double candidate=NormalizePrice(symbol,floorTP+tickSize*(attempt+1));
+         if(candidate>entry &&
+            candidate-entry>=minDist &&
+            candidate-entry+point*0.1>=risk*rr)
+           {
+            tp=candidate;
+            source="RR_FALLBACK";
+            return true;
+           }
+        }
+     }
+   else
+     {
+      double ceilingTP=entry-requiredReward;
+      double best=-DBL_MAX;
+
+      if(swingCount>0)
+        {
+         for(int i=0;i<ArraySize(lows);i++)
+           {
+            double candidate=NormalizePrice(symbol,lows[i].price);
+            if(candidate<=0.0 ||
+               candidate>=entry ||
+               entry-candidate+point*0.1<risk*rr ||
+               entry-candidate<minDist)
+               continue;
+
+            if(candidate<=ceilingTP+point*0.1 && candidate>best)
+               best=candidate;
+           }
+        }
+
+      if(best>0.0)
+        {
+         tp=best;
+         source="STRUCTURE_SWING";
+         return true;
+        }
+
+      for(int attempt=0;attempt<5;attempt++)
+        {
+         double candidate=NormalizePrice(symbol,ceilingTP-tickSize*(attempt+1));
+         if(candidate>0.0 &&
+            candidate<entry &&
+            entry-candidate>=minDist &&
+            entry-candidate+point*0.1>=risk*rr)
+           {
+            tp=candidate;
+            source="RR_FALLBACK";
+            return true;
+           }
+        }
+     }
+
+   tp=0.0;
+   source="NO_VALID_TARGET";
+   return false;
+  }
+
+bool STB_CalculatePositionTPFromStructure(const string symbol,
+                                          const long positionType,
+                                          const double entry,
+                                          const double sl,
+                                          const double minimumRR,
+                                          double &tp,
+                                          string &source)
+  {
+   tp=0.0;
+   source="UNAVAILABLE";
+
+   if(symbol=="" || entry<=0.0 || sl<=0.0)
+      return false;
+
+   bool isBuy=(positionType==POSITION_TYPE_BUY);
+   bool isSell=(positionType==POSITION_TYPE_SELL);
+   if(!isBuy && !isSell)
+      return false;
+
+   double risk=(isBuy ? entry-sl : sl-entry);
+   double minDist=TradeMinDistance(symbol);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize<=0.0) tickSize=point;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick) ||
+      risk<=0.0 || minDist<=0.0 || point<=0.0 || tickSize<=0.0)
+      return false;
+
+   double rr=MathMax(0.1,minimumRR);
+   double requiredReward=MathMax(risk*rr,minDist+tickSize);
+   double marketBuffer=minDist+MathMax(tickSize,risk*0.25);
+
+   SwingPoint highs[];
+   SwingPoint lows[];
+   int swingCount=CollectSwings(symbol,PERIOD_M15,InpLookbackM15,highs,lows);
+
+   if(isBuy)
+     {
+      double floorTP=MathMax(entry+requiredReward,tick.bid+marketBuffer);
+      double best=DBL_MAX;
+
+      if(swingCount>0)
+        {
+         for(int i=0;i<ArraySize(highs);i++)
+           {
+            double candidate=NormalizePrice(symbol,highs[i].price);
+            if(candidate<=entry ||
+               candidate<=tick.bid+minDist ||
+               candidate-entry+point*0.1<risk*rr)
+               continue;
+
+            if(candidate>=floorTP-point*0.1 && candidate<best)
+               best=candidate;
+           }
+        }
+
+      if(best<DBL_MAX && best>tick.bid+minDist)
+        {
+         tp=best;
+         source="STRUCTURE_SWING";
+         return true;
+        }
+
+      for(int attempt=0;attempt<5;attempt++)
+        {
+         double candidate=NormalizePrice(symbol,floorTP+tickSize*(attempt+1));
+         if(candidate>entry &&
+            candidate>tick.bid+minDist &&
+            candidate-entry+point*0.1>=risk*rr)
+           {
+            tp=candidate;
+            source="RR_FALLBACK";
+            return true;
+           }
+        }
+     }
+   else
+     {
+      double ceilingTP=MathMin(entry-requiredReward,tick.ask-marketBuffer);
+      double best=-DBL_MAX;
+
+      if(swingCount>0)
+        {
+         for(int i=0;i<ArraySize(lows);i++)
+           {
+            double candidate=NormalizePrice(symbol,lows[i].price);
+            if(candidate<=0.0 ||
+               candidate>=entry ||
+               candidate>=tick.ask-minDist ||
+               entry-candidate+point*0.1<risk*rr)
+               continue;
+
+            if(candidate<=ceilingTP+point*0.1 && candidate>best)
+               best=candidate;
+           }
+        }
+
+      if(best>0.0 && best<tick.ask-minDist)
+        {
+         tp=best;
+         source="STRUCTURE_SWING";
+         return true;
+        }
+
+      for(int attempt=0;attempt<5;attempt++)
+        {
+         double candidate=NormalizePrice(symbol,ceilingTP-tickSize*(attempt+1));
+         if(candidate>0.0 &&
+            candidate<entry &&
+            candidate<tick.ask-minDist &&
+            entry-candidate+point*0.1>=risk*rr)
+           {
+            tp=candidate;
+            source="RR_FALLBACK";
+            return true;
+           }
+        }
+     }
+
+   tp=0.0;
+   source="NO_VALID_TARGET";
+   return false;
+  }
+
+bool STB_ModifyPositionTP(const ulong ticket,const double newTP)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      return false;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   if(symbol=="" || !STB_SymbolManagementOwnedVerified(symbol))
+      return false;
+
+   long type=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double currentTP=PositionGetDouble(POSITION_TP);
+   double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize<=0.0) tickSize=point;
+
+   if(currentSL<=0.0 || newTP<=0.0 || point<=0.0 || tickSize<=0.0)
+      return false;
+
+   double tolerance=MathMax(point*0.5,tickSize*0.5);
+   if(currentTP>0.0)
+      return MathAbs(currentTP-newTP)<=tolerance;
+
+   MqlTick tick;
+   double minDist=TradeMinDistance(symbol);
+   if(!SymbolInfoTick(symbol,tick) || minDist<=0.0)
+      return false;
+
+   if(type==POSITION_TYPE_BUY)
+     {
+      if(newTP<=entry || newTP<=tick.bid+minDist)
+         return false;
+     }
+   else if(type==POSITION_TYPE_SELL)
+     {
+      if(newTP>=entry || newTP>=tick.ask-minDist)
+         return false;
+     }
+   else
+      return false;
+
+   string failKey=ScopedStateName("AUTOTP_MODFAIL_"+IntegerToString((long)ticket));
+   if(GlobalVariableCheck(failKey))
+     {
+      double lastFail=GlobalVariableGet(failKey);
+      if(lastFail>0.0 && TimeCurrent()-lastFail<30)
+         return false;
+     }
+
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetAsyncMode(false);
+   trade.SetTypeFillingBySymbol(symbol);
+   STB_GeomStore(ticket,true,entry,currentSL,newTP);
+
+   ResetLastError();
+   if(!trade.PositionModify(ticket,currentSL,newTP))
+     {
+      GlobalVariableSet(failKey,(double)TimeCurrent());
+      STB_GeomStore(ticket,true,entry,currentSL,currentTP);
+      Print("STB AUTO TP MODIFY FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " ret=",IntegerToString((int)trade.ResultRetcode()),
+            " desc=",trade.ResultRetcodeDescription(),
+            " err=",IntegerToString(GetLastError()));
+      return false;
+     }
+
+   if(!TradeRetcodeModifySucceeded())
+     {
+      GlobalVariableSet(failKey,(double)TimeCurrent());
+      STB_GeomStore(ticket,true,entry,currentSL,currentTP);
+      Print("STB AUTO TP REJECTED ticket=",ticket,
+            " symbol=",symbol,
+            " ret=",IntegerToString((int)trade.ResultRetcode()),
+            " desc=",trade.ResultRetcodeDescription());
+      return false;
+     }
+
+   if(!PositionSelectByTicket(ticket))
+     {
+      GlobalVariableSet(failKey,(double)TimeCurrent());
+      return false;
+     }
+
+   double verified=PositionGetDouble(POSITION_TP);
+   if(MathAbs(verified-newTP)>tolerance)
+     {
+      GlobalVariableSet(failKey,(double)TimeCurrent());
+      STB_GeomStore(ticket,true,PositionGetDouble(POSITION_PRICE_OPEN),
+                    PositionGetDouble(POSITION_SL),verified);
+      Print("STB AUTO TP CONFIRM MISMATCH ticket=",ticket,
+            " symbol=",symbol,
+            " expected=",DoubleToString(newTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " actual=",DoubleToString(verified,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
+     }
+
+   GlobalVariableDel(failKey);
+   Print("STB AUTO TP SET ticket=",ticket,
+         " symbol=",symbol,
+         " side=",(type==POSITION_TYPE_BUY ? "BUY":"SELL"),
+         " entry=",DoubleToString(entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " sl=",DoubleToString(currentSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " tp=",DoubleToString(newTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " source=STRUCTURAL_MANAGER");
+   return true;
+  }
+
+bool EnsureInitialTPForPosition(const ulong ticket)
+  {
+   if(ticket==0 || !PositionSelectByTicket(ticket) || !IsManagedPosition(ticket))
+      return false;
+
+   if(PositionGetDouble(POSITION_TP)>0.0)
+      return true;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+      return false;
+
+   long type=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double sl=PositionGetDouble(POSITION_SL);
+   if(sl<=0.0)
+      return false;
+
+   string retryKey=ScopedStateName("AUTOTP_INITPOS_"+IntegerToString((long)ticket));
+   if(GlobalVariableCheck(retryKey))
+     {
+      double lastFail=GlobalVariableGet(retryKey);
+      if(lastFail>0.0 && TimeCurrent()-lastFail<30)
+         return false;
+     }
+
+   double tp=0.0;
+   string source="";
+   if(!STB_CalculatePositionTPFromStructure(symbol,type,entry,sl,
+                                             STB_EffectiveMinimumRR(),tp,source))
+     {
+      GlobalVariableSet(retryKey,(double)TimeCurrent());
+      Print("STB AUTO TP UNAVAILABLE ticket=",ticket,
+            " symbol=",symbol,
+            " reason=",source);
+      return false;
+     }
+
+   if(!STB_ModifyPositionTP(ticket,tp))
+     {
+      GlobalVariableSet(retryKey,(double)TimeCurrent());
+      return false;
+     }
+
+   GlobalVariableDel(retryKey);
+   Print("STB AUTO TP STRUCTURE ticket=",ticket,
+         " symbol=",symbol,
+         " source=",source,
+         " tp=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+   return true;
+  }
+
+bool EnsureInitialTPForPendingOrder(const ulong ticket)
+  {
+   if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
+      return false;
+
+   if(OrderGetDouble(ORDER_TP)>0.0)
+      return true;
+
+   ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+      return false;
+
+   double entry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double sl=OrderGetDouble(ORDER_SL);
+   if(sl<=0.0)
+      return false;
+
+   string retryKey=ScopedStateName("AUTOTP_INITPEND_"+IntegerToString((long)ticket));
+   if(GlobalVariableCheck(retryKey))
+     {
+      double lastFail=GlobalVariableGet(retryKey);
+      if(lastFail>0.0 && TimeCurrent()-lastFail<30)
+         return false;
+     }
+
+   double tp=0.0;
+   string source="";
+   if(!STB_CalculatePendingTPFromStructure(symbol,orderType,entry,sl,
+                                            STB_EffectiveMinimumRR(),tp,source))
+     {
+      GlobalVariableSet(retryKey,(double)TimeCurrent());
+      Print("STB PENDING TP UNAVAILABLE ticket=",ticket,
+            " symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " reason=",source);
+      return false;
+     }
+
+   if(!STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,false))
+     {
+      GlobalVariableSet(retryKey,(double)TimeCurrent());
+      Print("STB PENDING TP MODIFY FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " proposedTP=",DoubleToString(tp,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " source=",source);
+      return false;
+     }
+
+   if(!OrderSelect(ticket) || OrderGetDouble(ORDER_TP)<=0.0)
+     {
+      GlobalVariableSet(retryKey,(double)TimeCurrent());
+      return false;
+     }
+
+   GlobalVariableDel(retryKey);
+   Print("STB PENDING TP SET ticket=",ticket,
+         " symbol=",symbol,
+         " type=",EnumToString(orderType),
+         " entry=",DoubleToString(entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " sl=",DoubleToString(sl,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " tp=",DoubleToString(OrderGetDouble(ORDER_TP),(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+         " source=",source);
+   return true;
+  }
+
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -6623,7 +7092,15 @@ void ManagePositions()
       if(ticket==0 || !IsManagedPosition(ticket))
          continue;
 
+      string manageSymbol=PositionGetString(POSITION_SYMBOL);
+      if(manageSymbol!="" && !SymbolSelect(manageSymbol,true))
+         continue;
+
       EnsureInitialSL(ticket);
+      if(PositionSelectByTicket(ticket) &&
+         PositionGetDouble(POSITION_SL)>0.0 &&
+         PositionGetDouble(POSITION_TP)<=0.0)
+         EnsureInitialTPForPosition(ticket);
    }
 
    AutoProfitProtection();
@@ -6637,6 +7114,10 @@ void ManagePositions()
 
       if(!IsManagedPosition(ticket))
          continue;
+
+      string manageSymbol=PositionGetString(POSITION_SYMBOL);
+      if(manageSymbol!="")
+         SymbolSelect(manageSymbol,true);
 
       TrailPositionByLivePrice(ticket);
    }
@@ -6739,6 +7220,8 @@ void ManagePendingOrders()
          continue;
 
       string symbol=OrderGetString(ORDER_SYMBOL);
+      if(!SymbolSelect(symbol,true))
+         continue;
       if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
 
       // Pending orders discovered on the terminal (manual / mobile / foreign /
@@ -6750,6 +7233,15 @@ void ManagePendingOrders()
       // EA-created path, idempotent, and only for managed + leased symbols.
       if(OrderGetDouble(ORDER_SL)<=0.0)
          EnsureInitialSLForPendingOrder(ticket);
+
+      if(OrderSelect(ticket) &&
+         OrderGetDouble(ORDER_SL)>0.0 &&
+         OrderGetDouble(ORDER_TP)<=0.0)
+         EnsureInitialTPForPendingOrder(ticket);
+
+      if(!OrderSelect(ticket))
+         continue;
+
       datetime setupTime=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
       int profileId=STB_AdaptiveParseProfileFromComment(OrderGetString(ORDER_COMMENT));
       int maxBars=InpMaxPendingBars;
@@ -11887,14 +12379,9 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    double pip=PipSize(symbol);
    datetime now=TimeCurrent();
 
-   bool candleStop=(g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_BUY_STOP ||
-                    g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_SELL_STOP);
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
-                              "MANUAL_OVERRIDE");
-
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      return false; // M5 candle-follow remains active for BUY STOP / SELL STOP
+   // Automatic management is universal: a manual/mobile origin does not
+   // disable pending-order trailing. The AUTO switch controls new strategy
+   // entries only, not management of existing exposure.
 
    // Diagnostic mirror of the throttle below (rate-limited per ticket/M15 bar):
    // it shows when a validated proposal was swallowed by the cooldown/backoff.
@@ -12024,12 +12511,8 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // existing manual-override pause for LIMIT and STOP-LIMIT orders.
    bool candleStop=(orderType==(long)ORDER_TYPE_BUY_STOP ||
                     orderType==(long)ORDER_TYPE_SELL_STOP);
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      STB_PendingTrailLogSkip(ticket,g_stbPendingTrail[idx].symbol,
-                              "MANUAL_OVERRIDE");
-
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      return true;
+   // Do not pause user/mobile pending orders permanently after a geometry
+   // update. The manager follows their current entry/SL anchor automatically.
 
    if(!STB_PendingTrailIsManagedType(orderType))
       STB_PendingTrailLogSkip(ticket,OrderGetString(ORDER_SYMBOL),"WRONG_TYPE");
@@ -12233,7 +12716,30 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    prop.valid=true;
    prop.entry=res.entry;
    prop.sl=res.sl;
-   prop.tp=OrderGetDouble(ORDER_TP);
+   double oldEntryForTP=OrderGetDouble(ORDER_PRICE_OPEN);
+   double oldSLForTP=OrderGetDouble(ORDER_SL);
+   double oldTPForTP=OrderGetDouble(ORDER_TP);
+   double requiredRRForTP=STB_EffectiveMinimumRR();
+   double oldRiskForTP=MathAbs(oldEntryForTP-oldSLForTP);
+   if(oldTPForTP>0.0 && oldRiskForTP>0.0)
+      requiredRRForTP=MathMax(requiredRRForTP,
+                              MathAbs(oldTPForTP-oldEntryForTP)/oldRiskForTP);
+
+   double revisedTP=0.0;
+   string revisedTPSource="";
+   bool revisedTPOK=STB_CalculatePendingTPFromStructure(
+                        symbol,
+                        (ENUM_ORDER_TYPE)orderType,
+                        res.entry,
+                        res.sl,
+                        requiredRRForTP,
+                        revisedTP,
+                        revisedTPSource);
+   prop.tp=(revisedTPOK ? revisedTP:oldTPForTP);
+   if(!revisedTPOK)
+      Print("PENDING_TRAIL_TP_RETAINED ticket=",IntegerToString((int)ticket),
+            " symbol=",symbol,
+            " reason=NO_VALID_STRUCTURAL_OR_RR_TARGET");
    prop.source=STB_PEND_SRC_TRAIL;
    prop.reason=res.reason;
 
@@ -12415,14 +12921,24 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
 
    if(OrderSelect(ticket) && IsManagedOrder(ticket))
      {
+      string symbol=OrderGetString(ORDER_SYMBOL);
+      SymbolSelect(symbol,true);
       STB_PendingTrailRegister(ticket,source);
       EnsureInitialSLForPendingOrder(ticket);
+      if(OrderSelect(ticket) && OrderGetDouble(ORDER_SL)>0.0 &&
+         OrderGetDouble(ORDER_TP)<=0.0)
+         EnsureInitialTPForPendingOrder(ticket);
       return;
      }
 
    if(PositionSelectByTicket(ticket) && IsManagedPosition(ticket))
      {
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      SymbolSelect(symbol,true);
       EnsureInitialSL(ticket);
+      if(PositionSelectByTicket(ticket) && PositionGetDouble(POSITION_SL)>0.0 &&
+         PositionGetDouble(POSITION_TP)<=0.0)
+         EnsureInitialTPForPosition(ticket);
       return;
      }
   }
