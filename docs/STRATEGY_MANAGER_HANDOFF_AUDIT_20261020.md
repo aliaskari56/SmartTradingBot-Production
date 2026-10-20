@@ -92,6 +92,138 @@
 
 **Disposition:** Make the confluence contract explicit: if FVG and OB must belong to the same impulse, record the impulse/event identity and test that relationship; if independent but nearby zones are allowed, document the permitted temporal/spatial relationship and test its boundaries. Do not tighten the pattern rule without an approved definition.
 
+### STR-AUD-10 — Protection eligibility is broader than strategy-managed eligibility
+
+**Evidence:** `STB_IsProtectionPosition(ticket)` accepts a broader set of live account positions than `IsManagedPosition()`, which applies the symbol allow-list. Transaction intake can call immediate management after the protection-scope check.
+
+**Impact:** Manual or foreign-symbol positions may enter the protection/management path even when they are not eligible for strategy entry management. This may be intentional account-protection policy, but the ownership boundary is not self-evident.
+
+**Disposition:** Define separate contracts for protection scope and strategy-management scope. Test manual, foreign-magic, disallowed-symbol, tester chart-only, netting, and hedging cases before narrowing either predicate.
+
+### STR-AUD-11 — Symbol-management lease expiry depends on server time
+
+**Evidence:** The symbol writer lease uses `TimeCurrent()` with a 90-second TTL, while the entry lock uses `TimeLocal()`.
+
+**Impact:** When server time is not advancing because quotes are absent/stale, lease expiry and reclaim timing may differ from elapsed wall-clock time. Two-instance ownership behavior is not established by static inspection.
+
+**Disposition:** Test two EA instances with active quotes, quiet markets, stale quotes, restart, and lease-owner disappearance. Document whether expiry is intended to follow server time or wall-clock time.
+
+### STR-AUD-12 — Partial fills need explicit pending-trail lifecycle coverage
+
+**Evidence:** Pending trail handling is deactivated on the first `DEAL_ADD`; the periodic pending-trail processor may discover and register a still-existing remainder through terminal order enumeration.
+
+**Impact:** Correctness depends on transaction ordering and subsequent reconciliation when a pending order partially fills and leaves a remainder.
+
+**Disposition:** Add partial-fill tests that verify remainder tracking, protection initialization for the filled volume, and cleanup only when the remainder is gone. This is a conditional lifecycle risk, not a confirmed defect.
+
+### STR-AUD-13 — Transaction intake does not explicitly branch on every transaction type
+
+**Evidence:** The inspected `STB_TradeIntakeFromTransaction()` excerpt has explicit `TRADE_TRANSACTION_ORDER_ADD` and `TRADE_TRANSACTION_DEAL_ADD` paths; it does not show equivalent explicit branches for order deletion or deal update.
+
+**Impact:** Correctness may depend on reconciliation and terminal scans rather than direct event handling. The excerpt alone does not prove missing cleanup.
+
+**Disposition:** Test order delete/cancel/expiry, deal add/update, delayed event ordering, and restart reconciliation. Confirm that stale registry and pending-trail entries are removed deterministically.
+
+### STR-AUD-14 — Pending-order write quota is consumed after verification
+
+**Evidence:** The central pending-order writer records its write quota after a successful result and geometry verification, unlike the position bridge path that consumes quota before sending.
+
+**Impact:** If a request has an ambiguous outcome, another write may be attempted in the same cycle because the first write was not recorded as consuming the quota. Whether this is possible depends on the trade API outcome path.
+
+**Disposition:** Test success, explicit rejection, timeout/ambiguous result, geometry mismatch, and order disappearance. Do not change quota semantics until ambiguous outcomes are specified.
+
+### STR-AUD-15 — Pending writer postcondition needs ambiguous-result tests
+
+**Evidence:** The pending writer performs post-send selection/geometry checks, but the inspected path does not establish a tested outcome for every ambiguous server response.
+
+**Impact:** A send result and the terminal's eventual order state can diverge. Incorrect assumptions could cause duplicate modification attempts or stale state.
+
+**Disposition:** Add deterministic checks for accepted-and-present, rejected, accepted-but-not-yet-visible, disappeared-before-postcheck, and mismatched geometry outcomes.
+
+### STR-AUD-16 — Initial-SL repair and pending trailing share a cycle write budget
+
+**Evidence:** The management cycle orders work as `ManagePositions()`, `ManagePendingOrders()`, then `STB_PendingTrailProcess()`. Pending-order management repairs SL before TP, and the trailing processor uses the same per-cycle write quota.
+
+**Impact:** A successful initial-SL repair can prevent trailing from writing during that cycle, which appears consistent with a one-write budget. Failure and retry interactions still require validation.
+
+**Disposition:** Test successful SL repair, failed SL repair, TP-only repair, and simultaneous trail eligibility; assert at most the intended number of writes per symbol/order/cycle.
+
+### STR-AUD-17 — Pending initial-SL retry backoff is not persisted across restart
+
+**Evidence:** `STB_RecordPendingInitialSLFailure()` uses a 5s, 15s, then 60s backoff sequence. `STB_PendingTrailRebuildFromTerminal()` clears in-memory state and registers existing orders with `failureCount=0` and `nextRetryTime=0`.
+
+**Impact:** Restart resets retry history and can cause an immediate retry that would otherwise be delayed. This is confirmed behavior; whether it is a defect depends on the intended restart contract.
+
+**Disposition:** Decide whether retry backoff must survive restart. Test restart after each failure count and ensure the chosen policy is observable and bounded.
+
+### STR-AUD-18 — Pending-trail reconstruction resets retry scheduling
+
+**Evidence:** Rebuild-from-terminal reconstructs pending trail state from live terminal orders rather than restoring prior retry counters and retry deadlines.
+
+**Impact:** This is the same underlying mechanism as STR-AUD-17, not a separate defect: retries restart from the initial state after reconstruction.
+
+**Disposition:** Track this as the restart-specific test dimension for STR-AUD-17; do not double-count it as an independent defect.
+
+### STR-AUD-19 — Manual-override authority transfer from order to position is not explicit
+
+**Evidence:** On `DEAL_ADD`, intake invokes `STB_PendingTrailOnOrderFilled(trans.order)`, then stores exposure/geometry for the selected position and invokes immediate management. The inspected path does not show a generic explicit transfer of manual-override state from the order ticket to the position identifier.
+
+**Impact:** Whether a user override survives a pending-order fill depends on the called helper implementations, identifier mapping, and account mode. Static evidence does not establish a confirmed loss of override.
+
+**Disposition:** Trace helper internals and test pending-order manual modification followed by fill, delayed events, restart, netting, and hedging. Assert the intended authority is retained or intentionally reset.
+
+### STR-AUD-20 — Orphan-state grace uses server time
+
+**Evidence:** `STB_ExposureOrphanGraceActive()` compares `TimeCurrent()` with the last-seen timestamp and retains absent-ticket state for a 120-second grace period.
+
+**Impact:** Cleanup may be delayed if server time is stale because no quote arrives. The grace protects delayed event recovery, so removing it without a replacement could create a different lifecycle risk.
+
+**Disposition:** Test elapsed wall time versus server time during quiet markets and restart. Specify whether delayed cleanup is acceptable and ensure stale state cannot persist indefinitely.
+
+### STR-AUD-21 — INOUT reversal closes the old adaptive lifecycle without explicit new-lifecycle initialization in that branch
+
+**Evidence:** For `DEAL_ENTRY_INOUT`, `OnTradeTransaction()` calculates the old direction, consumes accumulated PnL, records the old lifecycle, deletes the position profile/risk, and returns. That branch does not explicitly initialize a new profile/risk lifecycle for any reversed residual exposure.
+
+**Impact:** If the account mode and transaction semantics leave a new reversed position open, it may lack adaptive profile/risk state until another supported initialization path runs. This is a conditional lifecycle gap, not yet a confirmed defect.
+
+**Disposition:** Test full reversal, partial reversal/residual exposure, netting and hedging semantics, delayed events, and subsequent close. Define whether a residual reversed position is managed as a new strategy lifecycle or excluded from adaptive learning.
+
+### STR-AUD-22 — Duplicate of the INOUT lifecycle concern
+
+This is the same source path as STR-AUD-21 and is retained here only to preserve the audit trail from the working discussion. It is not a separate finding and must not be counted twice.
+
+### STR-AUD-23 — Adaptive order-to-position state transfer has multiple prerequisites
+
+**Evidence:** On `DEAL_ENTRY_IN`, the code reads the profile from order state and falls back to parsing the deal comment, remembers the position profile, reads planned order risk, and prefers recalculated risk from actual fill volume/price and active SL when available; then it deletes order state.
+
+**Impact:** Delayed events, absent/invalid profile metadata, or unavailable initial SL can change which state is transferred. The code explicitly skips lifecycle learning when no valid profile can be recovered and may leave risk unavailable.
+
+**Disposition:** Test normal and delayed fills, missing order state, valid/invalid comments, missing SL, partial fills, and restart. Verify that deleting order state cannot erase the only recoverable profile/risk before position state is safely recorded.
+
+### STR-AUD-24 — Missing initial-risk state correctly prevents an invalid R sample, but restart and delayed-SL paths need tests
+
+**Evidence:** Position risk is stored only when positive and finite. Closed-deal recording adds an R observation only when `hasValidRiskSample` is true and the R multiple is finite.
+
+**Impact:** This avoids fabricating an R sample when the denominator is unknown. It also means a lifecycle whose risk state was lost or never captured is excluded from R expectancy.
+
+**Disposition:** Preserve this guard. Test restart, delayed fill/exit events, missing initial SL, and risk recalculation failure to verify that unavailable R is logged as unavailable rather than treated as zero.
+
+### STR-AUD-25 — Accumulated position PnL is a consume-on-read global state, not a complete idempotency guarantee
+
+**Evidence:** `TakeAccumulatedPositionPnl()` reads the accumulated value and deletes its global-variable key. The OUT path adds the current deal PnL before checking whether the position identifier remains open; a fully closed lifecycle then consumes the sum and records an outcome.
+
+**Impact:** Consume-on-read supports one-time aggregation in the normal event sequence, but does not by itself prove duplicate-event safety, crash consistency, or concurrency safety. Setup-decision deduplication is separate and does not establish closed-trade deduplication.
+
+**Disposition:** Add tests for multiple partial exits, duplicate/replayed close processing, delayed deal events, restart between accumulation and consumption, and repeated history reconciliation. If duplicate processing is in scope, persist a per-deal/per-lifecycle idempotency marker before updating learner statistics.
+
+### STR-AUD-26 — Closed-lifecycle adaptive-stat updates have no visible per-deal idempotency marker
+
+**Evidence:** `STB_AdaptiveRecordClosedDeal()` increments profile win/loss observations and updates R sum/count, then flushes global variables. In the inspected `OnTradeTransaction()` close paths, the lifecycle is recorded after consuming accumulated PnL, but no explicit processed-deal or processed-lifecycle key is checked in the shown path before the statistics increment.
+
+**Impact:** If the same close lifecycle is processed twice through a replay/recovery path, learner counts can be incremented twice. Normal terminal delivery may not trigger this, so this is a recovery/idempotency risk requiring validation rather than a claim that ordinary event delivery duplicates callbacks.
+
+**Disposition:** Test duplicate transaction handling and crash/restart boundaries. If replay/reconciliation is supported, add a stable lifecycle/deal idempotency key and make statistics update plus marker semantics robust to partial failure. Do not introduce a marker that could suppress legitimate partial-exit aggregation.
+
 ## Required test cases
 
 | ID | Scenario | Expected result | Status |
@@ -113,6 +245,18 @@
 | STR-A15 | Wall-clock time crosses a session gap while few/no M15 bars form | Setup-age behavior matches the documented age definition | NOT RUN |
 | STR-A16 | Top candidate fails final validation; fallback is close to runner-up | Fallback is attempted only if it independently satisfies the approved confidence policy | NOT RUN |
 | STR-A17 | FVG and OB pass individually but derive from different impulses | Acceptance follows the approved shared-event or independent-zone contract | NOT RUN |
+| STR-A18 | Protection scope vs managed scope across manual/foreign/disallowed-symbol positions | Behavior matches the approved ownership contract | NOT RUN |
+| STR-A19 | Two EA instances contend for symbol lease during quiet/stale quotes | Lease ownership and reclaim follow the documented clock/TTL policy | NOT RUN |
+| STR-A20 | Pending order partially fills and remainder remains active | Filled position is protected and remaining pending order stays correctly tracked | NOT RUN |
+| STR-A21 | Order cancellation/expiry and delayed transaction ordering | Registry, trail, exposure, and geometry state reconcile without stale entries | NOT RUN |
+| STR-A22 | Pending writer receives ambiguous send/postcheck outcome | No duplicate write; final order state and write quota are reconciled | NOT RUN |
+| STR-A23 | Initial-SL repair and pending trailing are eligible in the same cycle | Write quota and retry behavior match the documented policy | NOT RUN |
+| STR-A24 | Restart after pending initial-SL failures | Retry backoff follows the explicitly chosen persistence policy | NOT RUN |
+| STR-A25 | Pending order is manually modified and then filled | Manual-override authority follows the approved order-to-position transfer policy | NOT RUN |
+| STR-A26 | Quiet market delays server time during orphan-state grace | Cleanup timing is bounded and matches the documented clock policy | NOT RUN |
+| STR-A27 | DEAL_ENTRY_INOUT reversal with residual exposure | Old lifecycle closes exactly once and new residual state follows contract | NOT RUN |
+| STR-A28 | Missing profile/risk state during delayed fill or after restart | Invalid profile is excluded and unavailable R is never fabricated | NOT RUN |
+| STR-A29 | Partial exits, duplicate close processing, and restart between PnL accumulation/consume | Closed-lifecycle PnL and adaptive observations are idempotent | NOT RUN |
 
 ## Exit criteria
 
