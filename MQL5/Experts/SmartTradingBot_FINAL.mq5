@@ -3932,13 +3932,25 @@ void STB_ReconcileTradeRegistry()
       if(!IsManagedOrder(ticket))
          continue;
 
-      // Seed recovery state from the actual pending-order geometry.
-      STB_PendingTrailRegister(ticket,"RECONCILE");
+      // Ensure the exposure baseline registry before registering trail state.
+      // If allocation fails, defer this order's reconciliation as a unit so
+      // trail processing cannot proceed from a partially initialized intake.
       int exposureIdx=STB_ExposureEnsure(ticket,false); // MANUAL_OVERRIDE: restore persisted override on reconcile (no broker write)
+      if(exposureIdx<0)
+        {
+         Print("STB ORDER RECONCILE DEFERRED ticket=",ticket,
+               " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+         continue;
+        }
+
+      // Seed recovery state from the actual pending-order geometry only after
+      // the exposure registry is available.
+      STB_PendingTrailRegister(ticket,"RECONCILE");
+
       // Preserve a known intake/own-write baseline across periodic Reconcile.
       // This lets ORDER_UPDATE compare the new server geometry with the last
       // observed baseline instead of a snapshot already overwritten here.
-      if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)
+      if(g_stbExposure[exposureIdx].entry<=0.0)
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
