@@ -360,8 +360,9 @@ def main() -> int:
         ("only one direct PositionModify call exists in the shared verified broker writer",
          source.count("trade.PositionModify(") == 1 and
          "bool STB_PositionModifyBrokerVerified(" in source),
-        ("SL-only writer delegates to the shared verified position modification bridge",
-         'gv,\n                                           "SL")' in source),
+        ("SL/TP wrapper delegates to the shared verified position modification bridge",
+         'gv,\n                                           (targetTP!=latestTP ? "SL+TP":"SL"))' in source and
+         "STB_PositionModifyBrokerVerified(ticket," in source),
         ("structural TP manager delegates TP-only writes to the same verified bridge",
          'failKey,"TP")' in source and
          'bool STB_ModifyPositionTP(' in source and
