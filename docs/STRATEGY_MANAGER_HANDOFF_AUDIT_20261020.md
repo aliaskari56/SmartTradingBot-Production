@@ -76,6 +76,14 @@
 
 **Disposition:** Treat bar-count age and elapsed-time age as separate concepts. Specify which one `InpMaxSetupAgeBars` means, then add tests around weekends/session gaps, missing bars, and a newly closed M15 candle. Do not silently replace one with the other without confirming intended behavior.
 
+### STR-AUD-08 — Fallback candidates can inherit a confidence decision made for a different winner
+
+**Evidence:** `STB_ExecuteTopCandidate()` checks `g_scannerConfidence` once before iterating through `g_scannerTop10`. If the top-ranked candidate later fails symbol selection, entry-lock acquisition, final revalidation, the final auto gate, or placement, the loop can continue to the next candidate. The confidence label was calculated earlier from the top two candidates in the revalidated watchlist, not from a fresh comparison of the fallback candidate against its current runner-up.
+
+**Impact:** The candidate eventually attempted for placement may not itself satisfy the configured top-score gap as the leading eligible candidate. This is a ranking/eligibility consistency risk. The static path shows the missing recalculation; runtime frequency and consequences have not been measured.
+
+**Disposition:** Add a regression test where candidate 1 initially clears the gap but fails final revalidation, while candidates 2 and 3 are closer than the required gap. The approved policy should either stop after the winner fails, or recompute eligibility/confidence from the remaining freshly validated candidates before considering a fallback. Do not treat the original `CLEAR` value as proof that every fallback is clear.
+
 ## Required test cases
 
 | ID | Scenario | Expected result | Status |
@@ -95,6 +103,7 @@
 | STR-A13 | High scanner score but a required strategy gate fails | Candidate is excluded; score cannot override the hard gate | NOT RUN |
 | STR-A14 | Final revalidation rejects a previously ranked candidate | Rejected candidate is not submitted; rejection stage/reason is logged | NOT RUN |
 | STR-A15 | Wall-clock time crosses a session gap while few/no M15 bars form | Setup-age behavior matches the documented age definition | NOT RUN |
+| STR-A16 | Top candidate fails final validation; fallback is close to runner-up | Fallback is attempted only if it independently satisfies the approved confidence policy | NOT RUN |
 
 ## Exit criteria
 
