@@ -60,3 +60,14 @@ The original audit status above reflects the October 10 checkpoint; it is not a 
 The corresponding source bytes (`MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob `a5cab7fa950571626c8261e14d40890189aa34e5`) passed the repository's Windows MetaEditor workflow on October 15: **0 errors, 0 warnings**, MetaEditor `5.0.0.6266`, run [38801737418](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/38801737418). The workflow uploaded a fresh EX5, compiler log, and provenance manifest as artifact `metaeditor-build-ebb9f0bbc9cd70ccbae40efd1b07d10ff4a92941`. The live AUTO and risk-sizing defaults remain `false`.
 
 This document remains a test plan, not evidence of a completed MT5 Strategy Tester or broker-equivalence run. Do not treat the EA as runtime-validated until deterministic baseline/candidate comparison and M5/manual-override tests are recorded.
+
+
+## Follow-up scanner correction — 2026-10-20
+
+A targeted source review on the development branch identified two scanner-integrity gaps and corrected them without changing the strategy weights or disabling any existing filter:
+
+- Quote integrity is now checked by the same validator in both symbol eligibility and market-quality scoring. It rejects non-finite/non-positive Bid/Ask, crossed quotes, missing timestamps, quotes more than two seconds into the future relative to the server-time estimate, unavailable clock, and quotes older than the configured maximum age. A sub-two-second timestamp skew is treated as age zero; materially future-dated quotes are not silently clamped to fresh.
+- ATR and derived market-quality metrics are checked for finite, valid values before they influence a score.
+- Scanner confidence now compares the top candidate against the runner-up in the fully revalidated and reranked watchlist before the execution list is truncated to InpScannerTopN. With InpScannerTopN=1, a second valid candidate can no longer be hidden to bypass InpScannerMinTopGap. A single surviving candidate still uses the existing score-floor policy.
+
+The source change is on fix/structure-first-fvg-trailing-20261020 only; main is not modified. This follow-up adds no new strategy weights and does not claim a completed MT5 Strategy Tester run. See scanner test IDs SCN-01–SCN-08 in docs/RELEASE_ACCEPTANCE_TEST_MATRIX_20261009.md. Compile/static CI and the runtime baseline-equivalence gate must be re-run/recorded for the exact new commit; functional and backtest statuses remain NOT RUN until real evidence is produced.

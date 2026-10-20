@@ -33,7 +33,10 @@ The compile workflow archived a fresh EX5, compiler log and provenance manifest 
 
 2. **Scanner**
    - Excessive spread as a share of M15 ATR is a hard market-quality rejection (InpMaxRelativeSpreadPct=10.0 by default); the threshold is configurable and logged at startup.
-   - Data freshness, activity, relative volatility, market quality, direction and regime checks remain active. Hard eligibility gates are separate from ranking.
+   - One shared fail-closed quote validator is applied both before scanner eligibility and before market-quality ranking. It rejects non-finite/non-positive quotes, crossed markets, missing timestamps, materially future-dated quotes and stale quotes; a small two-second timestamp skew is tolerated.
+   - Quality scoring rejects non-finite ATR/derived metrics instead of allowing invalid numeric values to contaminate ranking.
+   - Scanner confidence compares the best candidate with the runner-up in the complete final revalidated watchlist before applying the execution Top-N cap. InpScannerTopN=1 therefore cannot bypass InpScannerMinTopGap when a second valid candidate exists; a lone candidate can still pass the score floor.
+   - Data freshness, activity, relative volatility, market quality, direction and regime checks remain active. Hard eligibility gates are separate from ranking. Strategy weights and regime thresholds were not changed.
 
 3. **Position SL/TP management**
    - Position trailing defaults to confirmed swing structure on the configured trailing timeframe, with ATR activation and ATR-based padding. It remains monotonic and preserves existing profit-lock rules.
@@ -68,3 +71,15 @@ The compile workflow archived a fresh EX5, compiler log and provenance manifest 
 - Broker stop/freeze levels: https://www.mql5.com/en/docs/constants/environment_state/marketinfoconstants
 - Strategy Tester: https://www.mql5.com/en/docs/runtime/testing
 - Trade transactions: https://www.mql5.com/en/docs/event_handlers/ontradetransaction
+
+
+## Scanner correction checkpoint — 2026-10-20
+
+The working branch now includes shared quote-integrity validation, rejection of non-finite market-quality metrics, and full-watchlist competition-gap evaluation. This is a targeted scanner correctness/diagnostics change; it does not replace the existing 65/20/10/5 ranking weights or loosen a hard gate.
+
+Required evidence after this source change:
+- exact-source MetaEditor compile and static checks on the resulting commit;
+- deterministic scanner tests SCN-03 through SCN-07 in the acceptance matrix;
+- frozen baseline-versus-candidate Strategy Tester comparison for SCN-08.
+
+Until those runtime comparisons are executed and reconciled, scanner functional tests remain NOT RUN and the branch remains NOT release-ready.

@@ -146,6 +146,14 @@ def main() -> int:
     on_init = source_region(source, "int OnInit()", "// DEINIT")
     on_tick = source_region(source, "void OnTick()", "// TIMER")
     on_timer = source_region(source, "void OnTimer()", "// CHART EVENTS")
+    quote_validator = source_region(
+        source, "bool STB_ScannerQuoteValid(", "bool STB_ScannerDataEligible(")
+    scanner_data = source_region(
+        source, "bool STB_ScannerDataEligible(", "bool STB_ScannerDirectionAllowed(")
+    market_quality = source_region(
+        source, "bool STB_CalcMarketQuality(", "bool STB_EvaluateRegime(")
+    scanner_run = source_region(
+        source, "void STB_ScannerRun()", "void STB_DashDeleteAll()")
     initial_pending_sl = source_region(
         source, "bool CalculateInitialPendingProtectionSL(",
         "bool VerifyPendingInitialSL(")
@@ -186,6 +194,23 @@ def main() -> int:
          "bool intervalElapsed=(g_scannerLastRun<=0 ||" in source and
          "if(!newChartBar && !intervalElapsed)" in source and
          "if(cycleBar>0)" in source),
+         ("scanner quote validator rejects non-finite/crossed, future-dated, and stale quotes",
+          bool(quote_validator) and all(token in quote_validator for token in (
+              "MathIsValidNumber(tick.bid)", "MathIsValidNumber(tick.ask)",
+              "tick.ask<tick.bid", "TimeTradeServer()", "ageSeconds < -2",
+              "REJECT_FUTURE_QUOTE", "REJECT_STALE_DATA"))),
+         ("scanner eligibility and market-quality gates both use shared quote validation",
+          "STB_ScannerQuoteValid(tick,reason)" in scanner_data and
+          "STB_ScannerQuoteValid(tick,quoteReason)" in market_quality),
+         ("market quality rejects non-finite ATR and derived metrics before scoring",
+          all(token in market_quality for token in (
+              "MathIsValidNumber(atrNow)", "MathIsValidNumber(atrBase)",
+              "MathIsValidNumber(q.relativeSpread)",
+              'q.reason="REJECT_INVALID_MARKET_METRICS"'))),
+         ("scanner top-gap uses the full revalidated watchlist before Top-N truncation",
+          "if(clear && g_scannerWatchlistCount>1)" in scanner_run and
+          "g_scannerWatchlist[1].opportunityScore" in scanner_run and
+          "if(clear && g_scannerTop10Count>1)" not in scanner_run),
         ("OnTick and OnTimer execute only after a new completed scanner cycle",
          "ulong cycleBefore=g_scannerCycle;" in on_tick and
          "if(g_scannerCycle!=cycleBefore)" in on_tick and

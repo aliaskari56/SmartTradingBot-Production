@@ -8447,6 +8447,57 @@ bool STB_ScannerSessionOpen(const string symbol)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Reject invalid market quotes before they can influence scanner eligibility or ranking.
+bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason)
+  {
+   reason="";
+
+   if(tick.time<=0 ||
+      !MathIsValidNumber(tick.bid) ||
+      !MathIsValidNumber(tick.ask) ||
+      tick.bid<=0.0 ||
+      tick.ask<=0.0 ||
+      tick.ask<tick.bid)
+     {
+      reason="REJECT_INVALID_QUOTE";
+      return false;
+     }
+
+   // TimeTradeServer is a server-time estimate in live operation and follows
+   // simulated time in Strategy Tester. Permit only a tiny timestamp skew;
+   // never turn a materially future-dated quote into a fresh quote via clamping.
+   datetime clockNow=TimeTradeServer();
+   if(clockNow<=0)
+      clockNow=TimeCurrent();
+
+   if(clockNow<=0)
+     {
+      reason="REJECT_CLOCK_UNAVAILABLE";
+      return false;
+     }
+
+   long ageSeconds=(long)clockNow-(long)tick.time;
+   if(ageSeconds < -2)
+     {
+      reason="REJECT_FUTURE_QUOTE";
+      return false;
+     }
+
+   if(ageSeconds<0)
+      ageSeconds=0;
+
+   if(ageSeconds>(long)MathMax(30,InpScannerMaxQuoteAgeSec))
+     {
+      reason="REJECT_STALE_DATA";
+      return false;
+     }
+
+   return true;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool STB_ScannerDataEligible(const string symbol,string &reason)
   {
    reason="";
@@ -8472,21 +8523,14 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
      }
 
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick) ||
-      tick.bid<=0.0 || tick.ask<=0.0 ||
-      tick.time<=0)
+   if(!SymbolInfoTick(symbol,tick))
      {
       reason="REJECT_DATA_UNAVAILABLE";
       return false;
      }
 
-   long age=(long)MathMax(0,(long)(TimeCurrent()-(datetime)tick.time));
-
-   if(age>MathMax(30,InpScannerMaxQuoteAgeSec))
-     {
-      reason="REJECT_STALE_DATA";
+   if(!STB_ScannerQuoteValid(tick,reason))
       return false;
-     }
 
    if(Bars(symbol,PERIOD_M15)<MathMax(InpLookbackM15,40) ||
       Bars(symbol,PERIOD_H4)<MathMax(InpLookbackH4,40))
@@ -8549,6 +8593,14 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
    if(!SymbolInfoTick(symbol,tick))
       return false;
 
+   string quoteReason="";
+   if(!STB_ScannerQuoteValid(tick,quoteReason))
+     {
+      q.reason=quoteReason;
+      return false;
+     }
+   q.reason="REJECT_DATA_UNAVAILABLE";
+
    double pip=PipSize(symbol);
    if(pip<=0.0)
       return false;
@@ -8560,8 +8612,13 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
    double atrNow=LocalATR(rates,1,14);
    double atrBase=LocalATR(rates,20,14);
 
-   if(atrNow<=0.0 || atrBase<=0.0)
+   if(!MathIsValidNumber(atrNow) ||
+      !MathIsValidNumber(atrBase) ||
+      atrNow<=0.0 || atrBase<=0.0)
+     {
+      q.reason="REJECT_INVALID_MARKET_DATA";
       return false;
+     }
 
    q.spreadPips=(tick.ask-tick.bid)/pip;
    q.relativeSpread=(tick.ask-tick.bid)/atrNow*100.0;
@@ -8584,11 +8641,42 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
    q.activityRatio=(avgVol>0.0 ?
                     (double)rates[1].tick_volume/avgVol : 0.0);
 
-   long age=(long)MathMax(0,(long)(TimeCurrent()-(datetime)tick.time));
+   datetime qualityClock=TimeTradeServer();
+   if(qualityClock<=0)
+      qualityClock=TimeCurrent();
+   if(qualityClock<=0)
+     {
+      q.reason="REJECT_CLOCK_UNAVAILABLE";
+      return false;
+     }
+
+   long age=(long)qualityClock-(long)tick.time;
+   if(age<0)
+      age=0; // The shared validator already rejected future skew beyond two seconds.
+   if(age>(long)MathMax(30,InpScannerMaxQuoteAgeSec))
+     {
+      q.reason="REJECT_STALE_DATA";
+      return false;
+     }
 
    q.freshnessScore=100.0-
                     MathMin(100.0,
                             (double)age/(double)MathMax(30,InpScannerMaxQuoteAgeSec)*100.0);
+
+   if(!MathIsValidNumber(q.spreadPips) ||
+      !MathIsValidNumber(q.relativeSpread) ||
+      !MathIsValidNumber(q.volatilityRatio) ||
+      !MathIsValidNumber(q.activityRatio) ||
+      !MathIsValidNumber(q.freshnessScore) ||
+      q.spreadPips<0.0 ||
+      q.relativeSpread<0.0 ||
+      q.volatilityRatio<=0.0 ||
+      q.activityRatio<0.0 ||
+      q.freshnessScore<0.0 || q.freshnessScore>100.0)
+     {
+      q.reason="REJECT_INVALID_MARKET_METRICS";
+      return false;
+     }
 
    double score=100.0;
    score-=MathMin(35.0,q.relativeSpread*3.0);
@@ -9153,15 +9241,18 @@ void STB_ScannerRun()
    STB_SortCandidates(g_scannerTop10);
    g_scannerTop10Count=ArraySize(g_scannerTop10);
 
-   if(g_scannerTop10Count<=0)
+   // Confidence is based on the complete revalidated/reranked watchlist, not
+   // the truncated execution Top-N. In particular, TopN=1 must not bypass
+   // the configured runner-up gap when a second valid candidate exists.
+   if(g_scannerWatchlistCount<=0)
       g_scannerConfidence="NO_CLEAR_WINNER";
    else
      {
-      double topScore=g_scannerTop10[0].opportunityScore;
+      double topScore=g_scannerWatchlist[0].opportunityScore;
       bool clear=(topScore>=InpScannerMinScore);
 
-      if(clear && g_scannerTop10Count>1)
-         clear=(topScore-g_scannerTop10[1].opportunityScore)>=InpScannerMinTopGap;
+      if(clear && g_scannerWatchlistCount>1)
+         clear=(topScore-g_scannerWatchlist[1].opportunityScore)>=InpScannerMinTopGap;
 
       g_scannerConfidence=(clear ? "CLEAR":"WEAK");
      }
