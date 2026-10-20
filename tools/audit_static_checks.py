@@ -213,6 +213,13 @@ def main() -> int:
           "if(clear && g_scannerWatchlistCount>1)" in scanner_run and
           "g_scannerWatchlist[1].opportunityScore" in scanner_run and
           "if(clear && g_scannerTop10Count>1)" not in scanner_run),
+        ("scanner dashboard ready counts reflect final revalidated watchlist, not discovery candidates",
+          "int finalBuyReady=0;" in scanner_run and
+          "int finalSellReady=0;" in scanner_run and
+          "g_panelScanBuyReady=finalBuyReady;" in scanner_run and
+          "g_panelScanSellReady=finalSellReady;" in scanner_run and
+          "g_panelScanBuyReady=g_scannerBuyCount;" not in scanner_run and
+          "g_panelScanSellReady=g_scannerSellCount;" not in scanner_run),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
