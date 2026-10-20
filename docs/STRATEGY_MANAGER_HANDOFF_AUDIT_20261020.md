@@ -345,7 +345,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 ## Current status
 
-**Release status remains NOT VERIFIED.** The prior exact-source tree compiled with MetaEditor 5.0.0.6274 at 0 errors/0 warnings (workflow `39490351228`), and its static/safety checks passed. A newer scanner allocation fail-closed patch is now under fresh exact-tree compile and static/safety validation; those results must be checked before calling this checkpoint compile-verified. No compile or static result certifies runtime behavior or trading performance.
+**Release status remains NOT VERIFIED.** The prior exact-source tree compiled with MetaEditor 5.0.0.6274 at 0 errors/0 warnings (workflow `39490351228`), and its static/safety checks passed. Subsequent integrated scanner changes add fail-closed array-allocation handling and make dashboard ready counts reflect the final revalidated watchlist; exact-head compile/static/safety validation is pending. No compile or static result certifies runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
 
@@ -366,3 +366,11 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Correction:** `STB_ScannerAllocationAbort()` now releases temporary symbol selections where safe, clears current/watchlist/Top-N candidates and dashboard readiness, sets scanner status to `ALLOCATION_FAILED`, records a diagnostic, and returns without leaving a candidate available for execution. The scanner checks resize results at each listed stage and invokes the abort path on failure. Added a static-audit regression assertion for the fail-closed behavior.
 
 **Verification status:** Source commit `00eb7d0d706d64144d902e962f96c9f15a806b65`; fetch-back verified at blob `6559da7d692260b01cd10e3cf966fac590603c76`. Initial static audit for the source commit passed (run `39491472637`); the dedicated regression assertion was then added in commit `ff6774ae091d16c08470148ea8000f278c7031a6`. Re-run compile/static/safety workflows for the latest branch head before accepting this correction. Runtime allocation-fault injection and end-to-end scanner/manager tests NOT RUN.
+
+### STR-A56 — Scanner dashboard readiness counters included candidates rejected during final revalidation
+
+**Evidence:** The scanner increments `g_scannerBuyCount` / `g_scannerSellCount` during discovery, before final setup revalidation, refreshed market-quality/regime evaluation, and final setup-age checks. The dashboard previously copied these discovery counts into fields named `g_panelScanBuyReady` and `g_panelScanSellReady`, which could overstate final ready candidates.
+
+**Correction:** Dashboard ready counts are now derived from the final revalidated `g_scannerWatchlist`. Discovery counters remain available for diagnostic candidate totals. A static-audit regression assertion verifies that the dashboard fields no longer consume the pre-validation counters.
+
+**Verification status:** Source commit `e16147a08a72a1a3a290daaa4987cbd1885935d1`; fetch-back pending until the next verification step. The static-audit regression assertion is in commit `87fcc3fefb53fe9903842efb75d53e25d7ab21ec`. Exact-head compile/static/safety workflows are pending. Runtime scanner/manager tests NOT RUN.
