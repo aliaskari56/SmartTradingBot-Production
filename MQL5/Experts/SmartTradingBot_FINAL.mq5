@@ -3965,7 +3965,14 @@ void STB_ManagePositionImmediately(const ulong ticket)
    if(ticket==0 || !STB_IsProtectionPosition(ticket))
       return;
    string symbol=PositionGetString(POSITION_SYMBOL);
-   STB_ExposureEnsure(ticket,true);
+   int exposureIdx=STB_ExposureEnsure(ticket,true);
+   if(exposureIdx<0)
+     {
+      Print("STB POSITION HANDOFF DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return;
+     }
    STB_GeomStore(ticket,true,
                  PositionGetDouble(POSITION_PRICE_OPEN),
                  PositionGetDouble(POSITION_SL),
@@ -4972,7 +4979,19 @@ bool STB_GeomIsKnown(const ulong ticket,const bool isPosition,
    int idx=STB_ExposureFind(ticket);
    if(idx<0)
      {
-      STB_GeomStore(ticket,isPosition,entry,sl,tp);
+      // Do not report geometry as known unless a registry row was actually
+      // allocated and seeded. Allocation failure must remain distinguishable
+      // from a successful baseline initialization.
+      idx=STB_ExposureEnsure(ticket,isPosition);
+      if(idx<0)
+        {
+         Print("STB geometry baseline unavailable ticket=",ticket,
+               " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+         return false;
+        }
+      g_stbExposure[idx].entry=entry;
+      g_stbExposure[idx].sl=sl;
+      g_stbExposure[idx].tp=tp;
       return true;
      }
    double tol=STB_GeomTolerance(symbol);
@@ -5013,6 +5032,12 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
       double e=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
       double tp=PositionGetDouble(POSITION_TP);
+      if(STB_ExposureEnsure(ticket,true)<0)
+        {
+         Print("STB POSITION GEOMETRY INTAKE DEFERRED ticket=",ticket,
+               " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+         return;
+        }
       if(!STB_GeomIsKnown(ticket,true,e,sl,tp,symbol))
          Print("STB POSITION GEOMETRY UPDATED ticket=",ticket,
                " symbol=",symbol,
@@ -5032,6 +5057,12 @@ void STB_ManualOverrideIntake(const MqlTradeTransaction &trans)
       double e=OrderGetDouble(ORDER_PRICE_OPEN);
       double sl=OrderGetDouble(ORDER_SL);
       double tp=OrderGetDouble(ORDER_TP);
+      if(STB_ExposureEnsure(ticket,false)<0)
+        {
+         Print("STB ORDER GEOMETRY INTAKE DEFERRED ticket=",ticket,
+               " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+         return;
+        }
 
       if(!STB_GeomIsKnown(ticket,false,e,sl,tp,symbol))
         {
