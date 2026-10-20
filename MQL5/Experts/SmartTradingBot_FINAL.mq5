@@ -5425,6 +5425,11 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
    // not misclassified as a manual override. Failure paths restore actual state.
    STB_GeomStore(ticket,true,liveEntry,newSL,newTP);
 
+   // Consume the ticket's single-write budget on the attempt, not only on
+   // success. An immediate TP fallback must not retry a failed SL+TP request
+   // a second time in the same management cycle.
+   STB_CycleMarkWritten(ticket);
+
    ResetLastError();
    bool requestOK=trade.PositionModify(ticket,newSL,newTP);
    uint ret=trade.ResultRetcode();
