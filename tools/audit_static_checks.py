@@ -216,12 +216,12 @@ def main() -> int:
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
-          "STB_ScannerAllocationAbort(\\"PREVIOUS_SNAPSHOT\\"" in source and
-          "STB_ScannerAllocationAbort(\\"UNIVERSE_LIST\\"" in source and
-          "STB_ScannerAllocationAbort(\\"CANDIDATE_LIST\\"" in source and
-          "STB_ScannerAllocationAbort(\\"INITIAL_WATCHLIST\\"" in source and
-          "STB_ScannerAllocationAbort(\\"FINAL_WATCHLIST\\"" in source and
-          "STB_ScannerAllocationAbort(\\"EXECUTION_TOPN\\"" in source and
+          'STB_ScannerAllocationAbort("PREVIOUS_SNAPSHOT"' in source and
+          'STB_ScannerAllocationAbort("UNIVERSE_LIST"' in source and
+          'STB_ScannerAllocationAbort("CANDIDATE_LIST"' in source and
+          'STB_ScannerAllocationAbort("INITIAL_WATCHLIST"' in source and
+          'STB_ScannerAllocationAbort("FINAL_WATCHLIST"' in source and
+          'STB_ScannerAllocationAbort("EXECUTION_TOPN"' in source and
           "ArrayFree(g_scannerTop10);" in source and
           "ArrayFree(g_scannerWatchlist);" in source and
           "ArrayFree(g_scannerCurrent);" in source and
