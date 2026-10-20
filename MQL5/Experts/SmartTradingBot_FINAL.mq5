@@ -6936,8 +6936,9 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!STB_LeaseTrackSymbol(symbol))
         {
          // Do not keep a writer lease that this instance cannot release
-         // promptly during deinitialization.
-         GlobalVariableSet(leaseKey,0.0);
+         // promptly during deinitialization. The owner sentinel is authoritative;
+         // leave the old lease timestamp untouched to avoid clobbering a new
+         // owner's timestamp in a concurrent takeover race.
          GlobalVariableSetOnCondition(ownerKey,0.0,me);
          return false;
         }
@@ -6953,8 +6954,9 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!STB_LeaseTrackSymbol(symbol))
         {
          // Do not keep a writer lease that this instance cannot release
-         // promptly during deinitialization.
-         GlobalVariableSet(leaseKey,0.0);
+         // promptly during deinitialization. The owner sentinel is authoritative;
+         // leave the old lease timestamp untouched to avoid clobbering a new
+         // owner's timestamp in a concurrent takeover race.
          GlobalVariableSetOnCondition(ownerKey,0.0,me);
          return false;
         }
@@ -6969,8 +6971,9 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!STB_LeaseTrackSymbol(symbol))
         {
          // Do not keep a writer lease that this instance cannot release
-         // promptly during deinitialization.
-         GlobalVariableSet(leaseKey,0.0);
+         // promptly during deinitialization. The owner sentinel is authoritative;
+         // leave the old lease timestamp untouched to avoid clobbering a new
+         // owner's timestamp in a concurrent takeover race.
          GlobalVariableSetOnCondition(ownerKey,0.0,me);
          return false;
         }
