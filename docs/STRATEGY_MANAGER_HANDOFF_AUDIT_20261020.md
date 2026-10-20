@@ -320,6 +320,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A41 | Pending OrderModify reports success but the order disappears before postcheck, or postcheck geometry differs | Writer returns false and caches only observed geometry when selectable; confirm next-cycle reconciliation, retry/backoff, and trail-state cleanup for vanished tickets and broker-normalized geometry | SOURCE PATH REVIEWED; TEST NOT RUN |
 
 
+
+| STR-A44 | Periodic Reconcile overwrites an existing geometry baseline before delayed POSITION/ORDER_UPDATE intake | Patched `STB_ReconcileTradeRegistry()` to seed geometry only when registry entry is unknown (`entry<=0`), preserving a known baseline for later event comparison; verify startup recovery, own writes, manual edits, zero-SL/TP, delayed callbacks, and restart | SOURCE PATCHED AND FETCH-BACK VERIFIED; COMPILE/RUNTIME TEST NOT RUN |
 | STR-A43 | Manual pending-order geometry changes while Reconcile runs before delayed `TRADE_TRANSACTION_ORDER_UPDATE` intake | Reconcile unconditionally refreshes cached geometry via `STB_GeomStore`; a later update event may compare against the already-refreshed snapshot and fail to recognize the manual edit/override. Confirm event ordering and intended override semantics; consider separating reconciliation seeding from change detection | SOURCE PATH REVIEWED; RACE/BEHAVIOR TEST NOT RUN |
 | STR-A42 | Pending trail lifecycle after fill/cancel/delete or ownership loss | ManageOne deactivates state when OrderSelect fails, order is no longer managed, type changes, or symbol differs; process prunes inactive records; verify transaction ordering, position handoff, and repeated restart/reconciliation with functional tests | SOURCE PATH REVIEWED; TEST NOT RUN |
 
