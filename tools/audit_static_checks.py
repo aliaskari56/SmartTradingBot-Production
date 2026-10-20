@@ -213,6 +213,19 @@ def main() -> int:
           "if(clear && g_scannerWatchlistCount>1)" in scanner_run and
           "g_scannerWatchlist[1].opportunityScore" in scanner_run and
           "if(clear && g_scannerTop10Count>1)" not in scanner_run),
+        ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
+          "void STB_ScannerAllocationAbort(" in source and
+          'g_scannerStatus="ALLOCATION_FAILED";' in source and
+          "STB_ScannerAllocationAbort(\\"PREVIOUS_SNAPSHOT\\"" in source and
+          "STB_ScannerAllocationAbort(\\"UNIVERSE_LIST\\"" in source and
+          "STB_ScannerAllocationAbort(\\"CANDIDATE_LIST\\"" in source and
+          "STB_ScannerAllocationAbort(\\"INITIAL_WATCHLIST\\"" in source and
+          "STB_ScannerAllocationAbort(\\"FINAL_WATCHLIST\\"" in source and
+          "STB_ScannerAllocationAbort(\\"EXECUTION_TOPN\\"" in source and
+          "ArrayFree(g_scannerTop10);" in source and
+          "ArrayFree(g_scannerWatchlist);" in source and
+          "ArrayFree(g_scannerCurrent);" in source and
+          "no candidate may be executed" in source),
         ("M15 structure trigger requires a fresh close-crossing of a confirmed swing",
           "r[s].close>highs[i].price && r[s+1].close<=highs[i].price" in detect_structure and
           "r[s].close<lows[i].price && r[s+1].close>=lows[i].price" in detect_structure and
