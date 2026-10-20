@@ -6758,7 +6758,10 @@ bool STB_SymbolManagementOwned(const string symbol)
    double me=(double)((long)ChartID());
    string ownerKey=STB_MgmtOwnerKey(symbol);
    string leaseKey=STB_MgmtLeaseKey(symbol);
-   datetime now=TimeCurrent();
+   // Use terminal-local wall-clock time for the lease TTL. Server time may
+   // stop advancing when quotes are absent, which can otherwise delay stale
+   // owner reclamation or make the TTL measure market-time rather than elapsed time.
+   datetime now=TimeLocal();
 
    // Create the sentinel without overwriting a concurrent claimant. A plain
    // GlobalVariableSet(ownerKey,0) after a missing-key check can race and erase
