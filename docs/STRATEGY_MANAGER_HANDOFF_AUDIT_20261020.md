@@ -76,6 +76,14 @@
 
 **Disposition:** Treat bar-count age and elapsed-time age as separate concepts. Specify which one `InpMaxSetupAgeBars` means, then add tests around weekends/session gaps, missing bars, and a newly closed M15 candle. Do not silently replace one with the other without confirming intended behavior.
 
+### STR-AUD-07 — Status after source correction: setup age now uses observed M15 bar shifts
+
+**Correction:** Commit `e7f596bc05e68d31d595da2d32e9b94634c2873b` replaces both discovery and watchlist wall-clock calculations `(TimeCurrent()-setupTime)/900` with `iBarShift(symbol,PERIOD_M15,setupTime,true)-1`. If the exact setup bar cannot be located, the candidate is rejected with an explicit diagnostic rather than silently treated as age zero.
+
+**Expected behavior:** A setup on the most recently closed M15 bar has age 0; elapsed weekends/session closures do not increment age as if M15 bars had traded.
+
+**Verification status:** The updated source was fetched back from GitHub; both old wall-clock formulas are absent and both new stage-specific checks are present. Compile, sparse-history behavior, and Strategy Tester coverage remain NOT RUN.
+
 ### STR-AUD-08 — Fallback candidates can inherit a confidence decision made for a different winner
 
 **Evidence:** `STB_ExecuteTopCandidate()` checks `g_scannerConfidence` once before iterating through `g_scannerTop10`. If the top-ranked candidate later fails symbol selection, entry-lock acquisition, final revalidation, the final auto gate, or placement, the loop can continue to the next candidate. The confidence label was calculated earlier from the top two candidates in the revalidated watchlist, not from a fresh comparison of the fallback candidate against its current runner-up.
@@ -286,6 +294,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A30 | Watchlist revalidation changes market-quality/regime scores after initial stability calculation | Final ranking follows the documented stability-score contract | NOT RUN |
 | STR-A31 | Top candidate fails final validation while fallback has insufficient gap to next candidate | Fallback is blocked; no candidate with uncleared confidence is submitted | SOURCE PATCHED; TEST NOT RUN |
 | STR-A32 | Structure, FVG, and origin-candle patterns occur in nearby but different impulses | Candidate is accepted/rejected according to an explicit shared BOS/displacement contract; unrelated pattern combination is rejected if contract requires event identity | CONTRACT/TEST NOT DEFINED |
+| STR-A33 | BOS occurs before a weekend/session gap; wall-clock age would exceed observed bar age | Discovery and watchlist age agree with M15 bar shifts; missing exact setup bar is explicitly rejected | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
