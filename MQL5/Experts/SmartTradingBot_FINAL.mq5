@@ -4000,7 +4000,13 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
          // pending order could be mistaken for an unknown geometry snapshot.
          if(IsManagedOrder(trans.order))
            {
-            STB_ExposureEnsure(trans.order,false);
+            int exposureIdx=STB_ExposureEnsure(trans.order,false);
+            if(exposureIdx<0)
+              {
+               Print("STB ORDER INTAKE DEFERRED ticket=",trans.order,
+                     " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+               return;
+              }
             STB_GeomStore(trans.order,false,
                           OrderGetDouble(ORDER_PRICE_OPEN),
                           OrderGetDouble(ORDER_SL),
@@ -4032,15 +4038,25 @@ void STB_TradeIntakeFromTransaction(const MqlTradeTransaction &trans)
             double positionSL=PositionGetDouble(POSITION_SL);
             double positionTP=PositionGetDouble(POSITION_TP);
 
-            STB_ExposureEnsure(trans.position,true);
-            STB_GeomStore(trans.position,true,
-                          positionEntry,positionSL,positionTP);
+            int exposureIdx=STB_ExposureEnsure(trans.position,true);
+            if(exposureIdx>=0)
+              {
+               STB_GeomStore(trans.position,true,
+                             positionEntry,positionSL,positionTP);
 
-            Print("STB POSITION PROTECTION ACTIVE after fill ticket=",
-                   IntegerToString((int)trans.position),
-                   " symbol=",positionSymbol,
-                   " SL=",DoubleToString(positionSL,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)),
-                   " TP=",DoubleToString(positionTP,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)));
+               Print("STB POSITION PROTECTION ACTIVE after fill ticket=",
+                      IntegerToString((int)trans.position),
+                      " symbol=",positionSymbol,
+                      " SL=",DoubleToString(positionSL,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)),
+                      " TP=",DoubleToString(positionTP,(int)SymbolInfoInteger(positionSymbol,SYMBOL_DIGITS)));
+              }
+            else
+              {
+               Print("STB POSITION BASELINE DEFERRED after fill ticket=",
+                     trans.position,
+                     " symbol=",positionSymbol,
+                     " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+              }
            }
 
          // SIMPLIFIED: origin registry call removed.
