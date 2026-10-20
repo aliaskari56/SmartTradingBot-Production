@@ -5028,6 +5028,22 @@ bool STB_GeomIsKnown(const ulong ticket,const bool isPosition,
       g_stbExposure[idx].tp=tp;
       return true;
      }
+
+   // A registry row may have been allocated by ExposureEnsure before this
+   // first geometry comparison. Its zero entry is an unseeded sentinel, not
+   // evidence that the current terminal geometry is a manual edit.
+   // Seed the first observed snapshot and report it as known; subsequent
+   // changes are compared against this baseline normally.
+   if(g_stbExposure[idx].entry<=0.0 && entry>0.0)
+     {
+      g_stbExposure[idx].entry=entry;
+      g_stbExposure[idx].sl=sl;
+      g_stbExposure[idx].tp=tp;
+      Print("STB geometry baseline seeded ticket=",ticket,
+            " reason=FIRST_VALID_SNAPSHOT");
+      return true;
+     }
+
    double tol=STB_GeomTolerance(symbol);
    return (MathAbs(g_stbExposure[idx].entry-entry)<=tol &&
            MathAbs(g_stbExposure[idx].sl-sl)<=tol &&
