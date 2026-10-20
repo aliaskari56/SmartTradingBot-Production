@@ -389,6 +389,14 @@ def main() -> int:
          'q.reason="REJECT_RELATIVE_SPREAD";' in source and
          "q.relativeSpread>InpMaxRelativeSpreadPct" in source and
          "!MathIsValidNumber(InpMaxRelativeSpreadPct)" in source),
+        ("selected structural SL can attach a missing structural TP in the same verified broker request",
+         "double tpForRequest=-1.0" in source and
+         "if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL" in source and
+         "ModifyPositionSL(ticket,chosenSL,false,tpForRequest)" in source and
+         "const double requestedTP=-1.0" in source),
+        ("manager-generated position TP uses deterministic base RR, not stale active-profile state",
+         "InpMinimumRR,tp,source" in source and
+         "STB_EffectiveMinimumRR(),tp,source" not in source),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
