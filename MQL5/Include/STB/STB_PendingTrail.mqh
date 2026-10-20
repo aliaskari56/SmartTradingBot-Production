@@ -799,6 +799,22 @@ void STB_PendingTrailOnOrderFilled(const ulong ticket)
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return;
 
+   // DEAL_ADD can represent a partial fill. If the original pending ticket
+   // still exists in the active-order pool, keep its trail state alive for
+   // the unfilled remainder; only hand off after the pending order is gone.
+   // Transaction arrival order is not assumed: the next manager pass will
+   // also deactivate stale state if the order disappears after this check.
+   if(OrderSelect(ticket) &&
+      IsManagedOrder(ticket) &&
+      STB_PendingTrailIsManagedType(OrderGetInteger(ORDER_TYPE)))
+   {
+      Print("PENDING_PARTIAL_FILL_REMAINDER ticket=",IntegerToString((int)ticket),
+            " symbol=",OrderGetString(ORDER_SYMBOL),
+            " remainingVolume=",DoubleToString(OrderGetDouble(ORDER_VOLUME_CURRENT),2),
+            " action=KEEP_TRAIL_ACTIVE");
+      return;
+   }
+
    Print("PENDING_TRIGGERED ticket=",IntegerToString((int)ticket),
          " symbol=",g_stbPendingTrail[idx].symbol,
          " type=",STB_PendingTrailTypeName(g_stbPendingTrail[idx].orderType));
