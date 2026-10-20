@@ -257,9 +257,12 @@ def main() -> int:
           "if(ArrayResize(lows,n+1)!=n+1)" in collect_swings and
           collect_swings.count("ArrayFree(highs);") >= 2 and
           collect_swings.count("ArrayFree(lows);") >= 2),
-        ("management lease tracking allocation failure is diagnosed",
+        ("management lease tracking allocation failure releases the untrackable writer lease",
+          "bool STB_LeaseTrackSymbol(const string symbol)" in source and
           "if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)" in source and
-          "STB management lease tracking allocation failed" in source),
+          "STB management lease tracking allocation failed" in source and
+          source.count("if(!STB_LeaseTrackSymbol(symbol))") == 3 and
+          source.count("GlobalVariableSetOnCondition(ownerKey,0.0,me);") >= 4),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
