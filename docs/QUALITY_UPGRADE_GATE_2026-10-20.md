@@ -2,26 +2,29 @@
 
 ## Repository control
 
-- Production baseline: main at 578621216f2f62ade33ab8e341a506e253b22bbf.
-- Development branch: fix/structure-first-fvg-trailing-20261020.
-- Latest source-code commit at this checkpoint: 77253ea5cd23edf67fd7083775c5ca27b979764d.
-- Exact compiled source blob: 0b80607d25e31372d7a23b91078cfb494d7f0e13.
-- Exact compile/CI checkpoint: 91669e55f3516247f07d2d3f8e633af66c613fe5. Subsequent branch commits update documentation/audit tests only; no EA or include source changed after that compiled blob.
-- Pending-trail include blob: b45952dcb34f854dadfa4059473402ea74b96e41.
-- Static-audit tool blob: e52a25f7f642c0be84a15a35a172614a4d6dc94f.
-- main has not been edited or merged into. No source or EX5 has been copied to the active MetaTrader terminal.
+- Production baseline: `main` at `578621216f2f62ade33ab8e341a506e253b22bbf`.
+- Development branch: `fix/structure-first-fvg-trailing-20261020`.
+- Latest source-code commit in this scanner checkpoint: `ea67c43b92cb5b9c65ee7d170de7795561f37672` (`fix: harden scanner quote integrity and top-gap ranking`).
+- Exact source Git blob: `40adb7effcdb024be04dd4ecea2048a02d30f0de`; source SHA-256 from build provenance: `EC95BAE59896D1E8227F87A71D299720A8A3571045BEFD4EEEB0A4B3C7B3A259`.
+- Pending-trail include blob remains `b45952dcb34f854dadfa4059473402ea74b96e41`.
+- Static-audit tool blob in this checkpoint: `488a98e64d32592cd64b95217612ae52eb0eb6e7`.
+- Main has not been edited or merged into. No source or EX5 was copied to the active MetaTrader terminal.
 
-## CI evidence for this revision
+## CI evidence for this source commit
 
 | Check | Result | Evidence |
 |---|---|---|
-| MetaEditor Windows compile | **0 errors, 0 warnings** | [Run 39391437094](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094) |
-| Static source/invariant audit | **Passed** | [Run 39391436796](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436796) |
-| Trading safety defaults | **Passed** | [Run 39391436842](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436842) |
+| MetaEditor Windows compile | **0 errors, 0 warnings** | [Run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457) |
+| Static source/invariant audit | **Passed** | [Run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088) |
+| Trading safety defaults | **Passed** | [Run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310) |
 
-The compile workflow archived a fresh EX5, compiler log and provenance manifest as artifact [metaeditor-build-91669e55f3516247f07d2d3f8e633af66c613fe5](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094/artifacts/12249861519). This is a CI build artifact only; it has **not** been deployed to the user's terminal.
+The fresh compile artifact is [artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788). Its provenance records:
+- Source SHA-256: `EC95BAE59896D1E8227F87A71D299720A8A3571045BEFD4EEEB0A4B3C7B3A259`.
+- EX5 SHA-256: `99229960CD83699225ED6318791B4BB2929CA580AA7B0283130DF4252243B602`.
+- MetaEditor: `5.0.0.6274`; compile time `2026-10-20T16:11:57.3635453Z`.
+- The artifact contains a fresh `SmartTradingBot_FINAL.ex5`, compiler log and `provenance.json`; it is a CI test artifact, not a terminal deployment.
 
-**Important:** compile/static CI success verifies syntax and listed invariants, not trading edge, full broker behavior, or profitability. No Strategy Tester backtest, out-of-sample run, or demo soak has been recorded for this upgraded build yet. The branch is therefore **not release-ready**.
+**Important:** compile/static CI success verifies syntax and the listed source invariants, not scanner runtime decisions, broker behavior, profitability, or release readiness. Scanner functional tests SCN-03–SCN-08 remain **NOT RUN**; no Strategy Tester backtest, out-of-sample run, or demo soak has been recorded for this correction. The branch remains **NOT release-ready**.
 
 ## Changes now present on the working branch
 
@@ -75,11 +78,6 @@ The compile workflow archived a fresh EX5, compiler log and provenance manifest 
 
 ## Scanner correction checkpoint — 2026-10-20
 
-The working branch now includes shared quote-integrity validation, rejection of non-finite market-quality metrics, and full-watchlist competition-gap evaluation. This is a targeted scanner correctness/diagnostics change; it does not replace the existing 65/20/10/5 ranking weights or loosen a hard gate.
+The source correction is committed as `ea67c43b92cb5b9c65ee7d170de7795561f37672`. Its exact source compiled with MetaEditor `5.0.0.6274` with **0 errors, 0 warnings** ([run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457)); the static scanner/architecture audit passed ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)); trading safety defaults passed ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)). Build provenance and a fresh EX5 are archived in [artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788).
 
-Required evidence after this source change:
-- exact-source MetaEditor compile and static checks on the resulting commit;
-- deterministic scanner tests SCN-03 through SCN-07 in the acceptance matrix;
-- frozen baseline-versus-candidate Strategy Tester comparison for SCN-08.
-
-Until those runtime comparisons are executed and reconciled, scanner functional tests remain NOT RUN and the branch remains NOT release-ready.
+The code change adds shared quote-integrity validation, finite-market-metric rejection and full-watchlist competition-gap evaluation. It does not change the existing 65/20/10/5 ranking weights, hard-spread threshold or regime thresholds. Deterministic scanner cases SCN-03 through SCN-07 and the frozen baseline/candidate Strategy Tester comparison SCN-08 remain **NOT RUN**. Static/compile pass is not runtime or profitability evidence; the branch remains **NOT release-ready**.

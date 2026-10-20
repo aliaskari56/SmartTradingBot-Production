@@ -142,9 +142,9 @@ All rows below are **functional tests**. Passing CI compilation or static string
 
 ## Current branch checkpoint — 2026-10-20
 
-- Production main remains at baseline commit 578621216f2f62ade33ab8e341a506e253b22bbf. Work is confined to fix/structure-first-fvg-trailing-20261020.
-- Exact source blob compiled in CI: 0b80607d25e31372d7a23b91078cfb494d7f0e13. Pending-trail include blob: b45952dcb34f854dadfa4059473402ea74b96e41.
-- MetaEditor compile on the matching branch checkpoint: **0 errors, 0 warnings** ([run 39391437094](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094)); the run contains a fresh EX5, compile log and provenance manifest as [artifact 12249861519](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094/artifacts/12249861519).
-- Static source/invariant audit passed ([run 39391436796](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436796)); trading safety defaults passed ([run 39391436842](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436842)).
-- The compiled artifact is a CI test artifact, not a terminal deployment. No Strategy Tester, out-of-sample or demo-soak result is recorded for this upgrade; every functional row in section H remains NOT RUN.
-- Release decision remains **BLOCKED / NOT VERIFIED**. The source must not be copied to the active MT5 terminal or merged to main before the functional, historical, out-of-sample and demo gates pass.
+- Production main remains at baseline commit `578621216f2f62ade33ab8e341a506e253b22bbf`. Source work is confined to `fix/structure-first-fvg-trailing-20261020`.
+- Latest source-code commit: `ea67c43b92cb5b9c65ee7d170de7795561f37672`; source Git blob `40adb7effcdb024be04dd4ecea2048a02d30f0de`; pending-trail include blob `b45952dcb34f854dadfa4059473402ea74b96e41`.
+- MetaEditor compile: **0 errors, 0 warnings** ([run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457)); fresh EX5, compiler log and provenance manifest ([artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788)).
+- Provenance: source SHA-256 `EC95BAE59896D1E8227F87A71D299720A8A3571045BEFD4EEEB0A4B3C7B3A259`; EX5 SHA-256 `99229960CD83699225ED6318791B4BB2929CA580AA7B0283130DF4252243B602`; MetaEditor `5.0.0.6274`.
+- Static source/invariant audit passed ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)); trading safety defaults passed ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)).
+- The compile artifact is a CI test artifact, not a terminal deployment. Scanner tests SCN-03 through SCN-08 and all Strategy Tester/out-of-sample/demo gates remain NOT RUN. Release decision remains **BLOCKED / NOT VERIFIED**; do not copy this source/EX5 to the active terminal or merge to main before the functional release gates pass.
