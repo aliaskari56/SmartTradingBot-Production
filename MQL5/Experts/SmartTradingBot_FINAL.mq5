@@ -6839,21 +6839,25 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 // broker writer, regardless of which magic/EA created it.
 string g_stbLeaseSymbols[];
 
-void STB_LeaseTrackSymbol(const string symbol)
+bool STB_LeaseTrackSymbol(const string symbol)
   {
    if(symbol=="")
-      return;
+      return false;
 
    for(int i=0;i<ArraySize(g_stbLeaseSymbols);i++)
       if(g_stbLeaseSymbols[i]==symbol)
-         return;
+         return true;
 
    int n=ArraySize(g_stbLeaseSymbols);
    if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
+     {
       g_stbLeaseSymbols[n]=symbol;
-   else
-      Print("STB management lease tracking allocation failed symbol=",symbol,
-            " reason=LEASE_WILL_EXPIRE_BY_TIMEOUT");
+      return true;
+     }
+
+   Print("STB management lease tracking allocation failed symbol=",symbol,
+         " reason=LEASE_CLAIM_WILL_BE_RELEASED");
+   return false;
   }
 
 string STB_MgmtScopeKey(const string purpose,const string symbol)
@@ -6929,7 +6933,14 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,0.0))
          return false; // P11 atomic claim (CAS 0 -> me)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+        {
+         // Do not keep a writer lease that this instance cannot release
+         // promptly during deinitialization.
+         GlobalVariableSet(leaseKey,0.0);
+         GlobalVariableSetOnCondition(ownerKey,0.0,me);
+         return false;
+        }
       return true;
      }
 
@@ -6939,7 +6950,14 @@ bool STB_SymbolManagementOwned(const string symbol)
    if(owner==me)
      {
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+        {
+         // Do not keep a writer lease that this instance cannot release
+         // promptly during deinitialization.
+         GlobalVariableSet(leaseKey,0.0);
+         GlobalVariableSetOnCondition(ownerKey,0.0,me);
+         return false;
+        }
       return true;
      }
 
@@ -6948,7 +6966,14 @@ bool STB_SymbolManagementOwned(const string symbol)
       if(!GlobalVariableSetOnCondition(ownerKey,me,owner))
          return false; // P11 atomic stale takeover (CAS)
       GlobalVariableSet(leaseKey,(double)now);
-      STB_LeaseTrackSymbol(symbol);
+      if(!STB_LeaseTrackSymbol(symbol))
+        {
+         // Do not keep a writer lease that this instance cannot release
+         // promptly during deinitialization.
+         GlobalVariableSet(leaseKey,0.0);
+         GlobalVariableSetOnCondition(ownerKey,0.0,me);
+         return false;
+        }
       return true;
      }
 
