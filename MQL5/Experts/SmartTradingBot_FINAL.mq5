@@ -1314,7 +1314,12 @@ void STB_LogBuildReject(const string symbol,
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB diagnostic state allocation failed symbol=",symbol,
+               " direction=",direction);
+         return;
+        }
       g_diagnosticStates[idx].symbol=symbol;
       g_diagnosticStates[idx].direction=direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -1358,7 +1363,12 @@ void STB_LogSetupReady(const Setup &s)
    if(idx<0)
      {
       idx=ArraySize(g_diagnosticStates);
-      ArrayResize(g_diagnosticStates,idx+1);
+      if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)
+        {
+         Print("STB ready-state diagnostic allocation failed symbol=",s.symbol,
+               " direction=",s.direction);
+         return;
+        }
       g_diagnosticStates[idx].symbol=s.symbol;
       g_diagnosticStates[idx].direction=s.direction;
       g_diagnosticStates[idx].lastBar=0;
@@ -2393,7 +2403,14 @@ bool EnsureIndicatorHandles(const string symbol,int &rsiHandle,int &cciHandle)
    if(idx<0)
      {
       int n=ArraySize(g_indicatorCache);
-      ArrayResize(g_indicatorCache,n+1);
+      if(ArrayResize(g_indicatorCache,n+1)!=n+1)
+        {
+         IndicatorRelease(hRsi);
+         IndicatorRelease(hCci);
+         Print("STB indicator cache allocation failed symbol=",symbol,
+               " reason=HANDLE_CACHE_UNAVAILABLE");
+         return false;
+        }
       g_indicatorCache[n].symbol=symbol;
       g_indicatorCache[n].rsiHandle=hRsi;
       g_indicatorCache[n].cciHandle=hCci;
@@ -2544,8 +2561,12 @@ int CollectSwings(const string symbol,
    if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
-   ArrayResize(highs,0);
-   ArrayResize(lows,0);
+   if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)
+     {
+      Print("STB swing buffers reset failed symbol=",symbol,
+            " timeframe=",EnumToString(tf));
+      return 0;
+     }
 
    int left  = STB_EffectiveSwingLeft(tf);
    int right = STB_EffectiveSwingRight(tf);
@@ -2585,7 +2606,14 @@ int CollectSwings(const string symbol,
       if(isHigh)
         {
          int n=ArraySize(highs);
-         ArrayResize(highs,n+1);
+         if(ArrayResize(highs,n+1)!=n+1)
+           {
+            Print("STB swing-high allocation failed symbol=",symbol,
+                  " timeframe=",EnumToString(tf));
+            ArrayFree(highs);
+            ArrayFree(lows);
+            return 0;
+           }
 
          highs[n].shift=s;
          highs[n].time=r[s].time;
@@ -2596,7 +2624,14 @@ int CollectSwings(const string symbol,
       if(isLow)
         {
          int n=ArraySize(lows);
-         ArrayResize(lows,n+1);
+         if(ArrayResize(lows,n+1)!=n+1)
+           {
+            Print("STB swing-low allocation failed symbol=",symbol,
+                  " timeframe=",EnumToString(tf));
+            ArrayFree(highs);
+            ArrayFree(lows);
+            return 0;
+           }
 
          lows[n].shift=s;
          lows[n].time=r[s].time;
@@ -6816,6 +6851,9 @@ void STB_LeaseTrackSymbol(const string symbol)
    int n=ArraySize(g_stbLeaseSymbols);
    if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)
       g_stbLeaseSymbols[n]=symbol;
+   else
+      Print("STB management lease tracking allocation failed symbol=",symbol,
+            " reason=LEASE_WILL_EXPIRE_BY_TIMEOUT");
   }
 
 string STB_MgmtScopeKey(const string purpose,const string symbol)
