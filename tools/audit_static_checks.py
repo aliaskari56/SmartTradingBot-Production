@@ -357,6 +357,33 @@ def main() -> int:
          source.count("riskMoney>0.0 && MathIsValidNumber(riskMoney)") >= 2),
         ("default M15 setup age is bounded rather than unlimited",
          "InpMaxSetupAgeBars       = 4;" in source),
+        ("only one direct PositionModify call exists in the shared verified broker writer",
+         source.count("trade.PositionModify(") == 1 and
+         "bool STB_PositionModifyBrokerVerified(" in source),
+        ("SL-only writer delegates to the shared verified position modification bridge",
+         'gv,\n                                           "SL")' in source),
+        ("structural TP manager delegates TP-only writes to the same verified bridge",
+         'failKey,"TP")' in source and
+         'bool STB_ModifyPositionTP(' in source and
+         "trade.PositionModify(ticket,sl,newTP)" not in source),
+        ("existing explicit position and pending TPs are never overwritten",
+         "if(PositionGetDouble(POSITION_TP)>0.0)\n      return true;" in source and
+         "if(OrderGetDouble(ORDER_TP)>0.0)\n      return true;" in source),
+        ("position TP management happens after SL arbitration flush",
+         source.index("STB_FlushPositionSLProposals();", source.index("void ManagePositions()")) <
+         source.index("EnsureInitialTPForPosition(ticket)", source.index("void ManagePositions()"))),
+        ("pending structural TP modification uses the central pending geometry writer",
+         "STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,false)" in source),
+        ("structural TP calculation includes RR floor, swing target, quote buffer and RR fallback",
+         "bool STB_CalculatePositionTPFromStructure(" in source and
+         "bool STB_CalculatePendingTPFromStructure(" in source and
+         'source="STRUCTURE_SWING"' in source and
+         'source="RR_FALLBACK"' in source and
+         "tick.bid+marketBuffer" in source and
+         "tick.ask-marketBuffer" in source),
+        ("managed positions and pending orders select their symbols before market-data management",
+         "SymbolSelect(symbol,true)" in source[source.index("void ManagePositions()"):source.index("void ManagePendingOrders()")] and
+         "SymbolSelect(symbol,true)" in source[source.index("void ManagePendingOrders()"):source.index("double DirectionExposureVolume(")]),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
