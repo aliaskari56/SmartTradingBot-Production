@@ -347,6 +347,16 @@ def main() -> int:
              "!MathIsValidNumber(InpHTFMinFVGWidthATR)",
              "!MathIsValidNumber(InpStructuralTrailStartATR)",
              "!MathIsValidNumber(InpStructuralTrailBufferATR)"))),
+        ("adaptive state namespace is isolated from pre-confluence profile results",
+         "AP3|" in source and "AP2" not in source),
+        ("adaptive R expectancy uses its own risk-valid observation denominator",
+         '"RCOUNT",profile,0.0)*decay' in source and
+         '"RCOUNT",profileId,oldRCount' in source and
+         "if(hasValidRiskSample && MathIsValidNumber(rMultiple))" in source),
+        ("closed-trade learning reports whether initial monetary risk was captured",
+         source.count("riskMoney>0.0 && MathIsValidNumber(riskMoney)") >= 2),
+        ("default M15 setup age is bounded rather than unlimited",
+         "InpMaxSetupAgeBars       = 4;" in source),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
