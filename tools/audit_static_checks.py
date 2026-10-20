@@ -156,6 +156,9 @@ def main() -> int:
         source, "bool STB_CalcMarketQuality(", "bool STB_EvaluateRegime(")
     scanner_run = source_region(
         source, "void STB_ScannerRun()", "void STB_DashDeleteAll()")
+    final_revalidation = source_region(
+        source, "bool STB_FinalCandidateRevalidation(",
+        "// Serialize final scanner revalidation/submission")
     initial_pending_sl = source_region(
         source, "bool CalculateInitialPendingProtectionSL(",
         "bool VerifyPendingInitialSL(")
@@ -220,6 +223,12 @@ def main() -> int:
           "g_panelScanSellReady=finalSellReady;" in scanner_run and
           "g_panelScanBuyReady=g_scannerBuyCount;" not in scanner_run and
           "g_panelScanSellReady=g_scannerSellCount;" not in scanner_run),
+        ("final scanner-to-execution handoff rechecks effective setup age",
+          "iBarShift(c.symbol,PERIOD_M15,refreshed.setupTime,true)" in final_revalidation and
+          "STB_EffectiveMaxSetupAgeBars()" in final_revalidation and
+          'c.rejectReason="REJECT_SETUP_TOO_OLD";' in final_revalidation and
+          final_revalidation.index("if(effectiveMaxAge>0 && c.setupAgeBars>effectiveMaxAge)") <
+          final_revalidation.index("if(!ValidatePendingSetup(refreshed))")),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
           'g_scannerStatus="ALLOCATION_FAILED";' in source and
