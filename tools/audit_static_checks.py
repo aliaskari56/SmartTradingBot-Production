@@ -319,6 +319,34 @@ def main() -> int:
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
+        ("H4 trend alignment is a configurable hard entry gate",
+         "InpRequireH4TrendAlignment = true" in source and
+         "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
+        ("required local M15 FVG and Order Block are hard rejection gates",
+         "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
+         "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
+        ("HTF FVG and Order Block use only zones confirmed by the closed M15 decision time",
+         "bool STB_CheckHTFConfluence(" in source and
+         "datetime decisionTime=latestClosedM15+m15Seconds;" in source and
+         source.count("confirmedAt>decisionTime") >= 2 and
+         "r[j].time+tfSeconds>decisionTime" in source),
+        ("HTF Order Block requires a confirmed pre-impulse structural break",
+         "STB_HTFImpulseBrokePriorSwing" in source and
+         "pivotShift-rightBars<=impulseShift" in source),
+        ("structural position trailing routes candidates through shared SL arbitration",
+         "bool STB_CalculateStructuralTrailSL(" in source and
+         "STB_SubmitPositionSL(ticket,structuralSL," in source and
+         "trade.PositionModify(ticket,structuralSL" not in source),
+        ("structural trailing uses confirmed swings, ATR activation and ATR buffer",
+         "CollectSwings(symbol,InpTrailTF,lookback,highs,lows)" in source and
+         "movePrice<atr*InpStructuralTrailStartATR" in source and
+         "atr*InpStructuralTrailBufferATR" in source),
+        ("HTF and structural trail floating inputs are finite-checked",
+         all(token in source for token in (
+             "!MathIsValidNumber(InpHTFZoneMaxGapATR)",
+             "!MathIsValidNumber(InpHTFMinFVGWidthATR)",
+             "!MathIsValidNumber(InpStructuralTrailStartATR)",
+             "!MathIsValidNumber(InpStructuralTrailBufferATR)"))),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
