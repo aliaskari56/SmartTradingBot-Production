@@ -420,11 +420,6 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    double pip=PipSize(symbol);
    datetime now=TimeCurrent();
 
-   bool candleStop=(g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_BUY_STOP ||
-                    g_stbPendingTrail[idx].orderType==(long)ORDER_TYPE_SELL_STOP);
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      return false; // M5 candle-follow remains active for BUY STOP / SELL STOP
-
    // Time throttle: at most one modification per cooldown window.
    if(g_stbPendingTrail[idx].nextRetryTime>0 &&
       now<g_stbPendingTrail[idx].nextRetryTime)
@@ -500,6 +495,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return false;
 
+   // Honor per-ticket backoff before rebuilding an actionable-bar proposal.
+   // Failed candidates must not spin on every tick while waiting to retry.
+   if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())
+      return true;
+
    if(!OrderSelect(g_stbPendingTrail[idx].ticket))
    {
       // Terminal no longer exposes this order: filled (triggered),
@@ -523,13 +523,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    long orderType=OrderGetInteger(ORDER_TYPE);
 
-   // BUY STOP / SELL STOP orders explicitly opt into the M5 candle-follow
-   // lifecycle, including orders created by the chart buttons. Preserve the
-   // existing manual-override pause for LIMIT and STOP-LIMIT orders.
+   // Every supported pending type remains under automatic management,
+   // including orders created or edited manually/from mobile. Manual-override
+   // metadata is not a permanent opt-out from protective trailing.
    bool candleStop=(orderType==(long)ORDER_TYPE_BUY_STOP ||
                     orderType==(long)ORDER_TYPE_SELL_STOP);
-   if(!manual && STB_ManualOverrideIs(ticket) && !candleStop)
-      return true;
 
    if(!STB_PendingTrailIsManagedType(orderType))
    {
@@ -568,6 +566,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // SELL STOP moves only after a bullish M5 candle and anchors to its high.
    // Other pending types retain their previous live-extreme behavior.
    double extreme=0.0;
+   datetime actionableClosedBar=0;
    if(candleStop)
      {
       datetime closedBar=iTime(symbol,PERIOD_M5,1);
@@ -582,20 +581,26 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
          return true;
 
-      // Consume the closed bar only after its OHLC data passed validation.
-      // If history is temporarily unavailable, the same bar can be retried.
-      g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+      // An actionable bar is committed only after the proposal is resolved
+      // and the server write is confirmed. A rejected proposal stays retryable.
+      actionableClosedBar=closedBar;
 
       if(orderType==(long)ORDER_TYPE_BUY_STOP)
         {
          if(barClose>=barOpen)
-            return true; // only a completed bearish candle may move BUY STOP down
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+            return true; // this candle cannot move BUY STOP down
+           }
          extreme=barLow;
         }
       else
         {
          if(barClose<=barOpen)
-            return true; // only a completed bullish candle may move SELL STOP up
+           {
+            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+            return true; // this candle cannot move SELL STOP up
+           }
          extreme=barHigh;
         }
      }
@@ -620,7 +625,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(!isNewExtreme)
    {
-      // 2) No new extreme -> NO MODIFY (rate-limited).
+      // This closed candle produced no favorable new extreme. It is safe to
+      // consume; a later candle will provide a new anchor.
+      if(candleStop && actionableClosedBar>0)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
       return true;
@@ -655,7 +664,14 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                " reason=",res.reason);
       }
 
-      // State NOT committed as success.
+      // The action bar is deliberately NOT consumed: broker geometry may
+      // become valid as quotes move. Retry with the same bounded 5/15/60s policy.
+      g_stbPendingTrail[idx].failureCount++;
+      int fc=g_stbPendingTrail[idx].failureCount;
+      int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
+                            : (fc==2 ? STB_PEND_BACKOFF_2_SEC
+                                     : STB_PEND_BACKOFF_3_SEC));
+      g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
       return true;
    }
 
@@ -670,8 +686,21 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
 
-   // 4) Forward the proposal to the central submit gate. The gate applies
-   //    throttle / backoff / Step and then calls the single writer.
+   // Match the central step gate before submitting, so an insignificant
+   // proposal consumes its candle instead of being recalculated each tick.
+   double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double currentSL=OrderGetDouble(ORDER_SL);
+   double step=MathMax(0.0,InpTrailStepPips)*pip;
+   if(candleStop && step>0.0 &&
+      MathAbs(prop.entry-currentEntry)<step &&
+      MathAbs(prop.sl-currentSL)<step)
+     {
+      g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+      return true;
+     }
+
+   // 4) Forward the proposal to the central submit gate. A failed broker
+   //    write leaves the action bar unconsumed, so a later cycle can retry.
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
                                                  prop.sl,
@@ -680,6 +709,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(committed)
    {
+      if(candleStop && actionableClosedBar>0)
+         g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+
       // P4: trackedExtreme advances only in the favorable direction.
       if(direction>0)
          g_stbPendingTrail[idx].trackedExtreme=
