@@ -9552,10 +9552,23 @@ void STB_ScannerRun()
       g_scannerConfidence=(clear ? "CLEAR":"WEAK");
      }
 
+   // Dashboard "ready" counts must reflect the final revalidated watchlist,
+   // not discovery-stage candidates that may have become stale or failed a
+   // final quality/regime/age gate.
+   int finalBuyReady=0;
+   int finalSellReady=0;
+   for(int i=0;i<g_scannerWatchlistCount;i++)
+     {
+      if(g_scannerWatchlist[i].direction>0)
+         finalBuyReady++;
+      else if(g_scannerWatchlist[i].direction<0)
+         finalSellReady++;
+     }
+
    g_panelScanSymbols=g_scannerUniverseCount;
    g_panelScanTradable=g_scannerEligibleCount;
-   g_panelScanBuyReady=g_scannerBuyCount;
-   g_panelScanSellReady=g_scannerSellCount;
+   g_panelScanBuyReady=finalBuyReady;
+   g_panelScanSellReady=finalSellReady;
    g_panelScanPlacements=0;
    g_panelLastScanTime=TimeCurrent();
 
