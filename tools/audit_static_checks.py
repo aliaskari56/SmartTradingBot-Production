@@ -244,10 +244,13 @@ def main() -> int:
           "ready-state diagnostic allocation failed" in diagnostic_ready),
         ("indicator cache allocation releases newly created handles on failure",
           "if(ArrayResize(g_indicatorCache,n+1)!=n+1)" in indicator_cache and
+          'Print("STB indicator cache allocation failed symbol=",symbol,' in indicator_cache and
           indicator_cache.index("IndicatorRelease(hRsi);") <
-          indicator_cache.index("return false;") and
+          indicator_cache.index('Print("STB indicator cache allocation failed') and
           indicator_cache.index("IndicatorRelease(hCci);") <
-          indicator_cache.index("return false;")),
+          indicator_cache.index('Print("STB indicator cache allocation failed') and
+          indicator_cache.index('Print("STB indicator cache allocation failed') <
+          indicator_cache.index("return false;", indicator_cache.index('Print("STB indicator cache allocation failed'))),
         ("swing collection fails closed on reset or append allocation failure",
           "if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)" in collect_swings and
           "if(ArrayResize(highs,n+1)!=n+1)" in collect_swings and
