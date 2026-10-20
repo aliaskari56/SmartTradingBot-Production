@@ -322,7 +322,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 
 | STR-A44 | Periodic Reconcile overwrites an existing geometry baseline before delayed POSITION/ORDER_UPDATE intake | Patched `STB_ReconcileTradeRegistry()` to seed geometry only when registry entry is unknown (`entry<=0`), preserving a known baseline for later event comparison; verify startup recovery, own writes, manual edits, zero-SL/TP, delayed callbacks, and restart | SOURCE PATCHED/FETCH-BACK VERIFIED; MetaEditor compile 0 errors/0 warnings on commit `6e1a0700eed08515a785430ff57ed9353254dc47` (includes source patch); runtime behavior tests NOT RUN |
-| STR-A43 | Manual pending-order geometry changes while Reconcile runs before delayed `TRADE_TRANSACTION_ORDER_UPDATE` intake | Reconcile unconditionally refreshes cached geometry via `STB_GeomStore`; a later update event may compare against the already-refreshed snapshot and fail to recognize the manual edit/override. Confirm event ordering and intended override semantics; consider separating reconciliation seeding from change detection | SOURCE PATH REVIEWED; RACE/BEHAVIOR TEST NOT RUN |
+| STR-A43 | Manual pending-order geometry changes while Reconcile runs before delayed `TRADE_TRANSACTION_ORDER_UPDATE` intake | Original race hypothesis is addressed by STR-A44: Reconcile now seeds geometry only when the exposure registry has no known entry baseline. Verify delayed ORDER_UPDATE still detects the change and sets override under actual event ordering | SUPERSEDED BY STR-A44 PATCH; RUNTIME TEST NOT RUN |
 | STR-A42 | Pending trail lifecycle after fill/cancel/delete or ownership loss | ManageOne deactivates state when OrderSelect fails, order is no longer managed, type changes, or symbol differs; process prunes inactive records; verify transaction ordering, position handoff, and repeated restart/reconciliation with functional tests | SOURCE PATH REVIEWED; TEST NOT RUN |
 
 ## Exit criteria
@@ -336,3 +336,5 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 ## Current status
 
 **Static audit in progress; release status remains NOT VERIFIED.** This document records code paths and test obligations; it does not certify runtime behavior or trading performance.
+
+| STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
