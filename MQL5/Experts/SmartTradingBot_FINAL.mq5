@@ -8094,6 +8094,53 @@ void STB_ExecuteTopCandidate()
    for(int i=0;i<g_scannerTop10Count;i++)
      {
       STBCandidate c=g_scannerTop10[i];
+
+      // Confidence must remain valid for the candidate actually being tried.
+      // If an earlier candidate fails final validation, do not automatically
+      // promote a fallback whose own gap to the next valid watchlist entry
+      // is below the configured threshold.
+      if(i>0)
+        {
+         int watchRank=-1;
+         for(int w=0;w<g_scannerWatchlistCount;w++)
+           {
+            if(g_scannerWatchlist[w].symbol==c.symbol &&
+               g_scannerWatchlist[w].direction==c.direction &&
+               g_scannerWatchlist[w].setupTime==c.setupTime)
+              {
+               watchRank=w;
+               break;
+              }
+           }
+
+         if(watchRank<0)
+           {
+            Print("STB CANDIDATE REJECT stage=FALLBACK_CONFIDENCE",
+                  " symbol=",c.symbol,
+                  " reason=CANDIDATE_NOT_IN_REVALIDATED_WATCHLIST");
+            break;
+           }
+
+         double fallbackScore=g_scannerWatchlist[watchRank].opportunityScore;
+         double nextScore=(watchRank+1<g_scannerWatchlistCount ?
+                           g_scannerWatchlist[watchRank+1].opportunityScore:0.0);
+         bool fallbackClear=(fallbackScore>=InpScannerMinScore);
+         if(fallbackClear && watchRank+1<g_scannerWatchlistCount)
+            fallbackClear=(fallbackScore-nextScore)>=InpScannerMinTopGap;
+
+         if(!fallbackClear)
+           {
+            Print("STB EXECUTION SKIP reason=FALLBACK_CONFIDENCE_NOT_CLEAR",
+                  " symbol=",c.symbol,
+                  " direction=",(c.direction>0 ? "BUY":"SELL"),
+                  " score=",DoubleToString(fallbackScore,1),
+                  " nextScore=",DoubleToString(nextScore,1),
+                  " requiredGap=",DoubleToString(InpScannerMinTopGap,1),
+                  " watchRank=",IntegerToString(watchRank+1));
+            break;
+           }
+        }
+
       string symbol=c.symbol;
       bool wasSelected=(bool)SymbolInfoInteger(symbol,SYMBOL_SELECT);
 
