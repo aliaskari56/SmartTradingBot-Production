@@ -170,9 +170,18 @@ def main() -> int:
          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
          "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
-        ("manual override pause is retained for non-STOP orders while STOP candle-follow is explicit",
-         "&& !stbCandleStop" in source and
-         "&& !candleStop" in trail_source),
+        ("manual/mobile pending override metadata does not disable automatic SL protection or trailing",
+         "Do not impose protection on an order explicitly assigned to the user." not in source and
+         "if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)" not in source and
+         "!manual && STB_ManualOverrideIs(ticket) && !candleStop" not in trail_source and
+         "all supported pending types remain under automatic management" in trail_source),
+        ("actionable M5 candle remains retryable after resolver/server failure and commits only after a confirmed write or deliberate skip",
+         "actionableClosedBar=closedBar;" in trail_source and
+         "Retry with the same bounded 5/15/60s policy." in trail_source and
+         "if(candleStop && step>0.0 &&" in trail_source and
+         "if(committed)\n   {\n      if(candleStop && actionableClosedBar>0)" in trail_source),
+        ("empty managed-symbol list means universal exposure management",
+         "if(StringLen(InpScannerSymbols)==0)\n      return true;" in source),
         ("scanner is interval-throttled independently of chart M15 bar",
          "bool intervalElapsed=(g_scannerLastRun<=0 ||" in source and
          "if(!newChartBar && !intervalElapsed)" in source and
