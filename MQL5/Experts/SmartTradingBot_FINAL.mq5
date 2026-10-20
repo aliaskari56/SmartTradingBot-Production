@@ -7895,6 +7895,21 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
 
    // Final pre-submit gate: a second instance may have changed exposure while
    // this setup was being validated and sized.
+   // Revalidate volatile market, geometry, permission, and volume state at
+   // the broker-submit boundary; discovery and earlier OrderCheck can become
+   // stale while volume and expiration are being resolved.
+   if(!STB_TradeEnvironmentAllowed())
+      return STB_LogPlaceReject(s,"TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT");
+   if(!IsDirectionTradable(s.symbol,s.direction))
+      return STB_LogPlaceReject(s,"DIRECTION_CHANGED_BEFORE_SUBMIT");
+   if(!IsSpreadAcceptable(s.symbol))
+      return STB_LogPlaceReject(s,"SPREAD_CHANGED_BEFORE_SUBMIT");
+   if(!ValidatePendingSetup(s))
+      return STB_LogPlaceReject(s,"PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT");
+   if(!STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetupFinal"))
+      return STB_LogPlaceReject(s,"VOLUME_LIMIT_CHANGED_BEFORE_SUBMIT");
+
+   // These are the final state/ownership gates immediately before submission.
    if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
       return STB_LogPlaceReject(s,"ENTRY_LOCK_LOST_BEFORE_SUBMIT");
    if(!STB_SymbolManagementOwnedVerified(s.symbol))
