@@ -116,11 +116,13 @@
 
 **Disposition:** Explicitly approve one of these contracts: (A) all live account positions receive automatic protection while manual commands are symbol-scoped; or (B) automatic management is also constrained by the managed-symbol predicate. Then test manual, foreign-magic, disallowed-symbol, tester chart-only, netting, and hedging cases. Do not change the predicate until the contract is approved.
 
-### STR-AUD-11 — Symbol-management lease expiry depends on server time
+### STR-AUD-11 — Symbol-management lease expiry clock
 
-**Evidence:** The symbol writer lease uses `TimeCurrent()` with a 90-second TTL, while the entry lock uses `TimeLocal()`.
+**Evidence:** The symbol writer lease previously used `TimeCurrent()` with a 90-second TTL while the entry lock used `TimeLocal()`. Commit `d9a30c437c2579d7dabd0bb6776c697b52edee2b` changes the symbol-management lease timestamp to `TimeLocal()`, matching the entry-lock clock choice and avoiding dependence on quote-driven server-time advancement.
 
-**Impact:** When server time is not advancing because quotes are absent/stale, lease expiry and reclaim timing may differ from elapsed wall-clock time. Two-instance ownership behavior is not established by static inspection.
+**Impact:** The clock-source inconsistency is corrected in source. This does not prove race-free lease takeover: the global-variable CAS owner transition and the later lease timestamp write are separate operations, and the lease check plus broker request are not atomic.
+
+**Verification status:** Updated source was fetched back from GitHub and the new clock expression was confirmed. Quiet-market, two-instance contention, clock-change, and restart tests remain NOT RUN.
 
 **Disposition:** Test two EA instances with active quotes, quiet markets, stale quotes, restart, and lease-owner disappearance. Document whether expiry is intended to follow server time or wall-clock time.
 
@@ -305,6 +307,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A33 | BOS occurs before a weekend/session gap; wall-clock age would exceed observed bar age | Discovery and watchlist age agree with M15 bar shifts; missing exact setup bar is explicitly rejected | SOURCE PATCHED; TEST NOT RUN |
 | STR-A34 | Watchlist refresh changes setup, market-quality, or regime score after discovery stability was calculated | Final stability and opportunity score use refreshed values while retaining the documented previous-scan identity contract | SOURCE PATCHED; TEST NOT RUN |
 | STR-A35 | Automatic protection and manual commands process the same foreign-magic or disallowed-symbol position | Observed scope matches the explicitly approved broad-protection vs symbol-managed contract; verify SL/TP/trailing and manual SAVE behavior separately | CONTRACT/TEST NOT DEFINED |
+| STR-A36 | Two chart instances contend for the symbol lease during quiet quotes, restart, or local-clock adjustment | Only the CAS owner writes; stale reclaim follows the 90-second local-clock TTL without duplicate writers | SOURCE PATCHED; TEST NOT RUN |
 
 ## Exit criteria
 
