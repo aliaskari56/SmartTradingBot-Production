@@ -2019,6 +2019,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    trade.SetAsyncMode(false);
    trade.SetTypeFilling(ORDER_FILLING_RETURN);
 
+   // Consume the ticket's one-write budget before the broker request. A
+   // timeout or ambiguous response may still have changed server state; do not
+   // issue a second geometry write for this ticket in the same cycle.
+   STB_CycleMarkWritten(ticket);
+
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
      {
