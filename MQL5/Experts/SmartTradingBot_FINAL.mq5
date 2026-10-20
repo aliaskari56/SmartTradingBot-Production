@@ -8037,6 +8037,24 @@ bool STB_FinalCandidateRevalidation(STBCandidate &c,Setup &validated)
       return false;
      }
 
+   // Re-check setup age at the final scanner-to-execution handoff. The
+   // candidate may have aged after discovery/watchlist construction, so the
+   // discovery-stage age check alone is not a sufficient execution gate.
+   int setupBarShift=iBarShift(c.symbol,PERIOD_M15,refreshed.setupTime,true);
+   if(setupBarShift<1)
+     {
+      c.rejectReason="REJECT_SETUP_AGE_UNAVAILABLE";
+      return false;
+     }
+
+   c.setupAgeBars=(int)MathMax(0,setupBarShift-1);
+   int effectiveMaxAge=STB_EffectiveMaxSetupAgeBars();
+   if(effectiveMaxAge>0 && c.setupAgeBars>effectiveMaxAge)
+     {
+      c.rejectReason="REJECT_SETUP_TOO_OLD";
+      return false;
+     }
+
    if(!ValidatePendingSetup(refreshed))
      {
       c.rejectReason="REJECT_INVALID_PENDING_GEOMETRY";
