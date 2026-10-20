@@ -213,6 +213,17 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    if(ticket==0 || !OrderSelect(ticket) || !IsManagedOrder(ticket))
       return false;
 
+   // Do not create partial Pending Trail state unless the shared exposure
+   // registry can represent this terminal order. Later scan/reconcile passes
+   // will retry registration if allocation is temporarily unavailable.
+   if(STB_ExposureEnsure(ticket,false)<0)
+     {
+      Print("STB PENDING TRAIL REGISTER DEFERRED ticket=",ticket,
+            " source=",source,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return false;
+     }
+
    long orderType=OrderGetInteger(ORDER_TYPE);
    if(!STB_PendingTrailIsManagedType(orderType))
       return false;
@@ -494,6 +505,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return false;
+
+   // If the shared registry becomes unavailable after registration, defer
+   // processing before consuming bars or mutating trail state. The next
+   // management cycle retries from the still-live terminal order.
+   if(STB_ExposureEnsure(ticket,false)<0)
+     {
+      Print("STB PENDING TRAIL PROCESS DEFERRED ticket=",ticket,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return false;
+     }
 
    if(!OrderSelect(g_stbPendingTrail[idx].ticket))
    {
