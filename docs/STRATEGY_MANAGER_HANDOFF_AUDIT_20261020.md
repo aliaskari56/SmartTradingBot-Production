@@ -397,4 +397,4 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Correction:** Added a final pre-submit gate for trade environment, direction, spread, `ValidatePendingSetup()`, directional volume limits, entry-lock ownership, symbol-writer lease, and managed exposure. The gates run immediately before the order request. A static-audit assertion checks presence and ordering.
 
-**Verification status:** Source commit `661f678a83b6afee0f3f7410b21ad1f2b3fec563`; fetch-back and exact-source compile/static/safety validation pending. Regression assertion added in static-audit commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036`. Runtime race/broker-rejection tests NOT RUN.
+**Verification status:** Source commit `661f678a83b6afee0f3f7410b21ad1f2b3fec563`; the integrated source blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80` was compiled unchanged in validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036` with 0 errors/0 warnings; static audit and safety-default checks passed. Regression assertion is included in that validation tree. Runtime race/broker-rejection tests NOT RUN.
