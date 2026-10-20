@@ -4,8 +4,9 @@
 
 - Production baseline: main at 578621216f2f62ade33ab8e341a506e253b22bbf.
 - Development branch: fix/structure-first-fvg-trailing-20261020.
-- Latest branch commit at this checkpoint: 91669e55f3516247f07d2d3f8e633af66c613fe5.
-- Source blob: 0b80607d25e313313f19d0761a2cb6f0b7c29604c.
+- Latest source-code commit at this checkpoint: 77253ea5cd23edf67fd7083775c5ca27b979764d.
+- Exact compiled source blob: 0b80607d25e31372d7a23b91078cfb494d7f0e13.
+- Exact compile/CI checkpoint: 91669e55f3516247f07d2d3f8e633af66c613fe5. Subsequent branch commits update documentation/audit tests only; no EA or include source changed after that compiled blob.
 - Pending-trail include blob: b45952dcb34f854dadfa4059473402ea74b96e41.
 - Static-audit tool blob: e52a25f7f642c0be84a15a35a172614a4d6dc94f.
 - main has not been edited or merged into. No source or EX5 has been copied to the active MetaTrader terminal.
