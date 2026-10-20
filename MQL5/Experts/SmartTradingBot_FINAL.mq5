@@ -7192,6 +7192,8 @@ void ManagePendingOrders()
          continue;
 
       string symbol=OrderGetString(ORDER_SYMBOL);
+      if(symbol=="" || !SymbolSelect(symbol,true))
+         continue; // subscribe non-Watch symbols before reading their history/quotes
       if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
 
       // Protect every managed pending order with no SL, not only orders created
