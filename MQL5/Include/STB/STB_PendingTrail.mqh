@@ -512,16 +512,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(idx<0 || !g_stbPendingTrail[idx].active)
       return false;
 
-   // If the shared registry becomes unavailable after registration, defer
-   // processing before consuming bars or mutating trail state. The next
-   // management cycle retries from the still-live terminal order.
-   if(STB_ExposureEnsure(ticket,false)<0)
-     {
-      Print("STB PENDING TRAIL PROCESS DEFERRED ticket=",ticket,
-            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
-      return false;
-     }
-
+   // Resolve terminal lifecycle before requiring the exposure registry.
+   // A deleted/filled ticket must be retired even if registry allocation is
+   // currently failing; otherwise stale active states can persist indefinitely.
    if(!OrderSelect(g_stbPendingTrail[idx].ticket))
    {
       // Terminal no longer exposes this order: filled (triggered),
@@ -533,6 +526,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       g_stbPendingTrail[idx].active=false;
       return false;
    }
+
+   // If the shared registry becomes unavailable after registration, defer
+   // processing before consuming bars or mutating trail state. The next
+   // management cycle retries from the still-live terminal order.
+   if(STB_ExposureEnsure(ticket,false)<0)
+     {
+      Print("STB PENDING TRAIL PROCESS DEFERRED ticket=",ticket,
+            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      return false;
+     }
 
    if(!IsManagedOrder(ticket))
    {
