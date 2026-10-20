@@ -85,6 +85,16 @@ The code change adds shared quote-integrity validation, finite-market-metric rej
 
 ## Strategy audit checkpoint — fresh M15 structure break
 
-A source-level defect was identified and corrected in DetectStructure(): prior logic accepted any closed bar still above a bullish swing high (or below a bearish swing low). That could relabel an old break as a new setup, refresh setupTime, and undermine InpMaxSetupAgeBars. The detector now requires the current closed bar to cross the pivot relative to the immediately older closed bar, and its loop boundary guarantees that older bar exists.
+A source-level defect was corrected in `DetectStructure()`: prior logic accepted any closed bar still above a bullish swing high (or below a bearish swing low). That could relabel an old break as a new setup, refresh `setupTime`, and undermine `InpMaxSetupAgeBars`. The detector now requires a fresh close-crossing relative to the immediately older closed bar and bounds the loop to guarantee that older bar exists.
 
-This prevents stale levels from being treated as fresh break events. It does not yet implement a distinct two-event CHoCH-then-BOS sequence. That remaining strategy-policy issue is explicitly tracked as STR-09. Source compile/static CI and Strategy Tester cases STR-07–STR-09 are required; the functional cases remain NOT RUN until actually executed.
+Exact source commit `5b14166acb84c367bb02b4616a348c0816ab4cc8` passed MetaEditor `5.0.0.6274` with **0 errors, 0 warnings** ([run 39457211695](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39457211695)), the static invariant audit passed ([run 39457211171](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39457211171)), and safety-default checks passed ([run 39457211930](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39457211930)). Exact-source artifact: [12280118878](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39457211695/artifacts/12280118878).
+
+Provenance: source blob `c8a09e3a05f7ac8aea37ccd421a7aa1012191ffd`; source SHA-256 `E8AAA1DAD0C3914837D915718D91D4A73D230E6A52EBC1210BB42BBB8E453BC8`; EX5 SHA-256 `7B9DC581BDD9A4091147C9208F652B7E8FABFEB0B0977D6BECD65000DEFCFDAD`. This is CI evidence only, not Strategy Tester evidence or terminal deployment.
+
+The detector still does not independently identify a distinct two-event CHoCH-then-BOS sequence: it confirms one fresh directional pivot crossing. In addition, `chochShift` currently records the broken pivot's shift while `bosShift` records the break candle's shift. Whether to require both separate events is an open strategy-definition decision, tracked as STR-09 rather than being silently assumed.
+
+Two additional source-derived strategy items are now tracked:
+- Strategy score saturation: an aligned setup with fresh BOS (`+40+30`), RR ≥ 2 (`+15`), local FVG and OB (`+10+10`), and confirmed default RSI/CCI (`+7.5`) calculates 112.5 before the score is clipped to 100. This can reduce ranking resolution for strong setups. No scoring weights were changed; evaluate saturation and compare a single-variable candidate against a frozen baseline first.
+- Input-policy interaction: with `InpRequireH4TrendAlignment=true`, an H4-misaligned setup is rejected even if `InpAllowUniversal=true`; the latter only matters when the hard H4-alignment requirement is disabled. Confirm the intended meaning through STR-11 before altering defaults.
+
+STR-07–STR-12 remain test requirements, not completed runtime results. The branch remains NOT release-ready until the applicable deterministic and Strategy Tester gates are run.

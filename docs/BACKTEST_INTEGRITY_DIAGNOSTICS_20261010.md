@@ -82,3 +82,17 @@ The source-level M15 structure detector now requires a fresh closed-bar crossing
 Reason: merely remaining above/below a broken swing could previously be mistaken for a newly formed structure break, refreshing setup age and allowing late/duplicate setups to be rebuilt from the same level. The targeted correction does not change H4 alignment, FVG/OB gates, score weights or risk controls.
 
 Validation requirements: STR-07 through STR-09 in the acceptance matrix. STR-09 remains an open strategy-definition issue because current source does not independently require a separate CHoCH event followed by a distinct BOS event. No profitability conclusion is implied.
+
+
+## Follow-up strategy review — compile-verified source checkpoint
+
+The latest strategy-source commit is `5b14166acb84c367bb02b4616a348c0816ab4cc8`, file `MQL5/Experts/SmartTradingBot_FINAL.mq5` blob `c8a09e3a05f7ac8aea37ccd421a7aa1012191ffd`. CI MetaEditor compile passed with 0 errors/0 warnings (run 39457211695); static audit passed (39457211171); safety-default guard passed (39457211930). Source SHA-256: `E8AAA1DAD0C3914837D915718D91D4A73D230E6A52EBC1210BB42BBB8E453BC8`. EX5 SHA-256: `7B9DC581BDD9A4091147C9208F652B7E8FABFEB0B0977D6BECD65000DEFCFDAD`. Build artifact 12280118878 is not a terminal deployment.
+
+### Strategy items identified from the actual source
+- The M15 break detector now requires a fresh close-crossing and has safe array bounds, avoiding reuse of a continuously broken pivot as a new event.
+- The source still does not separately prove a CHoCH event followed by a distinct BOS event. The current detector returns a single fresh directional pivot break and assigns the broken-pivot shift to `chochShift`, while `bosShift` is the crossing candle. That event-definition is tracked in STR-09 and must not be silently reinterpreted.
+- The strategy-score ceiling is reachable by a common strong setup: 40 H4-alignment points + 30 fresh-break points + 15 RR points + 10 FVG + 10 OB + 7.5 default oscillator confirmation = 112.5 before clipping at 100. This is a source-math observation, not a measured performance defect. STR-10 measures its effect before any formula change.
+- With the current input logic, `InpRequireH4TrendAlignment=true` blocks H4-misaligned setups even if `InpAllowUniversal=true`; this precedence is tracked in STR-11.
+- Five adaptive parameter profiles change setup age, pattern window, swing confirmation, pending lifetime, entry/SL buffer, minimum RR and oscillator levels/weights. Their benefit is unproven until compared with fixed profile 0 over identical in-sample and untouched out-of-sample periods (STR-12).
+
+All STR-07–STR-12 rows remain NOT RUN. No conclusion about profitability or production readiness is implied.
