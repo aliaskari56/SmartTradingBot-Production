@@ -345,7 +345,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 ## Current status
 
-**The latest integrated scanner source compiled successfully** at validation commit `6a27377536e1f5cc7220a0ceb10bc6310f38fa70`: MetaEditor `5.0.0.6274`, **0 errors, 0 warnings** (workflow `39492054523`, artifact `12295687190`); static audit (run `39492054356`) and safety-default checks (run `39492054387`) also passed. The compiled source blob was fetched back from the branch as `21b834d0c33302e59dcbdd4c5ddf511de7c6c295`. **Release status remains NOT VERIFIED** because runtime/fault-injection and integrated scanner-to-manager tests have not been run. Compile/static success does not certify runtime behavior or trading performance.
+**The latest integrated source compiled successfully** at validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036`: MetaEditor `5.0.0.6274`, **0 errors, 0 warnings** (workflow `39492814185`, artifact `12295809473`); static audit (run `39492814244`) and safety-default checks (run `39492814033`) passed. The compiled source blob fetched back from the branch is `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`. Provenance records source SHA-256 `EC162131A48E93527125F275BCEBF822B0650E29361E4780ED0C89AD00B3B4F5` and EX5 SHA-256 `83F4206E18A867462E277F65F4050C7E0AF74ECAA66CFF0CD6491A8CB7C36BCF`. **Release status remains NOT VERIFIED** because runtime/fault-injection and integrated scanner-to-manager tests have not been run. Compile/static success does not certify runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
 
@@ -373,7 +373,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Correction:** Dashboard ready counts are now derived from the final revalidated `g_scannerWatchlist`. Discovery counters remain available for diagnostic candidate totals. A static-audit regression assertion verifies that the dashboard fields no longer consume the pre-validation counters.
 
-**Verification status:** Source commit `e16147a08a72a1a3a290daaa4987cbd1885935d1`; the resulting integrated source blob `21b834d0c33302e59dcbdd4c5ddf511de7c6c295` was fetched back and verified. The static-audit regression assertion is included in validation commit `6a27377536e1f5cc7220a0ceb10bc6310f38fa70`. MetaEditor compile passed with 0 errors/0 warnings; static audit and safety-default checks passed. Runtime scanner/manager tests NOT RUN.
+**Verification status:** Source commit `e16147a08a72a1a3a290daaa4987cbd1885935d1`; the final integrated source blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80` was fetched back and verified. The static-audit regression assertion is included in validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036`. MetaEditor compile passed with 0 errors/0 warnings; static audit and safety-default checks passed. Runtime scanner/manager tests NOT RUN.
 
 ### STR-A57 — Final execution revalidation did not independently enforce setup age
 
@@ -381,7 +381,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Correction:** Final revalidation now recomputes the M15 bar shift from the refreshed setup timestamp, rejects unavailable age data, recalculates `setupAgeBars`, and applies `STB_EffectiveMaxSetupAgeBars()` before pending geometry validation. The rejection reason is `REJECT_SETUP_TOO_OLD`. A static-audit regression assertion checks that this gate precedes geometry validation.
 
-**Verification status:** Source commit `fab942eec60775c8e1838352fc4329f11bf06835`; the final integrated source including this gate was fetched back at blob `21b834d0c33302e59dcbdd4c5ddf511de7c6c295`. Regression assertion is included in validation commit `6a27377536e1f5cc7220a0ceb10bc6310f38fa70`. MetaEditor compile passed with 0 errors/0 warnings; static audit and safety-default checks passed. Runtime scanner-to-execution age-boundary test NOT RUN.
+**Verification status:** Source commit `fab942eec60775c8e1838352fc4329f11bf06835`; the final integrated source including this gate was fetched back at blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`. Regression assertion is included in validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036`. MetaEditor compile passed with 0 errors/0 warnings; static audit and safety-default checks passed. Runtime scanner-to-execution age-boundary test NOT RUN.
 
 ### STR-A58 — Remaining diagnostic, indicator-cache, and swing-buffer appends were unchecked
 
