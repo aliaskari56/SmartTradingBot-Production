@@ -3259,8 +3259,8 @@ bool STB_CheckHTFConfluence(const string symbol,
    double obLow=0.0,obHigh=0.0;
    datetime obConfirmedAt=0;
    bool haveOB=false;
-   int leftBars=MathMax(1,InpSwingLeft);
-   int rightBars=MathMax(1,InpSwingRight);
+   int leftBars=(int)MathMax(1,InpSwingLeft);
+   int rightBars=(int)MathMax(1,InpSwingRight);
    int maxOBShift=(int)MathMin(InpHTFLookbackBars,ArraySize(r)-2);
 
    // Order Block: most recent opposite candle immediately preceding a
@@ -5848,7 +5848,7 @@ bool STB_CalculateStructuralTrailSL(const ulong ticket,
       return false;
      }
 
-   int lookback=MathMax(80,InpLookbackM15);
+   int lookback=(int)MathMax(80,InpLookbackM15);
    MqlRates rates[];
    if(!GetRates(symbol,InpTrailTF,lookback,rates))
      {
@@ -9159,11 +9159,12 @@ bool ValidateInputs()
       InpMaxPendingBars<0)
       return false;
    if(InpPatternWindowBars<1 ||
-      InpHTFLookbackBars<60 ||
+      InpHTFLookbackBars<60 || InpHTFLookbackBars>1000 ||
       InpHTFMaxZoneAgeBars<1 ||
+      InpHTFMaxZoneAgeBars>InpHTFLookbackBars ||
       PeriodSeconds(InpHTFPatternTF)<PeriodSeconds(PERIOD_H1) ||
-      InpHTFZoneMaxGapATR<0.0 ||
-      InpHTFMinFVGWidthATR<0.0)
+      InpHTFZoneMaxGapATR<0.0 || InpHTFZoneMaxGapATR>3.0 ||
+      InpHTFMinFVGWidthATR<0.0 || InpHTFMinFVGWidthATR>1.0)
       return false;
    if(InpManualSaveStepPips<0.0)
       return false;
@@ -9172,7 +9173,9 @@ bool ValidateInputs()
        InpLiveTrailDistancePips<0.0 ||
        InpTrailStepPips<0.0 ||
        InpStructuralTrailStartATR<=0.0 ||
-       InpStructuralTrailBufferATR<0.0)
+       InpStructuralTrailStartATR>10.0 ||
+       InpStructuralTrailBufferATR<0.0 ||
+       InpStructuralTrailBufferATR>2.0)
       return false;
    if(InpMaxSpreadPips<0.0 ||
       InpSetupCooldownMinutes<0 ||
