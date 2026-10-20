@@ -313,6 +313,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A37 | Pending OrderModify returns failure/timeout after server-side state may have changed | The ticket consumes its write quota before the request and receives no second geometry write in the same cycle | SOURCE PATCHED; TEST NOT RUN |
 | STR-A38 | Pending order emits DEAL_ADD while an unfilled remainder may still be active | Existing managed pending ticket keeps trail state active; state is handed off only after the pending ticket is absent | SOURCE PATCHED; TEST NOT RUN |
 
+| STR-A39 | Restart occurs during pending-trail retry backoff | Recovered ticket is re-registered with failureCount=0 and nextRetryTime=0; confirm this reset is an intentional policy or persist retry state, and verify no immediate retry storm after repeated restarts | CONTRACT/TEST NOT DEFINED |
+
 ## Exit criteria
 
 - Decide and document CHoCH/BOS semantics before changing structure behavior.
