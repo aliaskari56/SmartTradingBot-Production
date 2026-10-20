@@ -345,7 +345,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 ## Current status
 
-**Release status remains NOT VERIFIED.** The prior exact-source tree compiled with MetaEditor 5.0.0.6274 at 0 errors/0 warnings (workflow `39490351228`), and its static/safety checks passed. Subsequent integrated scanner changes add fail-closed array-allocation handling and make dashboard ready counts reflect the final revalidated watchlist; exact-head compile/static/safety validation is pending. No compile or static result certifies runtime behavior or trading performance.
+**Release status remains NOT VERIFIED.** The prior exact-source tree compiled with MetaEditor 5.0.0.6274 at 0 errors/0 warnings (workflow `39490351228`), and its static/safety checks passed. Subsequent integrated scanner changes add fail-closed array-allocation handling, make dashboard ready counts reflect the final revalidated watchlist, and recheck effective setup age at the final execution handoff; exact-head compile/static/safety validation is pending. No compile or static result certifies runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
 
@@ -374,3 +374,11 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Correction:** Dashboard ready counts are now derived from the final revalidated `g_scannerWatchlist`. Discovery counters remain available for diagnostic candidate totals. A static-audit regression assertion verifies that the dashboard fields no longer consume the pre-validation counters.
 
 **Verification status:** Source commit `e16147a08a72a1a3a290daaa4987cbd1885935d1`; fetch-back pending until the next verification step. The static-audit regression assertion is in commit `87fcc3fefb53fe9903842efb75d53e25d7ab21ec`. Exact-head compile/static/safety workflows are pending. Runtime scanner/manager tests NOT RUN.
+
+### STR-A57 — Final execution revalidation did not independently enforce setup age
+
+**Evidence:** Scanner discovery and final watchlist construction checked setup age, but `STB_FinalCandidateRevalidation()`—also called immediately before execution—only checked that the setup timestamp had not changed. A setup could age between candidate construction and the final handoff without a dedicated final age rejection.
+
+**Correction:** Final revalidation now recomputes the M15 bar shift from the refreshed setup timestamp, rejects unavailable age data, recalculates `setupAgeBars`, and applies `STB_EffectiveMaxSetupAgeBars()` before pending geometry validation. The rejection reason is `REJECT_SETUP_TOO_OLD`. A static-audit regression assertion checks that this gate precedes geometry validation.
+
+**Verification status:** Source commit `fab942eec60775c8e1838352fc4329f11bf06835`; fetch-back verified at blob `d9d493ef44cb493bcf9d2cfaa0bfa6f877b91eff`. Regression assertion added in commit `84645f819bfd07b443bc69f93aa0ab14d52fd15d`. Latest exact-head compile/static/safety checks pending. Runtime scanner-to-execution age-boundary test NOT RUN.
