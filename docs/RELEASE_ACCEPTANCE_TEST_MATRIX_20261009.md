@@ -101,3 +101,44 @@ Do not label the build production-ready until the exact source revision has a re
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
 - MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
 - Release decision: **BLOCKED / NOT VERIFIED**.
+
+
+## H. Structure-first strategy upgrade — added 2026-10-20
+
+All rows below are **functional tests**. Passing CI compilation or static string/invariant checks does not satisfy any row in this section.
+
+| ID | Scenario | Procedure | Expected result | Status |
+|---|---|---|---|---|
+| HTF-01 | Closed-bar/no-lookahead timing | Replay an H1 FVG/OB while the H1 candle is forming; compare before and after the relevant H1 candle closes relative to the M15 decision timestamp | No setup uses an H1 candle/zone that was not confirmed by the decision timestamp | NOT RUN |
+| HTF-02 | FVG age and mitigation | Present fresh, stale, untouched, partly mitigated and fully mitigated bullish/bearish FVGs | Only zones meeting age and mitigation rules qualify; rejection reason identifies the failed condition | NOT RUN |
+| HTF-03 | Order Block structural validation | Present an opposite candle followed by displacement that does and does not close beyond the last already-confirmed H1 swing | Only a directional displacement with a confirmed pre-impulse swing break can qualify as OB | NOT RUN |
+| HTF-04 | Zone confluence | Test H1 FVG/OB and M15 origin zones inside and outside the ATR-normalized max gap | Directionally valid, fresh zones inside the threshold may pass; missing or distant zones reject | NOT RUN |
+| ENT-01 | Hard entry gates | Test H4 trend aligned, opposite, unavailable; local M15 FVG/OB present/absent | H4 alignment and configured FVG/OB hard gates cannot be bypassed by a high score or oscillator bonus | NOT RUN |
+| ENT-02 | Stale setup rejection | Hold a valid M15 BOS/CHoCH beyond the configured 4-bar maximum before final revalidation | Stale setup is rejected deterministically and cannot become a late pending entry | NOT RUN |
+| SCN-01 | Relative spread cap | Replay spread-to-M15-ATR values just below, equal to and above InpMaxRelativeSpreadPct | Above-limit cases reject before ranking with REJECT_RELATIVE_SPREAD; the cap is logged and finite/range-validated | NOT RUN |
+| SCN-02 | Scanner funnel and diagnostics | Exercise stale quote, missing history, unusable regime, excessive spread, score rejection and clean candidate | Funnel counters and reject reasons agree with each intentionally induced condition | NOT RUN |
+| TRL-01 | Structural BUY trailing | Move price by less than and more than activation ATR, then form/confirm new M15 swing lows | No activation before threshold; only confirmed valid swing lows can tighten SL; SL never widens | NOT RUN |
+| TRL-02 | Structural SELL trailing | Repeat TRL-01 with swing highs | Only confirmed valid swing highs can tighten SL; SL never widens | NOT RUN |
+| TRL-03 | Trail broker rejects | Force/encounter stop-level, freeze-level, market-closed and transient retcode cases | Failed attempts log retcode, reconcile actual state, consume the per-cycle write budget, and retry according to bounded policy | NOT RUN |
+| PTRL-01 | BUY STOP same-bar retry | Force the M5 BUY STOP modify to fail on an actionable bearish closed bar, then allow a later retry with the same bar still the latest closed bar | Failed attempt does not consume the actionable bar; retry succeeds or records a bounded explicit reason | NOT RUN |
+| PTRL-02 | SELL STOP same-bar retry | Repeat PTRL-01 with bullish bar and SELL STOP | Same-bar retry semantics work in the opposite direction | NOT RUN |
+| PTRL-03 | Pending lifecycle while backing off | Cancel or trigger an order during retry backoff | Ticket absence/type/ownership is rechecked before backoff; no stale ticket is modified and lifecycle state is cleaned | NOT RUN |
+| TP-01 | Position missing TP | Open a managed position with valid SL and TP=0; test a qualifying M15 swing and no qualifying swing | EA sets the nearest swing target meeting base RR or a logged RR fallback; explicit TP is untouched | NOT RUN |
+| TP-02 | Pending missing TP | Create each supported BUY/SELL STOP, LIMIT and STOP-LIMIT order with SL and TP=0 | A broker-valid TP is added through the shared pending geometry writer; unsupported/invalid geometry is reported and retried safely | NOT RUN |
+| TP-03 | SL and TP simultaneously absent | Create a managed position without SL or TP; observe the first and subsequent management cycles | SL arbitration and TP repair occur without two uncontrolled writes in one cycle; an eligible SL improvement can include the absent TP in the same verified request | NOT RUN |
+| TP-04 | Existing TP preservation | Set an explicit position/order TP, then run automatic management and trailing | EA does not replace or erase explicit TP; only TP=0 is eligible for automatic initialization | NOT RUN |
+| TP-05 | Snapshot/race/retcode | Change TP externally around an automatic SL change and exercise a failed position modify | Snapshot change aborts stale request; one central PositionModify writer is used; server retcode and resulting SL/TP are verified | NOT RUN |
+| LRN-01 | AP2/AP3 isolation | Start with legacy AP2 terminal global variables and start the upgraded EA | AP3 state is used; old profile statistics cannot leak into the new strategy definition | NOT RUN |
+| LRN-02 | Valid R denominator | Close trades with known/unknown initial risk, including break-even | Only finite R with a valid initial-risk denominator contributes to RCOUNT/R expectancy; break-even contributes a neutral half-win/half-loss and R=0 only when risk is known | NOT RUN |
+| LRN-03 | Adaptive attribution/out-of-sample | Verify entry comment, position profile, initial monetary risk, partial exits, full closes/reversals; compare fixed profile against adaptive profile on held-out dates | Outcomes map to the correct profile/lifecycle; results are reported in R with sample counts; no profile is called better from in-sample ranking alone | NOT RUN |
+| UNIV-01 | Manual/mobile universal management | Create positions/pending orders from phone, terminal UI and EA on symbols not currently selected in Market Watch | Manager subscribes to exposure symbols, obtains the symbol lease, and adds missing protection independent of EA entry AUTO; existing SL/TP are preserved/tightened only under the documented rules | NOT RUN |
+| UNIV-02 | Internal AUTO vs terminal permission | Disable the EA's internal AUTO while the terminal's global Algo Trading remains enabled; separately disable global Algo Trading | Internal AUTO disables new EA entries but exposure management remains enabled; global terminal trading permission may block broker modifications and is reported rather than bypassed | NOT RUN |
+
+## Current branch checkpoint — 2026-10-20
+
+- Production main remains at baseline commit 578621216f2f62ade33ab8e341a506e253b22bbf. Work is confined to fix/structure-first-fvg-trailing-20261020.
+- Exact source blob compiled in CI: 0b80607d25e31372d7a23b91078cfb494d7f0e13. Pending-trail include blob: b45952dcb34f854dadfa4059473402ea74b96e41.
+- MetaEditor compile on the matching branch checkpoint: **0 errors, 0 warnings** ([run 39391437094](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094)); the run contains a fresh EX5, compile log and provenance manifest as [artifact 12249861519](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391437094/artifacts/12249861519).
+- Static source/invariant audit passed ([run 39391436796](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436796)); trading safety defaults passed ([run 39391436842](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39391436842)).
+- The compiled artifact is a CI test artifact, not a terminal deployment. No Strategy Tester, out-of-sample or demo-soak result is recorded for this upgrade; every functional row in section H remains NOT RUN.
+- Release decision remains **BLOCKED / NOT VERIFIED**. The source must not be copied to the active MT5 terminal or merged to main before the functional, historical, out-of-sample and demo gates pass.
