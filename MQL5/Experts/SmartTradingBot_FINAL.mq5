@@ -9286,6 +9286,10 @@ void STB_ScannerRun()
 
    if(ArrayResize(wasSelected,g_scannerUniverseCount)!=g_scannerUniverseCount)
      {
+      // Symbol selection has not started yet; discard any partial snapshot so
+      // the abort handler cannot mistake default-false entries for symbols
+      // that were originally unselected and deselect user-selected symbols.
+      ArrayFree(wasSelected);
       STB_ScannerAllocationAbort("SYMBOL_SELECTION_SNAPSHOT",symbols,wasSelected);
       return;
      }
