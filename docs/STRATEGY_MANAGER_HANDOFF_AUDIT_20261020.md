@@ -216,6 +216,14 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Disposition:** Add tests for multiple partial exits, duplicate/replayed close processing, delayed deal events, restart between accumulation and consumption, and repeated history reconciliation. If duplicate processing is in scope, persist a per-deal/per-lifecycle idempotency marker before updating learner statistics.
 
+### STR-AUD-27 — Watchlist reranking refreshes market/regime inputs but carries forward the initial stability score
+
+**Evidence:** During initial candidate discovery, `STB_CandidateStability()` computes `stabilityScore` using the preliminary score and previous score/rank. During watchlist revalidation, the code refreshes setup, market-quality score, and regime score, then recalculates `opportunityScore`; it does not recompute `stabilityScore` using the refreshed inputs before sorting the watchlist again.
+
+**Impact:** The final ranking combines refreshed setup/quality/regime components with a stability component calculated during the earlier scan pass. If the setup or market/regime values materially change between passes, the stability contribution can be stale relative to the candidate's current state. This is a ranking-consistency concern, not evidence that the chosen candidate is intrinsically invalid.
+
+**Disposition:** Decide whether stability is intended to represent scan-to-scan persistence or a score component recalculated from current inputs. If it is current-state dependent, recompute it after revalidation and before final reranking; if it is historical persistence, document the contract and test deterministic ranking under changed market quality/regime. Do not change scoring weights as part of this correction.
+
 ### STR-AUD-26 — Closed-lifecycle adaptive-stat updates have no visible per-deal idempotency marker
 
 **Evidence:** `STB_AdaptiveRecordClosedDeal()` increments profile win/loss observations and updates R sum/count, then flushes global variables. In the inspected `OnTradeTransaction()` close paths, the lifecycle is recorded after consuming accumulated PnL, but no explicit processed-deal or processed-lifecycle key is checked in the shown path before the statistics increment.
@@ -257,6 +265,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 | STR-A27 | DEAL_ENTRY_INOUT reversal with residual exposure | Old lifecycle closes exactly once and new residual state follows contract | NOT RUN |
 | STR-A28 | Missing profile/risk state during delayed fill or after restart | Invalid profile is excluded and unavailable R is never fabricated | NOT RUN |
 | STR-A29 | Partial exits, duplicate close processing, and restart between PnL accumulation/consume | Closed-lifecycle PnL and adaptive observations are idempotent | NOT RUN |
+| STR-A30 | Watchlist revalidation changes market-quality/regime scores after initial stability calculation | Final ranking follows the documented stability-score contract | NOT RUN |
 
 ## Exit criteria
 
