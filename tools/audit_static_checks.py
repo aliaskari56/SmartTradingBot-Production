@@ -174,7 +174,7 @@ def main() -> int:
          "Do not impose protection on an order explicitly assigned to the user." not in source and
          "if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)" not in source and
          "!manual && STB_ManualOverrideIs(ticket) && !candleStop" not in trail_source and
-         "all supported pending types remain under automatic management" in trail_source),
+         "Every supported pending type remains under automatic management" in trail_source),
         ("actionable M5 candle remains retryable after resolver/server failure and commits only after a confirmed write or deliberate skip",
          "actionableClosedBar=closedBar;" in trail_source and
          "Retry with the same bounded 5/15/60s policy." in trail_source and
