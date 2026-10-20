@@ -68,6 +68,14 @@
 
 **Disposition:** Add negative tests for each mandatory gate and a positive control for a candidate that passes all required gates. Confirm that every final rejection leaves no unintended pending order and records a stage-specific reason.
 
+### STR-AUD-07 — Scanner setup age is inferred from wall-clock seconds, not observed M15 bars
+
+**Evidence:** In scanner candidate creation and watchlist revalidation, `setupAgeBars` is calculated as `(TimeCurrent()-setupTime)/900`. This converts elapsed wall-clock time to nominal 15-minute bars. Separately, `BuildSetup()` has the actual `bosShift` available and applies a structure-age check based on bar shift.
+
+**Impact:** Wall-clock duration is not equivalent to the number of M15 bars that have formed. Market closures, weekends, missing history, and symbol-specific session gaps can make the scanner's `InpMaxSetupAgeBars` filter disagree with the structure detector's bar-shift age. This can cause inconsistent eligibility decisions; static inspection does not quantify how often it occurs.
+
+**Disposition:** Treat bar-count age and elapsed-time age as separate concepts. Specify which one `InpMaxSetupAgeBars` means, then add tests around weekends/session gaps, missing bars, and a newly closed M15 candle. Do not silently replace one with the other without confirming intended behavior.
+
 ## Required test cases
 
 | ID | Scenario | Expected result | Status |
@@ -86,6 +94,7 @@
 | STR-A12 | Duplicate/delayed transaction events and restart | Management state remains consistent and idempotent | NOT RUN |
 | STR-A13 | High scanner score but a required strategy gate fails | Candidate is excluded; score cannot override the hard gate | NOT RUN |
 | STR-A14 | Final revalidation rejects a previously ranked candidate | Rejected candidate is not submitted; rejection stage/reason is logged | NOT RUN |
+| STR-A15 | Wall-clock time crosses a session gap while few/no M15 bars form | Setup-age behavior matches the documented age definition | NOT RUN |
 
 ## Exit criteria
 
