@@ -317,6 +317,8 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 | STR-A40 | Pending order has no initial SL; initial-protection repair and trailing are both eligible, including OrderCheck rejection or ambiguous broker response | Central writer allows at most one broker geometry write per ticket per cycle; retry backoff and next-cycle reconciliation remain consistent with actual terminal geometry | SOURCE PATH REVIEWED; TEST NOT RUN |
 
+| STR-A41 | Pending OrderModify reports success but the order disappears before postcheck, or postcheck geometry differs | Writer returns false and caches only observed geometry when selectable; confirm next-cycle reconciliation, retry/backoff, and trail-state cleanup for vanished tickets and broker-normalized geometry | SOURCE PATH REVIEWED; TEST NOT RUN |
+
 ## Exit criteria
 
 - Decide and document CHoCH/BOS semantics before changing structure behavior.
