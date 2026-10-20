@@ -1216,55 +1216,56 @@ void STB_AdaptiveRecordClosedDeal(const string symbol,
                                   const double rMultiple,
                                   const bool hasValidRiskSample)
   {
-   if(!InpAdaptiveLearning || direction==0)
+   if(!InpAdaptiveLearning || direction==0 ||
+      !MathIsValidNumber(profit))
       return;
 
    if(profileId>=0 && profileId<STB_ADAPTIVE_PROFILE_COUNT)
      {
       double wins=0.0;
       double losses=0.0;
-
       STB_AP_ReadProfileStats(symbol,direction,profileId,wins,losses);
 
+      // A genuine break-even lifecycle is one neutral observation, not a
+      // missing sample: split it equally between wins and losses so it moves
+      // the smoothed win rate toward 50% without inventing an edge.
       if(profit>0.0)
          wins+=1.0;
+      else if(profit<0.0)
+         losses+=1.0;
       else
-         if(profit<0.0)
-            losses+=1.0;
-
-      if(profit!=0.0)
         {
-         STB_AP_Write(symbol,direction,"W",profileId,wins);
-         STB_AP_Write(symbol,direction,"L",profileId,losses);
-
-         double decay=STB_AP_Decay(symbol,direction,profileId);
-         double oldRSum=STB_AP_Read(symbol,direction,
-                                    "RSUM",profileId,0.0)*decay;
-         double oldRCount=STB_AP_Read(symbol,direction,
-                                      "RCOUNT",profileId,0.0)*decay;
-
-         // R statistics are updated only when the initial risk denominator
-         // is known and finite. Win/loss observations remain independent.
-         if(hasValidRiskSample && MathIsValidNumber(rMultiple))
-           {
-            oldRSum+=rMultiple;
-            oldRCount+=1.0;
-           }
-
-         STB_AP_Write(symbol,direction,"RSUM",profileId,oldRSum);
-         STB_AP_Write(symbol,direction,"RCOUNT",profileId,oldRCount);
-         STB_AP_Write(symbol,direction,"T",profileId,(double)TimeCurrent());
+         wins+=0.5;
+         losses+=0.5;
         }
-     }
 
-   if(profit==0.0)
-      return;
+      STB_AP_Write(symbol,direction,"W",profileId,wins);
+      STB_AP_Write(symbol,direction,"L",profileId,losses);
+
+      double decay=STB_AP_Decay(symbol,direction,profileId);
+      double oldRSum=STB_AP_Read(symbol,direction,
+                                 "RSUM",profileId,0.0)*decay;
+      double oldRCount=STB_AP_Read(symbol,direction,
+                                   "RCOUNT",profileId,0.0)*decay;
+
+      // Keep expectancy in R separate from the win/loss sample count. Only
+      // trades with a known positive initial-risk denominator enter this mean.
+      if(hasValidRiskSample && MathIsValidNumber(rMultiple))
+        {
+         oldRSum+=rMultiple;
+         oldRCount+=1.0;
+        }
+
+      STB_AP_Write(symbol,direction,"RSUM",profileId,oldRSum);
+      STB_AP_Write(symbol,direction,"RCOUNT",profileId,oldRCount);
+      STB_AP_Write(symbol,direction,"T",profileId,(double)TimeCurrent());
+     }
 
    Print("STB ADAPTIVE outcome symbol=",symbol,
          " dir=",(direction>0 ? "BUY":"SELL"),
          " profile=",IntegerToString(profileId),
          " outcome=",DoubleToString(profit,2),
-         " R=",DoubleToString(rMultiple,2),
+         " R=",hasValidRiskSample ? DoubleToString(rMultiple,2):"UNAVAILABLE",
          " floor=",DoubleToString(STB_AdaptiveScoreFloor(symbol,direction),1));
 
    STB_AdaptiveLog("TRADE_CLOSED",symbol,direction,
@@ -9851,9 +9852,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
          STB_AdaptiveRememberPositionProfile(positionId,profileId);
 
+         // Start with the planned risk captured when the pending order was
+         // created, then prefer risk recalculated from the actual filled position
+         // (fill price, filled volume and active initial SL) when it is available.
          double riskMoney=STB_AdaptiveReadOrderRisk(trans.order);
-
-         if(riskMoney<=0.0 && PositionSelectByTicket(trans.position))
+         if(PositionSelectByTicket(trans.position))
            {
             double positionVolume=PositionGetDouble(POSITION_VOLUME);
             double entryPrice=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -9865,10 +9868,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                ENUM_ORDER_TYPE calcType=
                   (positionType==POSITION_TYPE_BUY ?
                    ORDER_TYPE_BUY:ORDER_TYPE_SELL);
+               double actualRiskMoney=0.0;
 
                if(OrderCalcProfit(calcType,symbol,positionVolume,
-                                  entryPrice,initialSL,riskMoney))
-                  riskMoney=MathAbs(riskMoney);
+                                  entryPrice,initialSL,actualRiskMoney))
+                 {
+                  actualRiskMoney=MathAbs(actualRiskMoney);
+                  if(actualRiskMoney>0.0 &&
+                     MathIsValidNumber(actualRiskMoney))
+                     riskMoney=actualRiskMoney;
+                 }
               }
            }
 
