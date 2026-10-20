@@ -345,7 +345,7 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 ## Current status
 
-**Static audit in progress; release status remains NOT VERIFIED.** This document records code paths and test obligations; it does not certify runtime behavior or trading performance.
+**Latest source compile and static audit passed; release status remains NOT VERIFIED.** The exact source file at commit `9be5577f6541e46173612995f46596c25fa1fa2f` was included unchanged in validation commit `994b9d462bd5d953e65ec2edbcee88dd1e010e14`: MetaEditor 5.0.0.6274 reports 0 errors and 0 warnings (workflow `39490351228`); static audit and safety-default workflow checks succeeded. This does not certify runtime behavior or trading performance.
 
 | STR-A45 | Manual-override persistence across re-init/restart, lazy migration, AUTO clear, and ticket disappearance | Existing code restores scoped override keys in `STB_ExposureEnsure`, migrates legacy keys lazily, and prunes absent tickets after a bounded orphan grace; verify no stale key or unintended override loss across order fill/cancel/restart | SOURCE PATH REVIEWED; RUNTIME TEST NOT RUN |
 
@@ -356,4 +356,4 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 **Correction:** `STB_GeomIsKnown()` now detects an existing row with `entry<=0.0` and a valid observed `entry>0.0`, seeds entry/SL/TP from the current terminal snapshot, logs `FIRST_VALID_SNAPSHOT`, and returns true. Later snapshots continue through the normal tolerance comparison, preserving detection of subsequent geometry changes. Allocation failure remains a separate false/deferred path.
 
-**Verification status:** Source patch commit `9be5577f6541e46173612995f46596c25fa1fa2f`; fetch-back verified with blob `5491c308fd06241362afc391b1664e779dfb5b4f`. Exact-source compile/static checks for this new commit are pending; runtime/manual-edit/restart tests have not been run.
+**Verification status:** Source patch commit `9be5577f6541e46173612995f46596c25fa1fa2f`; fetch-back verified with blob `5491c308fd06241362afc391b1664e779dfb5b4f`. The source file was compiled unchanged in validation commit `994b9d462bd5d953e65ec2edbcee88dd1e010e14`: MetaEditor 5.0.0.6274 reports 0 errors and 0 warnings (workflow `39490351228`); static audit and safety-default checks succeeded. Runtime/manual-edit/restart tests have not been run.
