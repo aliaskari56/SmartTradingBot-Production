@@ -354,7 +354,13 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    st.active=true;
 
    int n=ArraySize(g_stbPendingTrail);
-   ArrayResize(g_stbPendingTrail,n+1);
+   if(ArrayResize(g_stbPendingTrail,n+1)!=n+1)
+     {
+      Print("STB PENDING TRAIL STATE ALLOCATION FAILED ticket=",ticket,
+            " source=",source,
+            " requestedSize=",n+1);
+      return false;
+     }
    g_stbPendingTrail[n]=st;
 
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
