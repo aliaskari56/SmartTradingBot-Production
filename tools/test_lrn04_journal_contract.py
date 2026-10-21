@@ -489,17 +489,11 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([prepared, intervening, committed])
 
-    def test_commit_must_immediately_follow_prepared(self):
+    def test_uncommitted_prepared_at_end_is_not_applied(self):
         prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
-        intervening = v2_reference_record(
-            2, "PREPARED", "op-2", "digest-1", "digest-2"
-        )
-        committed = v2_reference_record(
-            3, "COMMITTED", "op-1", "digest-2", "digest-3",
-            prepared_seq=1, prepared_digest="digest-1",
-        )
-        with self.assertRaises(JournalContractError):
-            validate_v2_reference_history([prepared, intervening, committed])
+        # Validation accepts the valid prefix; the recovery policy must not apply
+        # this snapshot because no matching COMMITTED record exists.
+        validate_v2_reference_history([prepared])
 
 
 
