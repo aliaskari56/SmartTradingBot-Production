@@ -75,3 +75,15 @@ At commit `a521425f352a87ff7c4d621caa9c6915329de4a1`, the following GitHub Actio
 - [Trading safety defaults, run 39545304457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545304457): success.
 
 **Evidence boundary:** the Windows CI workflow compiles the SHA-256 script but does not execute it inside a MetaTrader terminal. The vector outputs have not been observed at MQL5 runtime. Python reference tests and compilation do not establish runtime digest parity, file durability, locking/fencing, recovery, or EA integration. The V2 digest decision remains unapproved; LRN-04 remains **NOT VERIFIED** and release remains **BLOCKED / NOT VERIFIED**.
+
+
+## Latest CI evidence — documentation commit a0ff2a58 (2026-10-21)
+
+The documentation-only commit `a0ff2a58fe8b3e8548d75ebc0769446e3e7b492c` has now completed all four CI workflows successfully:
+
+- [MetaEditor compile (Windows), run 39545411273](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545411273): both `SmartTradingBot_FINAL.mq5` and `LRN04_SHA256_GoldenVector.mq5` compiled with **0 errors and 0 warnings** using MetaEditor **5.0.0.6274**. Fresh EX5 files, compiler logs, and provenance metadata were uploaded as artifact `metaeditor-build-a0ff2a58fe8b3e8548d75ebc0769446e3e7b492c`.
+- [LRN-04 journal contract tests, run 39545411249](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545411249): success.
+- [MQL5 static audit, run 39545411295](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545411295): success.
+- [Trading safety defaults, run 39545411256](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545411256): success.
+
+**Evidence boundary remains unchanged:** this run confirms compilation and CI checks only. The SHA-256 script was not executed inside a running MetaTrader terminal, so its runtime `[PASS]` output has not been observed. The V2 digest gate is still unapproved; journal persistence, lock/fencing, crash recovery, and EA integration remain unverified. **LRN-04: NOT VERIFIED; release: BLOCKED / NOT VERIFIED.**
