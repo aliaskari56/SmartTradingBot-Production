@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.131"
+#property version   "1.132"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -11187,7 +11187,8 @@ enum ENUM_STB_DELETE_REASON
    STB_DEL_SERVER_ACCEPT_INVALID=1,  // accepted then rejected geometry
    STB_DEL_EXPLICIT_USER_COMMAND=2,  // user-issued delete
    STB_DEL_SERVER_EXPIRATION=3,      // server-side explicit expiration
-   STB_DEL_EXPLICIT_CLEANUP=4        // housekeeping cleanup
+   STB_DEL_EXPLICIT_CLEANUP=4,       // housekeeping cleanup
+   STB_DEL_DAILY_RISK_GUARD=5        // daily equity-loss circuit breaker
   };
 
 bool STB_ExecuteOrderDelete(const ulong ticket,
@@ -11265,6 +11266,23 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
          // local-age expiry remains restricted to unoverridden EA creations.
          authorized=serverExpired || localAgeExpired;
         }
+     }
+
+   else if(reason==STB_DEL_DAILY_RISK_GUARD)
+     {
+      // Daily-risk cancellation is not a creator rollback: it must work for
+      // aged pending orders and must be re-authorized at the central writer.
+      // Include EA-owned magic orders and this EA's UI-manual orders (magic 0,
+      // STB|M| comment); never delete unrelated magic-0 terminal orders.
+      string symbol=OrderGetString(ORDER_SYMBOL);
+      long orderMagic=OrderGetInteger(ORDER_MAGIC);
+      bool eaOwned=(orderMagic==(long)InpMagic);
+      bool eaUiManual=(orderMagic==0 &&
+                       StringFind(orderComment,"STB|M|")==0);
+      authorized=(source=="DailyLossGuard" &&
+                  (eaOwned || eaUiManual) &&
+                  IsManagedOrder(ticket) &&
+                  STB_SymbolManagementOwnedVerified(symbol));
      }
 
    if(!authorized)
@@ -11375,13 +11393,20 @@ void STB_EnforceDailyRiskGuard()
       ulong ticket=OrderGetTicket(i);
       if(ticket==0 || !OrderSelect(ticket))
          continue;
-      if((long)OrderGetInteger(ORDER_MAGIC)!=(long)InpMagic)
+      long orderMagic=OrderGetInteger(ORDER_MAGIC);
+      string orderComment=OrderGetString(ORDER_COMMENT);
+      bool eaOwned=(orderMagic==(long)InpMagic);
+      bool eaUiManual=(orderMagic==0 &&
+                       StringFind(orderComment,"STB|M|")==0);
+      if(!eaOwned && !eaUiManual)
          continue;
       if(!IsManagedOrder(ticket))
          continue;
 
       string symbol=OrderGetString(ORDER_SYMBOL);
-      if(STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"DailyLossGuard"))
+      if(!STB_SymbolManagementOwnedVerified(symbol))
+         continue;
+      if(STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD,"DailyLossGuard"))
          Print("STB DAILY GUARD cancelled pending order=",ticket,
                " symbol=",symbol);
      }
