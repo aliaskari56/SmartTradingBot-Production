@@ -250,5 +250,24 @@ class JournalContractTests(unittest.TestCase):
             encode_record(values)
 
 
+    def test_v2_schema_proposal_has_exactly_26_numbered_fields(self):
+        """Guard proposal numbering without treating the proposal as implemented."""
+        root = Path(__file__).resolve().parents[1]
+        proposal = (
+            root / "docs" / "LRN04_SCHEMA_V2_PROPOSAL_20261021.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("exactly **26 serialized fields including the checksum**", proposal)
+        section = proposal.split("Required fields:", 1)[1].split(
+            "\n\nThe 26 fields above", 1
+        )[0]
+        numbered = re.findall(r"(?m)^(\d+)\. `([a-z_]+)`:", section)
+        self.assertEqual(len(numbered), 26)
+        self.assertEqual([int(number) for number, _ in numbered], list(range(1, 27)))
+        names = [name for _, name in numbered]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertLess(names.index("rsum_scaled"), names.index("rcount"))
+        self.assertEqual(names[-1], "checksum")
+
+
 if __name__ == "__main__":
     unittest.main()
