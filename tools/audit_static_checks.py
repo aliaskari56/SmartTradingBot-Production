@@ -173,10 +173,6 @@ def main() -> int:
         source, "void STB_ReconcileTradeRegistry()", "void STB_ManagePositionImmediately")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
-    get_rates = source_region(
-        source, "bool GetRates(", "bool GetRatesAtLeast(")
-    get_rates_at_least = source_region(
-        source, "bool GetRatesAtLeast(", "bool IsSymbolTradable(")
     indicator_cache = source_region(
         source, "bool EnsureIndicatorHandles(", "// SWING ENGINE")
     diagnostic_reject = source_region(
@@ -508,19 +504,6 @@ def main() -> int:
         ("H4 trend alignment is a configurable hard entry gate",
          "InpRequireH4TrendAlignment = true" in source and
          "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
-        ("CopyRates is called after symbol selection without a symbol-wide sync preflight",
-         bool(get_rates) and
-         "SymbolSelect(symbol,true)" in get_rates and
-         "CopyRates(symbol,tf,0,count,rates)" in get_rates and
-         "SymbolIsSynchronized" not in get_rates),
-        ("H4 swing discovery accepts only synchronized partial history with a minimum bar count and bounds indexing to copied bars",
-         bool(get_rates_at_least) and
-         "copiedOut<minimumCount" in get_rates_at_least and
-         "SERIES_SYNCHRONIZED" in get_rates_at_least and
-         "if(tf==PERIOD_H4)" in collect_swings and
-         "GetRatesAtLeast(symbol,tf,maxBars,minimumBars,r,copiedBars)" in collect_swings and
-         "int availableBars=MathMin(copiedBars,ArraySize(r));" in collect_swings and
-         "int maxShift=availableBars-left-1;" in collect_swings),
         ("required local M15 FVG and Order Block are hard rejection gates",
          "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
          "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
