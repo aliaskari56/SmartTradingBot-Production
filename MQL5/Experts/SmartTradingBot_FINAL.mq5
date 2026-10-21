@@ -10737,10 +10737,11 @@ void STB_RunManagementCycle()
 
 void OnTick()
   {
-   STB_RunManagementCycle();
    bool m15Bar=NewM15Bar();
    if(m15Bar)
       STB_ReconcileTradeRegistry();
+   // Reconcile a newly detected M15-bar exposure before this tick's manager pass.
+   STB_RunManagementCycle();
    ulong cycleBefore=g_scannerCycle;
    STB_ScannerRun();
    if(g_scannerCycle!=cycleBefore)
