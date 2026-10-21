@@ -112,3 +112,31 @@ Official MQL5 reference checked before selecting an implementation strategy:
 ### Updated approval gate
 
 The official API references clarify available flush and sandbox behavior, but they do not prove crash consistency or inter-instance lock correctness in the target terminal. Source implementation remains gated on a separately reviewable record codec/recovery unit and fault-injection coverage. Status remains **LRN-04 NOT FIXED / NOT RUN**; release remains **BLOCKED / NOT VERIFIED**.
+
+
+## Proposed journal record contract (design only; not implemented)
+
+To make the next implementation reviewable, use a bounded, canonical record format rather than locale-sensitive CSV:
+
+- Encoding: ASCII bytes, one physical record per line, LF terminator, no free-form strings.
+- Fields in fixed order: `schema|record_seq|state|account_scope|magic|deal_ticket|position_id|lifecycle_id|symbol_code|direction|entry_kind|pnl_minor|risk_state|r_scaled|wins_scaled|losses_scaled|rsum_scaled|rcount|decay_time|previous_record_hash|crc32`.
+- Numeric identifiers use unsigned decimal digits only; enums use documented uppercase tokens; optional values use a single explicit sentinel token, never an empty field.
+- Floating-point values are not serialized as locale-dependent decimal floats. Values must be converted to documented scaled integers with explicit range/overflow checks before journaling. If the chosen scale cannot represent an input without unacceptable loss, reject that record instead of silently rounding it.
+- `account_scope` must be a stable, non-secret account/server identity hash, and the namespace also includes `InpMagic` and an explicit environment identifier. Do not write account credentials or other secrets.
+- `lifecycle_id` must distinguish a position's opening/reversal epochs; `deal_ticket` is the deduplication key for the terminal event. A reversal may require separate close-outcome and new-side lifecycle-state records linked to the same deal.
+- `record_seq` is strictly increasing under the journal lock. `previous_record_hash` chains records so removal/reordering is detectable; `crc32` detects accidental record corruption. These checks detect corruption but are not cryptographic authentication.
+- A PREPARED record contains the complete absolute post-event aggregate snapshot plus the source deal/lifecycle identity. COMMITTED references the same sequence and checksum. A COMMITTED record without its matching valid PREPARED record is invalid.
+- Impose a maximum record byte length and maximum recovery scan budget. Reject overlong, malformed, out-of-range, duplicate-sequence, or checksum-invalid records. Never parse a partial final line as a complete record.
+- The recovery parser must distinguish an incomplete tail from corruption in the middle of the journal. An incomplete final record can be quarantined/truncated only after preserving the last verified byte offset; corruption before that offset disables adaptive writes pending explicit recovery.
+
+### Deterministic codec checks required before MQL5 integration
+
+1. Golden byte vectors for every enum, sentinel, integer boundary, and checksum.
+2. Reject altered bytes, missing/extra fields, invalid digits, overflow, invalid scale, and overlong records.
+3. Reject a truncated record at every byte offset; retain earlier verified records.
+4. Reject duplicate or decreasing sequence numbers and broken previous-record hashes.
+5. Round-trip the largest supported PnL/risk/aggregate values without locale dependence.
+6. Verify repeated PREPARED replay writes the same absolute snapshot; it never increments an aggregate.
+7. Verify environment/account/magic namespaces cannot collide in the test matrix.
+
+This contract is a review target, not evidence that a journal implementation exists or passes. In particular, checksum and hash-chain validation do not replace correct locking, lifecycle reconstruction, or terminal fault-injection tests.
