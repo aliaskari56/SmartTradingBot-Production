@@ -706,7 +706,6 @@ def main() -> int:
          "int exposureIdx=STB_ExposureEnsure(ticket,true);" in reconcile_registry and
          "if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry and
          "STB_GeomStore(ticket,true," in reconcile_registry),
-    ]
         ("adaptive break-even requires confirmed initial SL, ATR movement, net cost coverage, broker-valid geometry, and queues through the shared writer",
          bool(adaptive_be) and all(token in adaptive_be for token in (
              "currentSL<=0.0", "STB_GetAdaptiveProtectionATR(symbol,atr)",
@@ -744,6 +743,7 @@ def main() -> int:
          "STB_IsValidSLForDecisionSnapshot" in position_sl_resolver and
          "currentSL>0.0 && c<=currentSL" in position_sl_resolver and
          "currentSL>0.0 && c>=currentSL" in position_sl_resolver),
+    ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
