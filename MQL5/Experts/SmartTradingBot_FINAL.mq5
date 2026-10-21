@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.130"
+#property version   "1.131"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -53,7 +53,7 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = true;  // conservative equity-risk sizing enabled by default
+input bool    InpUseRiskSizing         = false; // explicit opt-in; conservative equity-risk sizing must be enabled in tester inputs
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
