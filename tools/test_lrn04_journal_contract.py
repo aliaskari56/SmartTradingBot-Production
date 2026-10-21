@@ -320,6 +320,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
     for record in records:
         if not required_fields.issubset(record):
             raise JournalContractError("missing required reference-model field")
+        if set(record) != required_fields:
+            raise JournalContractError("unexpected reference-model field")
         if any(not isinstance(record[name], str) for name in required_fields):
             raise JournalContractError("reference-model fields must be strings")
         # Validate every numeric field before using the reference record.
@@ -573,6 +575,14 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         record = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
         del record["account_scope"]
         with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([record])
+
+    def test_unexpected_reference_field_rejected(self):
+        record = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        record["unexpected_extension"] = "must-not-be-ignored"
+        with self.assertRaisesRegex(
+            JournalContractError, "unexpected reference-model field"
+        ):
             validate_v2_reference_history([record])
 
 
