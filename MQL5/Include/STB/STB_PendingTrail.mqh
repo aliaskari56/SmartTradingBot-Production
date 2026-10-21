@@ -787,9 +787,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                      " symbol=",symbol,
                      " type=",STB_PendingTrailTypeName(orderType),
                      " reason=MARKET_SIDE_BOUNDARY",
-                     " candleExtreme=",DoubleToString(extreme,digits),
-                     " adjustedExtreme=",DoubleToString(adjustedExtreme,digits),
-                     " entry=",DoubleToString(boundaryRes.entry,digits));
+                     " candleExtreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                     " adjustedExtreme=",DoubleToString(adjustedExtreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                     " entry=",DoubleToString(boundaryRes.entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
                res=boundaryRes;
                resolved=true;
               }
