@@ -159,6 +159,8 @@ def main() -> int:
     final_revalidation = source_region(
         source, "bool STB_FinalCandidateRevalidation(",
         "// Serialize final scanner revalidation/submission")
+    execute_top_candidate = source_region(
+        source, "void STB_ExecuteTopCandidate()", "// MANUAL PENDING COMMANDS")
     place_setup = source_region(
         source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
     on_trade_transaction = source_region(
@@ -266,6 +268,16 @@ def main() -> int:
           "g_panelScanSellReady=finalSellReady;" in scanner_run and
           "g_panelScanBuyReady=g_scannerBuyCount;" not in scanner_run and
           "g_panelScanSellReady=g_scannerSellCount;" not in scanner_run),
+        ("fallback candidate independently satisfies revalidated-watchlist confidence before submission",
+          bool(execute_top_candidate) and
+          "if(i>0)" in execute_top_candidate and
+          "CANDIDATE_NOT_IN_REVALIDATED_WATCHLIST" in execute_top_candidate and
+          "FALLBACK_CONFIDENCE_NOT_CLEAR" in execute_top_candidate and
+          "g_scannerWatchlist[watchRank+1].opportunityScore" in execute_top_candidate and
+          "fallbackScore>=InpScannerMinScore" in execute_top_candidate and
+          execute_top_candidate.index("CANDIDATE_NOT_IN_REVALIDATED_WATCHLIST") <
+              execute_top_candidate.index("FALLBACK_CONFIDENCE_NOT_CLEAR") <
+              execute_top_candidate.index("bool placed=false;")),
         ("final scanner-to-execution handoff rechecks effective setup age",
           "iBarShift(c.symbol,PERIOD_M15,refreshed.setupTime,true)" in final_revalidation and
           "STB_EffectiveMaxSetupAgeBars()" in final_revalidation and
