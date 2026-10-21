@@ -173,6 +173,8 @@ def main() -> int:
         source, "void STB_ReconcileTradeRegistry()", "void STB_ManagePositionImmediately")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
+    get_rates = source_region(
+        source, "bool GetRates(", "bool IsSymbolTradable(")
     indicator_cache = source_region(
         source, "bool EnsureIndicatorHandles(", "// SWING ENGINE")
     diagnostic_reject = source_region(
@@ -504,6 +506,12 @@ def main() -> int:
         ("H4 trend alignment is a configurable hard entry gate",
          "InpRequireH4TrendAlignment = true" in source and
          "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
+        ("CopyRates history request is not blocked by symbol-wide synchronization preflight",
+         bool(get_rates) and
+         "SymbolSelect(symbol,true)" in get_rates and
+         "CopyRates(symbol,tf,0,count,rates)" in get_rates and
+         "SymbolIsSynchronized" not in get_rates and
+         "return copied>=count;" in get_rates),
         ("required local M15 FVG and Order Block are hard rejection gates",
          "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
          "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
