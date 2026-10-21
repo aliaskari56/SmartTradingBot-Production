@@ -57,7 +57,7 @@ The transaction callback should capture stable identifiers and bounded event dat
 
 On startup and on controlled reconciliation:
 - validate the journal from its last known checkpoint within a bounded scan budget;
-- ignore only a clearly incomplete final append if the format makes that unambiguous;
+- reject a truncated final record by default; do not silently skip or repair it. Any future recovery exception requires an explicitly approved format-level proof that the tail is an incomplete append and dedicated fault-injection tests;
 - treat interior corruption, impossible sequence transitions, or conflicting committed records as a hard integrity failure;
 - rebuild absolute aggregates from the last valid committed snapshot;
 - reconcile open positions and recent deal history without double-applying committed tickets;
@@ -78,6 +78,10 @@ Implement deterministic tests for:
 - file-open/write/flush failure and bounded recovery scan.
 
 The Python reference codec tests are necessary but do not replace tests of the MQL5 implementation or terminal runtime.
+
+## Recovery-policy consistency
+
+The default policy is fail-closed for a truncated final record, consistent with `docs/LRN04_CRASH_RECOVERY_CONTRACT_20261021.md`. The implementation must not infer that a malformed tail is safe to discard merely because it is the last line. No automatic truncation, compaction, or migration is permitted in the initial version.
 
 ## Acceptance gate
 
