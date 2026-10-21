@@ -140,3 +140,10 @@ To make the next implementation reviewable, use a bounded, canonical record form
 7. Verify environment/account/magic namespaces cannot collide in the test matrix.
 
 This contract is a review target, not evidence that a journal implementation exists or passes. In particular, checksum and hash-chain validation do not replace correct locking, lifecycle reconstruction, or terminal fault-injection tests.
+
+
+## Reference codec contract tests (2026-10-21; test-only)
+
+A Python reference harness was added at `tools/test_lrn04_journal_contract.py`. It defines canonical ASCII/LF encoding, fixed field count, unsigned-integer and token validation, CRC32 verification, and negative tests for torn records, altered bytes, malformed field counts, non-canonical integers, delimiters, and non-ASCII input.
+
+**Important boundary:** this harness is a specification aid only. It is not the MQL5 journal, does not test terminal file semantics or cross-instance locking, and does not establish crash consistency. The harness must be run in CI and matched against golden byte vectors from the eventual MQL5 codec before it can be used as implementation evidence. LRN-04 remains **NOT FIXED / NOT RUN** and release remains **BLOCKED / NOT VERIFIED**.
