@@ -580,7 +580,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // Initial structural protection owns unprotected pending orders. Do not
    // let the trail fallback silently install a generic fixed-distance SL.
    if(OrderGetDouble(ORDER_SL)<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket,
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=SL_NOT_INSTALLED");
       return true;
+     }
 
    g_stbPendingTrail[idx].orderType=orderType;
 
@@ -590,7 +596,15 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    double pip=PipSize(symbol);
 
    if(direction==0 || point<=0.0 || pip<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=INVALID_SYMBOL_GEOMETRY",
+            " direction=",direction,
+            " point=",DoubleToString(point,10),
+            " pip=",DoubleToString(pip,10));
       return true;
+     }
 
    // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
    // BUY STOP moves only after a bearish M5 candle and anchors to its low.
@@ -616,7 +630,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
       if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=M5_OHLC_INVALID",
+               " open=",DoubleToString(barOpen,10),
+               " close=",DoubleToString(barClose,10),
+               " low=",DoubleToString(barLow,10),
+               " high=",DoubleToString(barHigh,10));
          return true;
+        }
 
       // An actionable bar is committed only after the proposal is resolved
       // and the server write is confirmed. A rejected proposal stays retryable.
@@ -653,12 +676,23 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
      {
       MqlTick liveTick;
       if(!SymbolInfoTick(symbol,liveTick))
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=LIVE_TICK_UNAVAILABLE");
          return true;
+        }
       extreme=(direction>0 ? liveTick.bid:liveTick.ask);
      }
 
    if(extreme<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=EXTREME_INVALID",
+            " extreme=",DoubleToString(extreme,10));
       return true;
+     }
 
    // P4 monotonic trackedExtreme: BUY side only moves down, SELL side only up.
    bool isNewExtreme=false;
@@ -757,11 +791,32 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    // 4) Forward the proposal to the central submit gate. A failed broker
    //    write leaves the action bar unconsumed, so a later cycle can retry.
+   ResetLastError();
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
                                                  prop.sl,
                                                  prop.tp,
                                                  manual);
+
+   if(!committed)
+     {
+      int writerIdx=STB_PendingTrailFind(ticket);
+      int failures=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
+      datetime retryAt=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].nextRetryTime:0);
+      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " stage=SUBMIT",
+            " proposedEntry=",DoubleToString(prop.entry,digits),
+            " proposedSL=",DoubleToString(prop.sl,digits),
+            " currentEntry=",DoubleToString(currentEntry,digits),
+            " currentSL=",DoubleToString(currentSL,digits),
+            " failureCount=",failures,
+            " retryAt=",(string)retryAt,
+            " lastError=",GetLastError(),
+            " tradeRetcode=",(string)trade.ResultRetcode(),
+            " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+     }
 
    if(committed)
    {
