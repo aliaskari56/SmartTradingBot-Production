@@ -160,7 +160,7 @@ class JournalContractTests(unittest.TestCase):
 
         vectors = {
             b"abc": "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
-            b"abc\\n": "EDEAAFF3F1774AD2888673770C6D64097E391BC362D7D6FB34982DDF0EFD18CB",
+            bytes((97, 98, 99, 10)): "EDEAAFF3F1774AD2888673770C6D64097E391BC362D7D6FB34982DDF0EFD18CB",
         }
         for payload, expected in vectors.items():
             with self.subTest(payload=payload):
@@ -170,7 +170,7 @@ class JournalContractTests(unittest.TestCase):
         # Guard the key byte-boundary decisions without claiming MQL5 runtime proof.
         self.assertIn("ArrayResize(bytes, length)", script)
         self.assertIn("bytes[i] = (uchar)ch;", script)
-        self.assertIn('"abc\\n"', script)
+        self.assertIn("StringGetCharacter(value, i)", script)
         self.assertIn("CryptEncode(CRYPT_HASH_SHA256, data, key, digest)", script)
         self.assertIn("digest_size != 32", script)
         self.assertNotIn("StringToCharArray", script)
