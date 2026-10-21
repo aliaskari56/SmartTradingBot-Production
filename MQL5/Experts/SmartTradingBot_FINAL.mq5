@@ -439,6 +439,7 @@ STBAdaptiveProfile g_activeAdaptiveProfile;
 bool               g_activeAdaptiveProfileValid=false;
 int                g_activeAdaptiveProfileId=0;
 string             g_lastBuildRejectReason="UNKNOWN";
+string             g_lastPendingSetupRejectReason="";
 STBDiagnosticState g_diagnosticStates[];
 string             g_dashboardLastAction="EA INITIALIZED";
 bool               g_dashHidden=false;
@@ -2382,19 +2383,51 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 // Normalize a pending setup against the live market and the broker's
 // symbol-specific stop/freeze constraints. Returns false if the resulting
 // geometry cannot satisfy the requested RR.
+bool STB_PendingSetupReject(const Setup &s,const string reason)
+  {
+   g_lastPendingSetupRejectReason=reason;
+
+   int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
+   if(digits<0 || digits>10)
+      digits=5;
+
+   MqlTick tick;
+   bool tickOK=SymbolInfoTick(s.symbol,tick);
+
+   Print("STB PENDING NORMALIZATION REJECT",
+         " symbol=",s.symbol,
+         " dir=",(s.direction>0 ? "BUY":"SELL"),
+         " reason=",reason,
+         " entry=",DoubleToString(s.entry,digits),
+         " sl=",DoubleToString(s.sl,digits),
+         " tp=",DoubleToString(s.tp,digits),
+         " bid=",DoubleToString(tickOK ? tick.bid:0.0,digits),
+         " ask=",DoubleToString(tickOK ? tick.ask:0.0,digits),
+         " point=",DoubleToString(SymbolInfoDouble(s.symbol,SYMBOL_POINT),digits),
+         " tickSize=",DoubleToString(SymbolInfoDouble(s.symbol,SYMBOL_TRADE_TICK_SIZE),digits),
+         " stopsLevelPts=",IntegerToString((int)SymbolInfoInteger(s.symbol,SYMBOL_TRADE_STOPS_LEVEL)));
+
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool PreparePendingSetup(Setup &s)
   {
+   g_lastPendingSetupRejectReason="";
+
    MqlTick tick;
 
    if(!SymbolInfoTick(s.symbol,tick))
-      return false;
+      return STB_PendingSetupReject(s,"TICK_UNAVAILABLE");
 
    double point=SymbolInfoDouble(s.symbol,SYMBOL_POINT);
    int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
    double minDist=TradeMinDistance(s.symbol);
 
    if(point<=0.0)
-      return false;
+      return STB_PendingSetupReject(s,"SYMBOL_POINT_INVALID");
 
    if(minDist<=0.0)
       minDist=point;
@@ -2419,7 +2452,7 @@ bool PreparePendingSetup(Setup &s)
                s.symbol,
                " planned=",DoubleToString(s.entry,digits),
                " ask=",DoubleToString(tick.ask,digits));
-         return false;
+         return STB_PendingSetupReject(s,"BUY_STOP_TRIGGER_ALREADY_CROSSED");
         }
 
       double minEntry=tick.ask+minDist+entryStep;
@@ -2444,7 +2477,7 @@ bool PreparePendingSetup(Setup &s)
             structuralSL>=entrySL)
            {
             Print("STB setup rejected: BUY structural SL unresolved symbol=",s.symbol);
-            return false;
+            return STB_PendingSetupReject(s,"BUY_STRUCTURAL_SL_UNRESOLVED");
            }
 
          s.sl=structuralSL;
@@ -2453,13 +2486,13 @@ bool PreparePendingSetup(Setup &s)
       if(s.sl>=s.entry)
         {
          Print("STB setup rejected: BUY SL is not structurally below entry symbol=",s.symbol);
-         return false;
+         return STB_PendingSetupReject(s,"BUY_SL_NOT_BELOW_ENTRY");
         }
 
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
+         return STB_PendingSetupReject(s,"BUY_SWING_COLLECTION_FAILED");
 
       double risk=s.entry-s.sl;
       double target=DBL_MAX;
@@ -2483,7 +2516,7 @@ bool PreparePendingSetup(Setup &s)
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
+         return STB_PendingSetupReject(s,"BUY_TP_TARGET_MISSING_OR_TOO_CLOSE");
         }
 
       s.tp=NormalizePrice(s.symbol,target);
@@ -2499,7 +2532,7 @@ bool PreparePendingSetup(Setup &s)
                s.symbol,
                " planned=",DoubleToString(s.entry,digits),
                " bid=",DoubleToString(tick.bid,digits));
-         return false;
+         return STB_PendingSetupReject(s,"SELL_STOP_TRIGGER_ALREADY_CROSSED");
         }
 
       double maxEntry=tick.bid-minDist-entryStep;
@@ -2524,7 +2557,7 @@ bool PreparePendingSetup(Setup &s)
             structuralSL<=entrySL)
            {
             Print("STB setup rejected: SELL structural SL unresolved symbol=",s.symbol);
-            return false;
+            return STB_PendingSetupReject(s,"SELL_STRUCTURAL_SL_UNRESOLVED");
            }
 
          s.sl=structuralSL;
@@ -2533,13 +2566,13 @@ bool PreparePendingSetup(Setup &s)
       if(s.sl<=s.entry)
         {
          Print("STB setup rejected: SELL SL is not structurally above entry symbol=",s.symbol);
-         return false;
+         return STB_PendingSetupReject(s,"SELL_SL_NOT_ABOVE_ENTRY");
         }
 
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
+         return STB_PendingSetupReject(s,"SELL_SWING_COLLECTION_FAILED");
 
       double risk=s.sl-s.entry;
       double target=-DBL_MAX;
@@ -2563,7 +2596,7 @@ bool PreparePendingSetup(Setup &s)
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
+         return STB_PendingSetupReject(s,"SELL_TP_TARGET_MISSING_OR_TOO_CLOSE");
         }
 
       s.tp=NormalizePrice(s.symbol,target);
@@ -2577,7 +2610,7 @@ bool PreparePendingSetup(Setup &s)
    double reward=MathAbs(s.tp-s.entry);
 
    if(risk<=0.0 || reward<=0.0)
-      return false;
+      return STB_PendingSetupReject(s,"ZERO_RISK_OR_REWARD");
 
    if(InpMaxInitialSLPips>0.0 &&
       risk>InpMaxInitialSLPips*PipSize(s.symbol))
@@ -2586,7 +2619,7 @@ bool PreparePendingSetup(Setup &s)
             s.symbol,
             " riskPips=",DoubleToString(risk/PipSize(s.symbol),1),
             " capPips=",DoubleToString(InpMaxInitialSLPips,1));
-      return false;
+      return STB_PendingSetupReject(s,"INITIAL_SL_RISK_CAP_EXCEEDED");
      }
 
    s.rr=reward/risk;
@@ -2595,7 +2628,7 @@ bool PreparePendingSetup(Setup &s)
    if(!STB_ValidatePendingGeometry(s.symbol,s.direction,s.entry,s.sl,s.tp,true,STB_EffectiveMinimumRR(),geometryReason))
      {
       Print("STB pending geometry contract rejected symbol=",s.symbol," dir=",(s.direction>0 ? "BUY":"SELL")," reason=",geometryReason);
-      return false;
+      return STB_PendingSetupReject(s,"PENDING_GEOMETRY_"+geometryReason);
      }
 
    if(s.rr+1e-9<STB_EffectiveMinimumRR())
@@ -2607,7 +2640,7 @@ bool PreparePendingSetup(Setup &s)
             " entry=",DoubleToString(s.entry,digits),
             " sl=",DoubleToString(s.sl,digits),
             " tp=",DoubleToString(s.tp,digits));
-      return false;
+      return STB_PendingSetupReject(s,"RR_BELOW_MINIMUM");
      }
 
    bool changed=
@@ -3932,7 +3965,12 @@ bool BuildSetup(const string symbol,
      }
 
    if(!PreparePendingSetup(s))
-      return STB_BuildReject(symbol,direction,"BROKER_STOP_NORMALIZATION_FAILED");
+     {
+      string normalizationReason=g_lastPendingSetupRejectReason;
+      if(normalizationReason=="")
+         normalizationReason="BROKER_STOP_NORMALIZATION_FAILED";
+      return STB_BuildReject(symbol,direction,normalizationReason);
+     }
 
    if(s.rr+1e-9<minimumRR)
       return STB_BuildReject(symbol,direction,"RR_BELOW_PROFILE_MINIMUM");
