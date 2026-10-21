@@ -659,9 +659,6 @@ class JournalV2DecisionChecklistTests(unittest.TestCase):
         self.assertIn("not implement durable persistence", checklist)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class JournalV2ProvisionalDecisionRecordTests(unittest.TestCase):
     def test_provisional_decisions_keep_runtime_approval_explicit(self):
@@ -693,3 +690,7 @@ class JournalV2ProvisionalDecisionRecordTests(unittest.TestCase):
         self.assertIn("minimum supported terminal build", doc)
         self.assertIn("controlled non-live terminal evidence", doc)
         self.assertIn("Do not enable live deployment", doc)
+
+
+if __name__ == "__main__":
+    unittest.main()
