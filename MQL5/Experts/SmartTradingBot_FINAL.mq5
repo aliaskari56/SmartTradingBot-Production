@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.128"
+#property version   "1.129"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
