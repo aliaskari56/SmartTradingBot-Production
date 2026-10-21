@@ -80,6 +80,14 @@ void OnStart()
    int failed = 0;
 
    // Independent SHA-256 known-answer vectors:
+   // SHA256(empty byte sequence)
+   if(CheckVector("Empty input (0 bytes)",
+                  "",
+                  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"))
+      ++passed;
+   else
+      ++failed;
+
    // SHA256(ASCII "abc")
    if(CheckVector("ASCII abc (3 bytes)",
                   "abc",
