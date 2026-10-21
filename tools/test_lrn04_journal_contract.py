@@ -504,5 +504,34 @@ class JournalRecoveryProposalTests(unittest.TestCase):
         self.assertIn("Do not connect LRN-04 to", doc)
 
 
+
+class JournalLockProposalTests(unittest.TestCase):
+    def test_lock_contract_requires_atomic_ownership_and_fencing(self):
+        root = Path(__file__).resolve().parents[1]
+        doc = (root / "docs" / "LRN04_LOCK_OWNERSHIP_CONTRACT_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        for phrase in (
+            "Status: proposal only; not implemented or runtime-verified",
+            "atomic compare-and-set",
+            "lease generation",
+            "Only the current owner may release the lock",
+            "Do not steal a lock solely because its timestamp appears old",
+            "fencing prevents its writes",
+            "Release status remains BLOCKED / NOT VERIFIED",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, doc)
+
+    def test_lock_contract_rejects_unlocked_fallback(self):
+        root = Path(__file__).resolve().parents[1]
+        doc = (root / "docs" / "LRN04_LOCK_OWNERSHIP_CONTRACT_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("No silent fallback to an unlocked writer", doc)
+        self.assertIn("operator intervention", doc)
+        self.assertIn("Do not wire journal writes into", doc)
+
+
 if __name__ == "__main__":
     unittest.main()
