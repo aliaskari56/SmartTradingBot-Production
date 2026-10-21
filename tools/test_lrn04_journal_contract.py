@@ -633,5 +633,31 @@ class JournalRecoveryPolicyConsistencyTests(unittest.TestCase):
         self.assertIn("No automatic truncation, compaction, or migration", plan)
 
 
+class JournalV2DecisionChecklistTests(unittest.TestCase):
+    def test_unresolved_v2_decisions_and_evidence_are_explicit(self):
+        root = Path(__file__).resolve().parents[1]
+        checklist = (
+            root / "docs" / "LRN04_V2_DECISION_CHECKLIST_20261021.md"
+        ).read_text(encoding="utf-8")
+        for phrase in (
+            "Status: review checklist only",
+            "Namespace canonicalization",
+            "Digest algorithm",
+            "Numeric semantics",
+            "Sentinels and semantic constraints",
+            "Duplicate COMMITTED policy",
+            "File semantics",
+            "Lock and fencing",
+            "Recovery budget and diagnostics",
+            "Cross-language parity",
+            "Fault-injection coverage",
+            "before the above gates pass",
+            "LRN-04: NOT VERIFIED. Release: BLOCKED / NOT VERIFIED.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, checklist)
+        self.assertIn("not implement durable persistence", checklist)
+
+
 if __name__ == "__main__":
     unittest.main()
