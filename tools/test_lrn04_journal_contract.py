@@ -191,6 +191,18 @@ class JournalContractTests(unittest.TestCase):
         values["symbol_code"] = "EURUSD.a"
         self.assertEqual(decode_record(encode_record(values)), values)
 
+    def test_symbol_charset_is_ascii_and_bounded_by_record_limit(self):
+        for invalid in ("EUR/USD", "EURUSD:PRO", "EUR€USD"):
+            with self.subTest(symbol=invalid):
+                values = sample()
+                values["symbol_code"] = invalid
+                with self.assertRaises(JournalContractError):
+                    encode_record(values)
+
+        values = sample()
+        values["symbol_code"] = "eurusd.a"
+        self.assertEqual(decode_record(encode_record(values)), values)
+
     def test_negative_leading_zero_is_rejected(self):
         values = sample()
         values["pnl_minor"] = "-01"
