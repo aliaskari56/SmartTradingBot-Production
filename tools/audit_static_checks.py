@@ -195,7 +195,7 @@ def main() -> int:
         source, "void ManagePositions()", "// PENDING ORDER MANAGEMENT")
     position_sl_resolver = source_region(
         source, "bool STB_ResolvePositionSL(",
-        "bool STB_QueuePositionSL(")
+        "bool STB_SubmitPositionSL(")
     checks: list[tuple[str, bool]] = [
         ("live automatic trading remains opt-in by default",
          "input bool    InpAutoTrading            = false;" in source),
