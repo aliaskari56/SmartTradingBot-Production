@@ -533,5 +533,20 @@ class JournalLockProposalTests(unittest.TestCase):
         self.assertIn("Do not wire journal writes into", doc)
 
 
+class JournalRecoveryPolicyConsistencyTests(unittest.TestCase):
+    def test_implementation_plan_fails_closed_on_truncated_tail(self):
+        root = Path(__file__).resolve().parents[1]
+        plan = (root / "docs" / "LRN04_IMPLEMENTATION_PLAN_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        recovery = (root / "docs" / "LRN04_CRASH_RECOVERY_CONTRACT_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("reject a truncated final record by default", plan)
+        self.assertIn("fail-closed for a truncated final record", plan)
+        self.assertIn("Truncated final record fail closed by default", recovery)
+        self.assertIn("No automatic truncation, compaction, or migration", plan)
+
+
 if __name__ == "__main__":
     unittest.main()
