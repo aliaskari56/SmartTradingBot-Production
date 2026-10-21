@@ -379,6 +379,14 @@ def main() -> int:
              "STB_SymbolManagementOwnedVerified(symbol)",
              "if(expiryAuthority)",
              "authorized=serverExpired || localAgeExpired"))),
+        ("daily-loss guard uses dedicated authorization for aged EA and UI-manual pending orders",
+         all(token in source for token in (
+             "STB_DEL_DAILY_RISK_GUARD=5",
+             "if(reason==STB_DEL_DAILY_RISK_GUARD)",
+             'source=="DailyLossGuard"',
+             'StringFind(orderComment,"STB|M|")==0',
+             'STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD,"DailyLossGuard")',
+             "STB_SymbolManagementOwnedVerified(symbol)"))),
         ("position modify rechecks TP snapshot",
          "position state changed before request" in source),
         # Fail closed on the confirmed root cause. A one-element proposal
