@@ -520,6 +520,11 @@ def main() -> int:
          "CopyRates(symbol,tf,0,count,rates)" in get_rates and
          "SymbolIsSynchronized" not in get_rates and
          "return copied>=count;" in get_rates),
+        ("Strategy Tester scanner is chart-symbol-only even with legacy multi-symbol .set inputs",
+         "if(MQLInfoInteger(MQL_TESTER))" in scanner_run and
+         "symbols[0]=_Symbol;" in scanner_run and
+         "if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)" not in scanner_run and
+         "STB TESTER SCOPE OVERRIDE:" in on_init),
         ("required local M15 FVG and Order Block are hard rejection gates",
          "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
          "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
