@@ -20,8 +20,8 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
-//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - BUY STOP: each closed M5 low is tested as a favorable extreme|
+//|   - SELL STOP: each closed M5 high is tested as a favorable extreme|
 //|   - other pending types retain live Bid/Ask extreme trailing     |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
@@ -641,36 +641,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          return true;
         }
 
-      // An actionable bar is committed only after the proposal is resolved
-      // and the server write is confirmed. A rejected proposal stays retryable.
+      // Candle color is not a trailing criterion: a wick can set a valid
+      // favorable extreme on either candle body color. The monotonic extreme
+      // gate below decides whether the closed bar can improve the proposal.
+      // Commit this bar only after a no-change decision or confirmed write;
+      // resolver/writer failures leave it retryable under bounded backoff.
       actionableClosedBar=closedBar;
-
-      if(orderType==(long)ORDER_TYPE_BUY_STOP)
-        {
-         if(barClose>=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
-                  " type=BUY_STOP reason=M5_BAR_NOT_BEARISH",
-                  " open=",DoubleToString(barOpen,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-                  " close=",DoubleToString(barClose,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-            return true; // this candle cannot move BUY STOP down
-           }
-         extreme=barLow;
-        }
-      else
-        {
-         if(barClose<=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
-                  " type=SELL_STOP reason=M5_BAR_NOT_BULLISH",
-                  " open=",DoubleToString(barOpen,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-                  " close=",DoubleToString(barClose,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-            return true; // this candle cannot move SELL STOP up
-           }
-         extreme=barHigh;
-        }
+      extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);
      }
    else
      {
@@ -730,77 +707,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                  res,
                                  g_stbPendingTrail[idx].slBufferPips);
 
-   // A new M5 extreme can place the raw STOP entry inside the live market
-   // (BUY STOP: at/below Ask; SELL STOP: at/above Bid). That is a normal
-   // trailing geometry conflict, not a reason to abandon the new extreme.
-   // Retry once at the nearest broker-valid market-side boundary. The central
-   // writer still enforces favorable-only entry movement, SL validity and the
-   // immutable risk floor; if those constraints cannot all be met it rejects.
-   if((!resolved || !res.valid) && candleStop &&
-      (res.reason=="BUY_ENTRY_INSIDE_BROKER_ZONE" ||
-       res.reason=="SELL_ENTRY_INSIDE_BROKER_ZONE"))
-     {
-      MqlTick trailTick;
-      double pointSize=SymbolInfoDouble(symbol,SYMBOL_POINT);
-      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-      double minDistance=TradeMinDistance(symbol);
-
-      if(SymbolInfoTick(symbol,trailTick) &&
-         trailTick.bid>0.0 && trailTick.ask>0.0 &&
-         pointSize>0.0 && minDistance>=0.0)
-        {
-         if(tickSize<=0.0)
-            tickSize=pointSize;
-
-         double spread=MathMax(0.0,trailTick.ask-trailTick.bid);
-         double effectiveOffset=MathMax(g_stbPendingTrail[idx].entryBufferPips*pip,
-                                         spread+minDistance+pointSize);
-         double safeEntry=0.0;
-         double adjustedExtreme=0.0;
-
-         if(orderType==(long)ORDER_TYPE_BUY_STOP)
-           {
-            safeEntry=STB_TickAlignPrice(symbol,
-                                         trailTick.ask+minDistance+2.0*tickSize);
-            adjustedExtreme=safeEntry-effectiveOffset;
-           }
-         else if(orderType==(long)ORDER_TYPE_SELL_STOP)
-           {
-            safeEntry=STB_TickAlignPrice(symbol,
-                                         trailTick.bid-minDistance-2.0*tickSize);
-            adjustedExtreme=safeEntry+effectiveOffset;
-           }
-
-         if(safeEntry>0.0 && adjustedExtreme>0.0)
-           {
-            STBPendingResolution boundaryRes;
-            bool boundaryResolved=
-               STB_ResolvePendingDistance(symbol,
-                                          (ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType,
-                                          adjustedExtreme,
-                                          g_stbPendingTrail[idx].entryBufferPips,
-                                          boundaryRes,
-                                          g_stbPendingTrail[idx].slBufferPips);
-            if(boundaryResolved && boundaryRes.valid)
-              {
-               Print("PENDING_TRAIL_BOUNDARY_ADJUST ticket=",ticket,
-                     " symbol=",symbol,
-                     " type=",STB_PendingTrailTypeName(orderType),
-                     " reason=MARKET_SIDE_BOUNDARY",
-                     " candleExtreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-                     " adjustedExtreme=",DoubleToString(adjustedExtreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
-                     " entry=",DoubleToString(boundaryRes.entry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
-               res=boundaryRes;
-               resolved=true;
-              }
-            else
-              {
-               res=boundaryRes;
-               resolved=false;
-              }
-           }
-        }
-     }
+   // Do not fabricate a synthetic candle extreme merely to push a pending
+   // STOP beyond the current market. If the true candle-derived geometry is
+   // currently invalid, retain the real extreme and retry after bounded
+   // backoff; the resolver will re-evaluate it against the latest quote.
 
    if(!resolved || !res.valid)
    {
