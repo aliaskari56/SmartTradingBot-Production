@@ -142,3 +142,13 @@ STR-07–STR-12 remain test requirements, not completed runtime results. The bra
 - Audit-script commit: `fee9cc308931ee1e8f35ed09a763f4cbe72ef19a`. Updated static audit passed (run `39532544020`) and safety-default check passed (run `39532544001`).
 - EA source blob remains `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`; no source code change in this checkpoint. A prior MetaEditor compile on that exact source passed (run `39532360739`); the compile triggered by the latest audit-script commit was still running when recorded.
 - Still not covered: runtime fault injection, event-order permutations, terminal restart/reattach lifecycle, end-to-end scanner-to-manager behavior, and Strategy Tester baseline/OOS. **Not release-ready / NOT VERIFIED.**
+
+
+## Timer recovery checkpoint — 2026-10-21
+
+- Canonical EA remains `MQL5/Experts/SmartTradingBot_FINAL.mq5`; latest EA source commit: `110bee250beaee48bf8745bf2d0a2074ee3994bc` (source blob `21a0a3f6c57da2e9cfbfe9533e8e02072f62bf17`).
+- `OnTimer()` now runs `STB_ReconcileTradeRegistry()` before `STB_RunManagementCycle()`, so terminal-visible positions/orders can be recovered into the registry before that timer's management pass. This is a recovery-ordering safeguard, not proof that all transaction races are resolved.
+- Static-audit script commit: `589002bf868c0cfdda74b66d69a3965375d98f45`.
+- Validation on the audit-script head: MetaEditor compile passed (run [39533074448](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533074448)); static source/invariant audit passed (run [39533074402](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533074402)); trading safety defaults passed (run [39533074531](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533074531)). The source-change commit also passed compile (run [39533064357](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533064357)), static audit (run [39533064361](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533064361)), and safety defaults (run [39533064336](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39533064336)).
+- The audit-script commit does not change EA source; compile and safety runs above are tied to the same latest EA source tree.
+- Still NOT RUN: runtime event-order/fault-injection tests, integrated scanner-to-manager tests, Strategy Tester baseline/OOS, and demo restart/reattach soak. No merge to `main` or terminal deployment. **Release status: NOT VERIFIED / NOT RELEASE READY.**
