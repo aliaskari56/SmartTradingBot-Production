@@ -11,8 +11,8 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the exact source commit `5d3ca220e205a36d8b37796c5cdae24a686457f7` using MetaEditor 5.0.0.6274; retain compiler log and provenance artifact | 0 errors, 0 warnings; confirmed by workflow run `39533709506` | PASS — CI COMPILE |
-| BLD-02 | Artifact provenance | Retain workflow artifact `metaeditor-build-5d3ca220e205a36d8b37796c5cdae24a686457f7` (artifact ID `12316507072`) containing compiler log, EX5 and `provenance.json`; independently inspect manifest hashes before release | Manifest maps EX5 to exact source commit and records MetaEditor build; final package/dependency provenance review remains separate | ARTIFACT GENERATED — RELEASE REVIEW PENDING |
+| BLD-01 | Exact-source compile | Compile exact branch revision `12380f2aa7c34ae23ca02ce8728e6fb9c528a7b5` using MetaEditor 5.0.0.6274; retain compiler log and provenance artifact | 0 errors, 0 warnings; confirmed by workflow run `39534201104` | PASS — CI COMPILE |
+| BLD-02 | Artifact provenance | Retain workflow artifact `metaeditor-build-12380f2aa7c34ae23ca02ce8728e6fb9c528a7b5` (artifact ID `12316357782`) containing compiler log, EX5 and `provenance.json`; independently inspect manifest hashes before release | Workflow generated the artifact for the exact revision and compiler build; independently verify manifest hashes and final package/dependency provenance before release | ARTIFACT GENERATED — RELEASE REVIEW PENDING |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
 
@@ -93,15 +93,15 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## Current evidence summary — refreshed 2026-10-21
 
-- Current validated source commit: `5d3ca220e205a36d8b37796c5cdae24a686457f7`; working branch: `fix/structure-first-fvg-trailing-20261020`.
-- MetaEditor workflow run `39533709506`: **SUCCESS**, MetaEditor 5.0.0.6274, **0 errors and 0 warnings**. The run compiled `MQL5/Experts/SmartTradingBot_FINAL.mq5` and its included dependencies from that exact commit.
-- Static audit run `39533709512`: **SUCCESS**. Trading safety defaults run `39533709682`: **SUCCESS**. These are source/CI checks, not functional trading tests.
-- Build artifact `metaeditor-build-5d3ca220e205a36d8b37796c5cdae24a686457f7` (artifact ID `12316507072`) contains the compiler log, EX5, and provenance manifest. The workflow records source and EX5 SHA-256 values in the artifact; independent package-level inspection remains pending.
+- Current checked revision: `12380f2aa7c34ae23ca02ce8728e6fb9c528a7b5`; working branch: `fix/structure-first-fvg-trailing-20261020`. The primary EA remains `MQL5/Experts/SmartTradingBot_FINAL.mq5`.
+- MetaEditor workflow run `39534201104`: **SUCCESS**, MetaEditor 5.0.0.6274, **0 errors and 0 warnings**. The exact checked revision compiled the primary EA and its included dependencies.
+- Static audit run `39534201139`: **SUCCESS**. Trading safety-defaults run `39534201122`: **SUCCESS**. These checks confirm compilation and static/source guardrails only; they are not functional trading tests.
+- Build artifact `metaeditor-build-12380f2aa7c34ae23ca02ce8728e6fb9c528a7b5` (artifact ID `12316357782`) contains the compiler log, EX5, and `provenance.json`. Artifact upload digest: `dd005b77cb47e359a67e4a32b82e99dbad2e3c3a342f743d3024c0cc6033fca0`. Independent inspection of the source/EX5 manifest hashes and package contents remains pending.
+- Latest lifecycle ordering change: on a newly detected M15 bar, `OnTick()` now calls `STB_ReconcileTradeRegistry()` before `STB_RunManagementCycle()`; the static audit explicitly checks this order. This reduces recovery latency in the code path but does not prove terminal runtime behavior.
 - Pending-trail retry, partial-fill handoff, registry reconciliation, scanner quote validation, and final scanner-to-manager checks have static assertions. Their runtime behavior remains unproven.
 - Functional tests for SL-01 through SL-12, EVT-01 through EVT-07, SCN/TRL/PTRL cases, Strategy Tester regression, demo lifecycle, include/license review, and package inspection remain **NOT RUN or NOT VERIFIED** as indicated by their individual rows.
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
 - Release decision: **BLOCKED / NOT VERIFIED**. Do not merge to `main` or treat the compiled artifact as production-approved.
-
 
 ## H. Structure-first strategy upgrade — added 2026-10-20
 
