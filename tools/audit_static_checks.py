@@ -219,6 +219,9 @@ def main() -> int:
           "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
           "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
           "double barClose=iClose(symbol,PERIOD_M5,1);" in trail_source and
+          "MathIsValidNumber(barOpen)" in trail_source and
+          "barLow<=MathMin(barOpen,barClose)" in trail_source and
+          "barHigh>=MathMax(barOpen,barClose)" in trail_source and
           "extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);" in trail_source and
           "M5_BAR_NOT_BEARISH" not in trail_source and
           "M5_BAR_NOT_BULLISH" not in trail_source and
