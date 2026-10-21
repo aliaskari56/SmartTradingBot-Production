@@ -35,7 +35,7 @@ input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
 input bool    InpTesterForceAutoTrading  = true;  // tester only; prevents stale/missing .set state from disabling order placement
-input bool    InpTesterChartSymbolOnly   = true;  // tester only; isolates the test universe to _Symbol
+input bool    InpTesterChartSymbolOnly   = true;  // legacy .set: also restricts tester management scope to _Symbol
 
 input group "=== RSI + CCI COMPOSITE ==="
 input bool    InpOscillatorConfirmation    = true;
@@ -1830,6 +1830,11 @@ bool STB_TradeEnvironmentAllowed()
             " expert=",accountAllowed ? "ON":"OFF",
             " accountTrade=",accountTradeAllowed ? "ON":"OFF",
             " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
+
+   // Scanner scope is always chart-only in Strategy Tester. This note explains
+   // old .set files that still carry the former multi-symbol scanner setting.
+   if(MQLInfoInteger(MQL_TESTER) && !InpTesterChartSymbolOnly)
+      Print("STB TESTER SCOPE OVERRIDE: scanner uses chart symbol only; legacy multi-symbol scanner setting ignored.");
       return false;
      }
 
@@ -9997,7 +10002,10 @@ void STB_ScannerRun()
    ArrayResize(symbols,0);
    bool universeAllocationFailed=false;
 
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+   // Strategy Tester only guarantees a coherent tick/history stream for the
+   // tested chart symbol. Never scan the whole Market Watch from a tester run,
+   // even if a legacy .set file has InpTesterChartSymbolOnly disabled.
+   if(MQLInfoInteger(MQL_TESTER))
      {
       if(ArrayResize(symbols,1)!=1)
         {
