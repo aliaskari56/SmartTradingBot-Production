@@ -146,6 +146,39 @@ def main() -> int:
     on_init = source_region(source, "int OnInit()", "// DEINIT")
     on_tick = source_region(source, "void OnTick()", "// TIMER")
     on_timer = source_region(source, "void OnTimer()", "// CHART EVENTS")
+    detect_structure = source_region(
+        source, "bool DetectStructure(", "// FVG / DISPLACEMENT ENGINE")
+    quote_validator = source_region(
+        source, "bool STB_ScannerQuoteValid(", "bool STB_ScannerDataEligible(")
+    scanner_data = source_region(
+        source, "bool STB_ScannerDataEligible(", "bool STB_ScannerDirectionAllowed(")
+    market_quality = source_region(
+        source, "bool STB_CalcMarketQuality(", "bool STB_EvaluateRegime(")
+    scanner_run = source_region(
+        source, "void STB_ScannerRun()", "void STB_DashDeleteAll()")
+    final_revalidation = source_region(
+        source, "bool STB_FinalCandidateRevalidation(",
+        "// Serialize final scanner revalidation/submission")
+    execute_top_candidate = source_region(
+        source, "void STB_ExecuteTopCandidate()", "// MANUAL PENDING COMMANDS")
+    place_setup = source_region(
+        source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
+    on_trade_transaction = source_region(
+        source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge")
+    trade_intake = source_region(
+        source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
+    management_cycle = source_region(
+        source, "void STB_RunManagementCycle()", "void OnTick()")
+    reconcile_registry = source_region(
+        source, "void STB_ReconcileTradeRegistry()", "void STB_ManagePositionImmediately")
+    collect_swings = source_region(
+        source, "int CollectSwings(", "// H4 TREND")
+    indicator_cache = source_region(
+        source, "bool EnsureIndicatorHandles(", "// SWING ENGINE")
+    diagnostic_reject = source_region(
+        source, "void STB_LogBuildReject(", "void STB_LogSetupReady(")
+    diagnostic_ready = source_region(
+        source, "void STB_LogSetupReady(", "//+------------------------------------------------------------------+")
     initial_pending_sl = source_region(
         source, "bool CalculateInitialPendingProtectionSL(",
         "bool VerifyPendingInitialSL(")
@@ -170,14 +203,146 @@ def main() -> int:
          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
          "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
-        ("manual override pause is retained for non-STOP orders while STOP candle-follow is explicit",
-         "&& !stbCandleStop" in source and
-         "&& !candleStop" in trail_source),
+        ("pending trail retires disappeared orders before exposure-allocation checks",
+         (lambda body: bool(body) and
+          "if(!OrderSelect(g_stbPendingTrail[idx].ticket))" in body and
+          "if(STB_ExposureEnsure(ticket,false)<0)" in body and
+          body.index("if(!OrderSelect(g_stbPendingTrail[idx].ticket))") <
+              body.index("if(STB_ExposureEnsure(ticket,false)<0)") and
+          "g_stbPendingTrail[idx].active=false;" in body)
+         (source_region(trail_source,
+                        "bool STB_PendingTrailManageOne(",
+                        "int STB_PendingTrailProcess("))),
+        ("partial pending fills retain trailing only while a managed remainder remains",
+         bool(trail_source) and
+         "DEAL_ADD can represent a partial fill" in trail_source and
+         "if(OrderSelect(ticket) &&" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery") and
+         "action=KEEP_TRAIL_ACTIVE" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery") and
+         "g_stbPendingTrail[idx].active=false;" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery")),
+        ("manual/mobile pending override metadata does not disable automatic SL protection or trailing",
+         "Do not impose protection on an order explicitly assigned to the user." not in source and
+         "if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)" not in source and
+         "!manual && STB_ManualOverrideIs(ticket) && !candleStop" not in trail_source and
+         "Every supported pending type remains under automatic management" in trail_source),
+        ("actionable M5 candle remains retryable after resolver/server failure and commits only after a confirmed write or deliberate skip",
+         "actionableClosedBar=closedBar;" in trail_source and
+         "Retry with the same bounded 5/15/60s policy." in trail_source and
+         "if(candleStop && step>0.0 &&" in trail_source and
+         "if(committed)\n   {\n      if(candleStop && actionableClosedBar>0)" in trail_source),
+        ("empty managed-symbol list means universal exposure management",
+         "if(StringLen(InpScannerSymbols)==0)\n      return true;" in source),
         ("scanner is interval-throttled independently of chart M15 bar",
          "bool intervalElapsed=(g_scannerLastRun<=0 ||" in source and
          "if(!newChartBar && !intervalElapsed)" in source and
          "if(cycleBar>0)" in source),
-        ("OnTick and OnTimer execute only after a new completed scanner cycle",
+         ("scanner quote validator rejects non-finite/crossed, future-dated, and stale quotes",
+          bool(quote_validator) and all(token in quote_validator for token in (
+              "MathIsValidNumber(tick.bid)", "MathIsValidNumber(tick.ask)",
+              "tick.ask<tick.bid", "TimeTradeServer()", "ageSeconds < -2",
+              "REJECT_FUTURE_QUOTE", "REJECT_STALE_DATA"))),
+         ("scanner eligibility and market-quality gates both use shared quote validation",
+          "STB_ScannerQuoteValid(tick,reason)" in scanner_data and
+          "STB_ScannerQuoteValid(tick,quoteReason)" in market_quality),
+         ("market quality rejects non-finite ATR and derived metrics before scoring",
+          all(token in market_quality for token in (
+              "MathIsValidNumber(atrNow)", "MathIsValidNumber(atrBase)",
+              "MathIsValidNumber(q.relativeSpread)",
+              'q.reason="REJECT_INVALID_MARKET_METRICS"'))),
+         ("scanner top-gap uses the full revalidated watchlist before Top-N truncation",
+          "if(clear && g_scannerWatchlistCount>1)" in scanner_run and
+          "g_scannerWatchlist[1].opportunityScore" in scanner_run and
+          "if(clear && g_scannerTop10Count>1)" not in scanner_run),
+        ("scanner dashboard ready counts reflect final revalidated watchlist, not discovery candidates",
+          "int finalBuyReady=0;" in scanner_run and
+          "int finalSellReady=0;" in scanner_run and
+          "g_panelScanBuyReady=finalBuyReady;" in scanner_run and
+          "g_panelScanSellReady=finalSellReady;" in scanner_run and
+          "g_panelScanBuyReady=g_scannerBuyCount;" not in scanner_run and
+          "g_panelScanSellReady=g_scannerSellCount;" not in scanner_run),
+        ("fallback candidate independently satisfies revalidated-watchlist confidence before submission",
+          bool(execute_top_candidate) and
+          "if(i>0)" in execute_top_candidate and
+          "CANDIDATE_NOT_IN_REVALIDATED_WATCHLIST" in execute_top_candidate and
+          "FALLBACK_CONFIDENCE_NOT_CLEAR" in execute_top_candidate and
+          "g_scannerWatchlist[watchRank+1].opportunityScore" in execute_top_candidate and
+          "fallbackScore>=InpScannerMinScore" in execute_top_candidate and
+          execute_top_candidate.index("CANDIDATE_NOT_IN_REVALIDATED_WATCHLIST") <
+              execute_top_candidate.index("FALLBACK_CONFIDENCE_NOT_CLEAR") <
+              execute_top_candidate.index("bool placed=false;")),
+        ("final scanner-to-execution handoff rechecks effective setup age",
+          "iBarShift(c.symbol,PERIOD_M15,refreshed.setupTime,true)" in final_revalidation and
+          "STB_EffectiveMaxSetupAgeBars()" in final_revalidation and
+          'c.rejectReason="REJECT_SETUP_TOO_OLD";' in final_revalidation and
+          final_revalidation.index("if(effectiveMaxAge>0 && c.setupAgeBars>effectiveMaxAge)") <
+          final_revalidation.index("if(!ValidatePendingSetup(refreshed))")),
+        ("diagnostic state arrays check allocation before indexing",
+          "if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)" in diagnostic_reject and
+          "if(ArrayResize(g_diagnosticStates,idx+1)!=idx+1)" in diagnostic_ready and
+          "diagnostic state allocation failed" in diagnostic_reject and
+          "ready-state diagnostic allocation failed" in diagnostic_ready),
+        ("indicator cache allocation releases newly created handles on failure",
+          "if(ArrayResize(g_indicatorCache,n+1)!=n+1)" in indicator_cache and
+          'Print("STB indicator cache allocation failed symbol=",symbol,' in indicator_cache and
+          indicator_cache.index("IndicatorRelease(hRsi);") <
+          indicator_cache.index('Print("STB indicator cache allocation failed') and
+          indicator_cache.index("IndicatorRelease(hCci);") <
+          indicator_cache.index('Print("STB indicator cache allocation failed') and
+          indicator_cache.index('Print("STB indicator cache allocation failed') <
+          indicator_cache.index("return false;", indicator_cache.index('Print("STB indicator cache allocation failed'))),
+        ("swing collection fails closed on reset or append allocation failure",
+          "if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)" in collect_swings and
+          "if(ArrayResize(highs,n+1)!=n+1)" in collect_swings and
+          "if(ArrayResize(lows,n+1)!=n+1)" in collect_swings and
+          collect_swings.count("ArrayFree(highs);") >= 2 and
+          collect_swings.count("ArrayFree(lows);") >= 2),
+        ("management lease tracking allocation failure releases the untrackable writer lease",
+          "bool STB_LeaseTrackSymbol(const string symbol)" in source and
+          "if(ArrayResize(g_stbLeaseSymbols,n+1)==n+1)" in source and
+          "STB management lease tracking allocation failed" in source and
+          source.count("if(!STB_LeaseTrackSymbol(symbol))") == 3 and
+          source.count("GlobalVariableSetOnCondition(ownerKey,0.0,me);") >= 4),
+        ("order submission rechecks volatile market, geometry, volume, permissions, and ownership",
+          all(token in place_setup for token in (
+              "TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT",
+              "DIRECTION_CHANGED_BEFORE_SUBMIT",
+              "SPREAD_CHANGED_BEFORE_SUBMIT",
+              "PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT",
+              'STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetupFinal")',
+              "ENTRY_LOCK_LOST_BEFORE_SUBMIT",
+              "SYMBOL_WRITER_LEASE_LOST",
+              "MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT")) and
+          place_setup.index("PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT") <
+          place_setup.index("bool ok=false;") <
+          place_setup.index("trade.BuyStop(volume,s.entry")),
+        ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
+          "void STB_ScannerAllocationAbort(" in source and
+          'g_scannerStatus="ALLOCATION_FAILED";' in source and
+          'STB_ScannerAllocationAbort("PREVIOUS_SNAPSHOT"' in source and
+          'STB_ScannerAllocationAbort("UNIVERSE_LIST"' in source and
+          'STB_ScannerAllocationAbort("CANDIDATE_LIST"' in source and
+          'STB_ScannerAllocationAbort("INITIAL_WATCHLIST"' in source and
+          'STB_ScannerAllocationAbort("FINAL_WATCHLIST"' in source and
+          'STB_ScannerAllocationAbort("EXECUTION_TOPN"' in source and
+          scanner_run.index("ArrayFree(wasSelected);") <
+          scanner_run.index('STB_ScannerAllocationAbort("SYMBOL_SELECTION_SNAPSHOT"') and
+          "ArrayFree(g_scannerTop10);" in source and
+          "ArrayFree(g_scannerWatchlist);" in source and
+          "ArrayFree(g_scannerCurrent);" in source and
+          "no candidate may be executed" in source),
+        ("M15 structure trigger requires a fresh close-crossing of a confirmed swing",
+          "r[s].close>highs[i].price && r[s+1].close<=highs[i].price" in detect_structure and
+          "r[s].close<lows[i].price && r[s+1].close>=lows[i].price" in detect_structure and
+          detect_structure.count("s+1<ArraySize(r)") == 2),
+         ("OnTick and OnTimer execute only after a new completed scanner cycle",
          "ulong cycleBefore=g_scannerCycle;" in on_tick and
          "if(g_scannerCycle!=cycleBefore)" in on_tick and
          "ulong cycleBefore=g_scannerCycle;" in on_timer and
@@ -310,6 +475,181 @@ def main() -> int:
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
+        ("H4 trend alignment is a configurable hard entry gate",
+         "InpRequireH4TrendAlignment = true" in source and
+         "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
+        ("required local M15 FVG and Order Block are hard rejection gates",
+         "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
+         "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
+        ("HTF FVG and Order Block use only zones confirmed by the closed M15 decision time",
+         "bool STB_CheckHTFConfluence(" in source and
+         "datetime decisionTime=latestClosedM15+m15Seconds;" in source and
+         source.count("confirmedAt>decisionTime") >= 2 and
+         "r[j].time+tfSeconds>decisionTime" in source),
+        ("HTF Order Block requires a confirmed pre-impulse structural break",
+         "STB_HTFImpulseBrokePriorSwing" in source and
+         "pivotShift-rightBars<=impulseShift" in source),
+        ("structural position trailing routes candidates through shared SL arbitration",
+         "bool STB_CalculateStructuralTrailSL(" in source and
+         "STB_SubmitPositionSL(ticket,structuralSL," in source and
+         "trade.PositionModify(ticket,structuralSL" not in source),
+        ("structural trailing uses confirmed swings, ATR activation and ATR buffer",
+         "CollectSwings(symbol,InpTrailTF,lookback,highs,lows)" in source and
+         "movePrice<atr*InpStructuralTrailStartATR" in source and
+         "atr*InpStructuralTrailBufferATR" in source),
+        ("HTF and structural trail floating inputs are finite-checked",
+         all(token in source for token in (
+             "!MathIsValidNumber(InpHTFZoneMaxGapATR)",
+             "!MathIsValidNumber(InpHTFMinFVGWidthATR)",
+             "!MathIsValidNumber(InpStructuralTrailStartATR)",
+             "!MathIsValidNumber(InpStructuralTrailBufferATR)"))),
+        ("adaptive state namespace is isolated from pre-confluence profile results",
+         "AP3|" in source and "AP2" not in source),
+        ("adaptive R expectancy uses its own risk-valid observation denominator",
+         '"RCOUNT",profile,0.0)*decay' in source and
+         '"RCOUNT",profileId,oldRCount' in source and
+         "if(hasValidRiskSample && MathIsValidNumber(rMultiple))" in source),
+        ("closed-trade learning reports whether initial monetary risk was captured",
+         source.count("riskMoney>0.0 && MathIsValidNumber(riskMoney)") >= 2),
+        ("default M15 setup age is bounded rather than unlimited",
+         "InpMaxSetupAgeBars       = 4;" in source),
+        ("only one direct PositionModify call exists in the shared verified broker writer",
+         source.count("trade.PositionModify(") == 1 and
+         "bool STB_PositionModifyBrokerVerified(" in source),
+        ("SL/TP wrapper delegates to the shared verified position modification bridge",
+         'gv,\n                                           (targetTP!=latestTP ? "SL+TP":"SL"))' in source and
+         "STB_PositionModifyBrokerVerified(ticket," in source),
+        ("structural TP manager delegates TP-only writes to the same verified bridge",
+         'failKey,"TP")' in source and
+         'bool STB_ModifyPositionTP(' in source and
+         "trade.PositionModify(ticket,sl,newTP)" not in source),
+        ("existing explicit position and pending TPs are never overwritten",
+         "if(PositionGetDouble(POSITION_TP)>0.0)\n      return true;" in source and
+         "if(OrderGetDouble(ORDER_TP)>0.0)\n      return true;" in source),
+        ("position TP management happens after SL arbitration flush",
+         source.index("STB_FlushPositionSLProposals();", source.index("void ManagePositions()")) <
+         source.index("EnsureInitialTPForPosition(ticket)", source.index("void ManagePositions()"))),
+        ("pending structural TP modification uses the central pending geometry writer",
+         "STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,false)" in source),
+        ("structural TP calculation includes RR floor, swing target, quote buffer and RR fallback",
+         "bool STB_CalculatePositionTPFromStructure(" in source and
+         "bool STB_CalculatePendingTPFromStructure(" in source and
+         'source="STRUCTURE_SWING"' in source and
+         'source="RR_FALLBACK"' in source and
+         "tick.bid+marketBuffer" in source and
+         "tick.ask-marketBuffer" in source),
+        ("managed positions and pending orders select their symbols before market-data management",
+         "SymbolSelect(symbol,true)" in source[source.index("void ManagePositions()"):source.index("void ManagePendingOrders()")] and
+         "SymbolSelect(symbol,true)" in source[source.index("void ManagePendingOrders()"):source.index("double DirectionExposureVolume(")]),
+        ("scanner rejects excessive spread relative to M15 ATR before score ranking",
+         "InpMaxRelativeSpreadPct   = 10.0" in source and
+         'q.reason="REJECT_RELATIVE_SPREAD";' in source and
+         "q.relativeSpread>InpMaxRelativeSpreadPct" in source and
+         "!MathIsValidNumber(InpMaxRelativeSpreadPct)" in source),
+        ("selected structural SL can attach a missing structural TP in the same verified broker request",
+         "double tpForRequest=-1.0" in source and
+         "if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL" in source and
+         "ModifyPositionSL(ticket,chosenSL,false,tpForRequest)" in source and
+         "const double requestedTP=-1.0" in source),
+        ("manager-generated position TP uses deterministic base RR, not stale active-profile state",
+         "InpMinimumRR,tp,source" in source and
+         "STB_EffectiveMinimumRR(),tp,source" not in source),
+        ("every position modify attempt consumes this cycle's write budget before the broker call",
+         "STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);" in source and
+         source.index("STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);") <
+         source.index("bool ModifyPositionSL(")),
+        ("transaction intake runs before deal-magic filtering so manual and foreign-magic fills enter protection",
+         "STB_TradeIntakeFromTransaction(trans);" in on_trade_transaction and
+         on_trade_transaction.index("STB_TradeIntakeFromTransaction(trans);") <
+         on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+        ("pending-order intake records actual server geometry before registering pending trail state",
+         "if(trans.type==TRADE_TRANSACTION_ORDER_ADD" in trade_intake and
+         trade_intake.index("STB_GeomStore(trans.order,false,") <
+         trade_intake.index("STB_PendingTrailRegister(trans.order,\"TRADE_TRANSACTION\")")),
+        ("filled positions seed exposure and geometry before immediate manager handoff",
+         "STB_ExposureEnsure(trans.position,true)" in trade_intake and
+         "STB_GeomStore(trans.position,true," in trade_intake and
+         "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+         trade_intake.index("STB_ExposureEnsure(trans.position,true)") <
+         trade_intake.index("STB_GeomStore(trans.position,true,") <
+         trade_intake.index("STB_ManagePositionImmediately(trans.position);")),
+        ("deal-add handoff safely defers unavailable positions to periodic terminal reconciliation",
+         "if(trans.position>0 && PositionSelectByTicket(trans.position))" in trade_intake and
+         "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+         "STB_ReconcileTradeRegistry();" in on_timer and
+         on_timer.index("STB_ReconcileTradeRegistry();") <
+             on_timer.index("STB_RunManagementCycle();")),
+        ("immediate fill management is reentrancy-guarded and defers nested cycles",
+         "if(g_stbManagementCycleActive)" in management_cycle and
+         "g_stbManagementCyclePending=true;" in management_cycle and
+         "while(g_stbManagementCyclePending && pass<2);" in management_cycle),
+        ("accepted pending order is initial-SL-verified before setup cooldown is committed",
+         "if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))" in place_setup and
+         place_setup.index("VerifyPendingInitialSL(placedOrder)") <
+         place_setup.index("SetLastSetupTime(s.symbol,s.direction,s.setupTime)")),
+        ("final volatile-state and ownership checks are directly before broker submission",
+         place_setup.index("TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT") <
+         place_setup.index("bool ok=false;") <
+         place_setup.index("trade.BuyStop(volume,s.entry") and
+         place_setup.index("MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT") <
+         place_setup.index("bool ok=false;")),
+        ("startup recovery rebuilds pending trails and reconciles exposure before management and scanner",
+         all(token in on_init for token in (
+             "STB_PendingTrailRebuildFromTerminal();",
+             "STB_ReconcileTradeRegistry();",
+             "STB_RunManagementCycle();",
+             "STB_ScannerRun();")) and
+         on_init.index("STB_PendingTrailRebuildFromTerminal();") <
+         on_init.index("STB_ReconcileTradeRegistry();") <
+         on_init.index("STB_RunManagementCycle();") <
+         on_init.index("STB_ScannerRun();")),
+        ("periodic timer recovery reconciles terminal positions/orders before management and scanner execution",
+         "STB_ReconcileTradeRegistry();" in on_timer and
+         on_timer.index("STB_ReconcileTradeRegistry();") <
+             on_timer.index("STB_RunManagementCycle();") <
+             on_timer.index("STB_ScannerRun();")),
+        ("tick recovery reconciles a newly detected M15-bar exposure before the central management cycle",
+         "STB_RunManagementCycle();" in on_tick and
+         "bool m15Bar=NewM15Bar();" in on_tick and
+         "if(m15Bar)" in on_tick and
+         on_tick.index("STB_ReconcileTradeRegistry();") <
+             on_tick.index("STB_RunManagementCycle();") <
+             on_tick.index("STB_ScannerRun();")),
+         ("transaction intake fails closed before registering a managed pending order",
+          "STB_ExposureEnsure(trans.order,false)" in trade_intake and
+          "if(exposureIdx<0)" in trade_intake and
+          "STB ORDER INTAKE DEFERRED" in trade_intake and
+          trade_intake.index("if(exposureIdx<0)") <
+              trade_intake.index("STB_GeomStore(trans.order,false") <
+              trade_intake.index('STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION")')),
+         ("filled managed position handoff is guarded and defers cleanly on exposure allocation failure",
+          "STB_ExposureEnsure(trans.position,true)" in trade_intake and
+          "STB POSITION BASELINE DEFERRED after fill" in trade_intake and
+          "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+          "STB POSITION HANDOFF DEFERRED" in source),
+         ("partial close retains per-ticket lock state while position remains; full close or reversal clears it before magic filtering",
+          "entryType==DEAL_ENTRY_OUT" in on_trade_transaction and
+          "entryType==DEAL_ENTRY_OUT_BY" in on_trade_transaction and
+          "entryType==DEAL_ENTRY_INOUT" in on_trade_transaction and
+          "bool positionRemains=PositionSelectByTicket(closedTicket);" in on_trade_transaction and
+          "if(exposureReversed || !positionRemains)" in on_trade_transaction and
+          "GlobalVariableDel(TicketLockName(closedTicket));" in on_trade_transaction and
+          on_trade_transaction.index("if(exposureReversed || !positionRemains)") <
+              on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+         ("pending trail fill transition is attempted before immediate position handoff",
+          "STB_PendingTrailOnOrderFilled(trans.order);" in trade_intake and
+          trade_intake.index("STB_PendingTrailOnOrderFilled(trans.order);") <
+              trade_intake.index("STB_ManagePositionImmediately(trans.position);")),
+        ("pending-order reconciliation fails closed on exposure allocation and preserves known geometry baselines",
+         "int exposureIdx=STB_ExposureEnsure(ticket,false);" in reconcile_registry and
+         "if(exposureIdx<0)" in reconcile_registry and
+         "STB ORDER RECONCILE DEFERRED" in reconcile_registry and
+         "STB_PendingTrailRegister(ticket,\"RECONCILE\");" in reconcile_registry and
+         "if(g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry),
+        ("position reconciliation seeds only an unknown geometry baseline",
+         "int exposureIdx=STB_ExposureEnsure(ticket,true);" in reconcile_registry and
+         "if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry and
+         "STB_GeomStore(ticket,true," in reconcile_registry),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))

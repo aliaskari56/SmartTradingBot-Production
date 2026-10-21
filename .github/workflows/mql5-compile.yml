@@ -90,6 +90,31 @@ jobs:
           "Source SHA-256: $sourceHash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "EX5 SHA-256: $ex5Hash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Compile LRN04 SHA256 golden-vector script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'MQL5\Scripts\LRN04_SHA256_GoldenVector.mq5'
+          $mql5Root = Join-Path $env:GITHUB_WORKSPACE 'MQL5'
+          $ex5 = [IO.Path]::ChangeExtension($source, '.ex5')
+          $log = [IO.Path]::ChangeExtension($source, '.log')
+          Remove-Item $ex5, $log -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path $source)) { throw "SHA-256 test script not found: $source" }
+          $compileArg = '/compile:"' + $source + '"'
+          $includeArg = '/include:"' + $mql5Root + '"'
+          $compileProcess = Start-Process -FilePath $env:METAEDITOR_PATH -ArgumentList @('/portable', $compileArg, $includeArg, '/log') -Wait -PassThru
+          Start-Sleep -Seconds 2
+          if (-not (Test-Path $log)) { throw "MetaEditor did not create test-script compiler log: $log (process exit $($compileProcess.ExitCode))." }
+          $logText = Get-Content -Path $log -Raw
+          Write-Host $logText
+          Copy-Item -Path $log -Destination (Join-Path $env:ARTIFACT_DIR 'LRN04_SHA256_GoldenVector.compile.log') -Force
+          if ($logText -notmatch '(?i)\b0 errors?,\s*0 warnings?\b') {
+            throw 'SHA-256 test script compile did not confirm zero errors and zero warnings.'
+          }
+          if (-not (Test-Path $ex5)) { throw 'Compiler reported success but SHA-256 test EX5 was not created.' }
+          Copy-Item -Path $ex5 -Destination (Join-Path $env:ARTIFACT_DIR 'LRN04_SHA256_GoldenVector.ex5') -Force
+          "LRN04 SHA-256 test script compile passed: 0 errors, 0 warnings." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Upload compiler log, EX5, and provenance manifest
         if: always()
         uses: actions/upload-artifact@v4

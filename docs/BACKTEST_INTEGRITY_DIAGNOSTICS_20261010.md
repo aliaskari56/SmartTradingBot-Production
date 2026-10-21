@@ -60,3 +60,39 @@ The original audit status above reflects the October 10 checkpoint; it is not a 
 The corresponding source bytes (`MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob `a5cab7fa950571626c8261e14d40890189aa34e5`) passed the repository's Windows MetaEditor workflow on October 15: **0 errors, 0 warnings**, MetaEditor `5.0.0.6266`, run [38801737418](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/38801737418). The workflow uploaded a fresh EX5, compiler log, and provenance manifest as artifact `metaeditor-build-ebb9f0bbc9cd70ccbae40efd1b07d10ff4a92941`. The live AUTO and risk-sizing defaults remain `false`.
 
 This document remains a test plan, not evidence of a completed MT5 Strategy Tester or broker-equivalence run. Do not treat the EA as runtime-validated until deterministic baseline/candidate comparison and M5/manual-override tests are recorded.
+
+
+## Follow-up scanner correction — 2026-10-20
+
+A targeted source review on the development branch identified two scanner-integrity gaps and corrected them without changing the strategy weights or disabling any existing filter:
+
+- Quote integrity is now checked by the same validator in both symbol eligibility and market-quality scoring. It rejects non-finite/non-positive Bid/Ask, crossed quotes, missing timestamps, quotes more than two seconds into the future relative to the server-time estimate, unavailable clock, and quotes older than the configured maximum age. A sub-two-second timestamp skew is treated as age zero; materially future-dated quotes are not silently clamped to fresh.
+- ATR and derived market-quality metrics are checked for finite, valid values before they influence a score.
+- Scanner confidence now compares the top candidate against the runner-up in the fully revalidated and reranked watchlist before the execution list is truncated to InpScannerTopN. With InpScannerTopN=1, a second valid candidate can no longer be hidden to bypass InpScannerMinTopGap. A single surviving candidate still uses the existing score-floor policy.
+
+The source change is on `fix/structure-first-fvg-trailing-20261020` only; `main` is not modified. The source commit `ea67c43b92cb5b9c65ee7d170de7795561f37672` passed MetaEditor compile with **0 errors, 0 warnings** ([run 39455177457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457)), passed the static source/invariant audit ([run 39455177088](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177088)), and passed the trading-safety-default guard ([run 39455177310](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177310)). Provenance and the fresh EX5 are archived in [artifact 12280695788](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39455177457/artifacts/12280695788); the build is not deployed to the active terminal.
+
+No scanner strategy weights were changed. Functional scanner cases SCN-01–SCN-08 and the baseline-equivalence Strategy Tester gate remain **NOT RUN** until real execution evidence is recorded.
+
+
+## Follow-up strategy correction — M15 break event freshness
+
+The source-level M15 structure detector now requires a fresh closed-bar crossing of the selected confirmed swing: BUY requires the older close at or below the swing high and the current close above it; SELL requires the older close at or above the swing low and the current close below it. Scan bounds also reserve the immediately older closed bar.
+
+Reason: merely remaining above/below a broken swing could previously be mistaken for a newly formed structure break, refreshing setup age and allowing late/duplicate setups to be rebuilt from the same level. The targeted correction does not change H4 alignment, FVG/OB gates, score weights or risk controls.
+
+Validation requirements: STR-07 through STR-09 in the acceptance matrix. STR-09 remains an open strategy-definition issue because current source does not independently require a separate CHoCH event followed by a distinct BOS event. No profitability conclusion is implied.
+
+
+## Follow-up strategy review — compile-verified source checkpoint
+
+The latest strategy-source commit is `5b14166acb84c367bb02b4616a348c0816ab4cc8`, file `MQL5/Experts/SmartTradingBot_FINAL.mq5` blob `c8a09e3a05f7ac8aea37ccd421a7aa1012191ffd`. CI MetaEditor compile passed with 0 errors/0 warnings (run 39457211695); static audit passed (39457211171); safety-default guard passed (39457211930). Source SHA-256: `E8AAA1DAD0C3914837D915718D91D4A73D230E6A52EBC1210BB42BBB8E453BC8`. EX5 SHA-256: `7B9DC581BDD9A4091147C9208F652B7E8FABFEB0B0977D6BECD65000DEFCFDAD`. Build artifact 12280118878 is not a terminal deployment.
+
+### Strategy items identified from the actual source
+- The M15 break detector now requires a fresh close-crossing and has safe array bounds, avoiding reuse of a continuously broken pivot as a new event.
+- The source still does not separately prove a CHoCH event followed by a distinct BOS event. The current detector returns a single fresh directional pivot break and assigns the broken-pivot shift to `chochShift`, while `bosShift` is the crossing candle. That event-definition is tracked in STR-09 and must not be silently reinterpreted.
+- The strategy-score ceiling is reachable by a common strong setup: 40 H4-alignment points + 30 fresh-break points + 15 RR points + 10 FVG + 10 OB + 7.5 default oscillator confirmation = 112.5 before clipping at 100. This is a source-math observation, not a measured performance defect. STR-10 measures its effect before any formula change.
+- With the current input logic, `InpRequireH4TrendAlignment=true` blocks H4-misaligned setups even if `InpAllowUniversal=true`; this precedence is tracked in STR-11.
+- Five adaptive parameter profiles change setup age, pattern window, swing confirmation, pending lifetime, entry/SL buffer, minimum RR and oscillator levels/weights. Their benefit is unproven until compared with fixed profile 0 over identical in-sample and untouched out-of-sample periods (STR-12).
+
+All STR-07–STR-12 rows remain NOT RUN. No conclusion about profitability or production readiness is implied.
