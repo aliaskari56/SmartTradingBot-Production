@@ -10501,6 +10501,7 @@ void OnDeinit(const int reason)
    STB PENDING TRAIL SERVICES
    Included after the EA's global declarations and before events.
    ============================================================== */
+#include <STB\STB_LRN04Journal.mqh>
 #include <STB\STB_PendingDistanceResolver.mqh>
 #include <STB\STB_PendingTrail.mqh>
 void STB_RecordPendingInitialSLFailure(const int stateIdx)
