@@ -80,6 +80,25 @@ bool STB_LRN04_IsToken(const string value)
    return true;
 }
 
+bool STB_LRN04_IsSymbolCode(const string value)
+{
+   int length=StringLen(value);
+   if(length<1)
+      return false;
+
+   for(int i=0;i<length;i++)
+   {
+      ushort c=StringGetCharacter(value,i);
+      bool valid=(c>='A' && c<='Z') ||
+                 (c>='0' && c<='9') ||
+                 c=='_' || c=='-' || c=='.';
+      if(!valid)
+         return false;
+   }
+
+   return true;
+}
+
 bool STB_LRN04_IsDigits(const string value)
 {
    int length=StringLen(value);
@@ -125,6 +144,9 @@ bool STB_LRN04_IsSigned64(const string value)
    {
       string digits=StringSubstr(value,1);
       if(digits=="0" || !STB_LRN04_IsDigits(digits))
+         return false;
+      // Reject non-canonical negative values such as -01 and -0007.
+      if(StringLen(digits)>1 && StringGetCharacter(digits,0)=='0')
          return false;
       if(StringLen(digits)<19)
          return true;
@@ -191,11 +213,10 @@ bool STB_LRN04_ValidateFields(const string &fields[])
       !STB_LRN04_IsSigned64(fields[STB_LRN04_F_RSUM]))
       return false;
 
-   int tokenIndexes[]={STB_LRN04_F_ACCOUNT,STB_LRN04_F_SYMBOL,
-                       STB_LRN04_F_PREVIOUS_HASH};
-   for(int k=0;k<ArraySize(tokenIndexes);k++)
-      if(!STB_LRN04_IsToken(fields[tokenIndexes[k]]))
-         return false;
+   if(!STB_LRN04_IsToken(fields[STB_LRN04_F_ACCOUNT]) ||
+      !STB_LRN04_IsToken(fields[STB_LRN04_F_PREVIOUS_HASH]) ||
+      !STB_LRN04_IsSymbolCode(fields[STB_LRN04_F_SYMBOL]))
+      return false;
 
    return true;
 }
