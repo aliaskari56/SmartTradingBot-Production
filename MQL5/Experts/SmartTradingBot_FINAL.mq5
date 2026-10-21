@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.127"
+#property version   "1.128"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -146,9 +146,35 @@ input double  InpTrailStepPips             = 5.0;   // minimum SL improvement be
 bool g_modifyWasNoChanges=false;
 
 // Daily equity guard state. This build remains Strategy-Tester-only.
+// Terminal globals preserve the baseline across EA reinitialization. The key is
+// scoped to account, magic number and chart instance to reduce cross-test bleed.
 double g_stbDailyStartEquity=0.0;
 int    g_stbDailyKey=0;
 bool   g_stbDailyLimitLogged=false;
+
+string STB_DailyRiskStateName(const string suffix)
+  {
+   return "STB_DLY_"+suffix+"_"+
+          (string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+          (string)InpMagic+"_"+
+          (string)ChartID();
+  }
+
+bool STB_DailyRiskPersist(const int dayKey,const double startEquity,
+                          const bool limitLogged)
+  {
+   string dayName=STB_DailyRiskStateName("DAY");
+   string equityName=STB_DailyRiskStateName("EQ");
+   string loggedName=STB_DailyRiskStateName("LOG");
+   if(GlobalVariableSet(equityName,startEquity)<=0 ||
+      GlobalVariableSet(loggedName,(limitLogged ? 1.0:0.0))<=0 ||
+      GlobalVariableSet(dayName,(double)dayKey)<=0)
+     {
+      Print("STB DAILY RISK STATE PERSIST FAILED; entries will remain blocked.");
+      return false;
+     }
+   return true;
+  }
 
 bool STB_DailyLossLimitHit()
   {
@@ -162,14 +188,39 @@ bool STB_DailyLossLimitHit()
    if(!MathIsValidNumber(equity) || equity<=0.0)
       return true; // fail closed on invalid equity
 
-   if(g_stbDailyKey!=dayKey || g_stbDailyStartEquity<=0.0)
+   string dayName=STB_DailyRiskStateName("DAY");
+   string equityName=STB_DailyRiskStateName("EQ");
+   string loggedName=STB_DailyRiskStateName("LOG");
+   bool persistedStateValid=false;
+
+   if(GlobalVariableCheck(dayName) && GlobalVariableCheck(equityName))
      {
+      double storedDay=GlobalVariableGet(dayName);
+      double storedEquity=GlobalVariableGet(equityName);
+      if(MathIsValidNumber(storedDay) &&
+         storedDay==(double)dayKey &&
+         MathIsValidNumber(storedEquity) && storedEquity>0.0)
+        {
+         g_stbDailyKey=dayKey;
+         g_stbDailyStartEquity=storedEquity;
+         g_stbDailyLimitLogged=(GlobalVariableCheck(loggedName) &&
+                                GlobalVariableGet(loggedName)>=1.0);
+         persistedStateValid=true;
+        }
+     }
+
+   if(!persistedStateValid)
+     {
+      // New server day or no valid baseline yet: establish and persist once.
+      // A failed write is fail-closed so the EA cannot silently bypass the cap.
       g_stbDailyKey=dayKey;
       g_stbDailyStartEquity=equity;
       g_stbDailyLimitLogged=false;
       Print("STB DAILY RISK BASELINE day=",dayKey,
             " equity=",DoubleToString(equity,2),
             " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2));
+      if(!STB_DailyRiskPersist(dayKey,equity,false))
+         return true;
       return false;
      }
 
@@ -182,6 +233,8 @@ bool STB_DailyLossLimitHit()
       if(!g_stbDailyLimitLogged)
         {
          g_stbDailyLimitLogged=true;
+         if(!STB_DailyRiskPersist(dayKey,g_stbDailyStartEquity,true))
+            return true;
          Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
             " startEquity=",DoubleToString(g_stbDailyStartEquity,2),
             " equity=",DoubleToString(equity,2),
