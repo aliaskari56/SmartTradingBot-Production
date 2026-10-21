@@ -692,5 +692,33 @@ class JournalV2ProvisionalDecisionRecordTests(unittest.TestCase):
         self.assertIn("Do not enable live deployment", doc)
 
 
+class JournalIntegrationReleaseGateTests(unittest.TestCase):
+    def test_primary_ea_transaction_handler_remains_unwired_to_journal_codec(self):
+        """Prevent premature journal integration before V2/runtime gates pass."""
+        root = Path(__file__).resolve().parents[1]
+        ea = (
+            root / "MQL5" / "Experts" / "SmartTradingBot_FINAL.mq5"
+        ).read_text(encoding="utf-8")
+        start = ea.find("void OnTradeTransaction(")
+        self.assertGreaterEqual(start, 0, "primary EA transaction handler missing")
+        end = ea.find("\\nvoid STB_ToggleDashboard(", start)
+        self.assertGreater(end, start, "transaction handler boundary changed")
+        handler = ea[start:end]
+        self.assertNotIn("STB_LRN04_EncodeRecord(", handler)
+        self.assertNotIn("STB_LRN04_DecodeRecord(", handler)
+        self.assertNotIn("STB_LRN04_Append", handler)
+        self.assertIn("STB_AdaptiveRecordClosedDeal(", handler)
+
+    def test_journal_module_still_declares_persistence_disabled(self):
+        root = Path(__file__).resolve().parents[1]
+        module = (
+            root / "MQL5" / "Include" / "STB" / "STB_LRN04Journal.mqh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Persistence is intentionally not", module)
+        self.assertIn("bool STB_LRN04_EncodeRecord(", module)
+        self.assertIn("bool STB_LRN04_DecodeRecord(", module)
+        self.assertNotIn("FileOpen(", module)
+
+
 if __name__ == "__main__":
     unittest.main()
