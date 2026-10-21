@@ -9383,6 +9383,11 @@ void STB_ScannerRun()
      }
 
    bool candidateAllocationFailed=false;
+   // Per-cycle counters expose silent discovery-stage exits in the summary.
+   int scanDirectionGateRejects=0;
+   int scanBuildSetupRejects=0;
+   int scanSetupAgeRejects=0;
+   int scanScoreRejects=0;
 
    for(int i=0;i<ArraySize(symbols);i++)
      {
@@ -9429,11 +9434,17 @@ void STB_ScannerRun()
       for(int direction=1;direction>=-1;direction-=2)
         {
          if(!STB_ScannerDirectionAllowed(symbol,direction))
+           {
+            scanDirectionGateRejects++;
             continue;
+           }
 
          Setup setup;
          if(!BuildSetup(symbol,direction,setup,true))
+           {
+            scanBuildSetupRejects++;
             continue;
+           }
 
          STBCandidate candidate;
          ZeroMemory(candidate);
@@ -9451,6 +9462,7 @@ void STB_ScannerRun()
          int setupBarShift=iBarShift(symbol,PERIOD_M15,setup.setupTime,true);
          if(setupBarShift<1)
            {
+            scanSetupAgeRejects++;
             Print("STB SCANNER REJECT stage=DISCOVERY_AGE symbol=",symbol,
                   " reason=SETUP_BAR_SHIFT_UNAVAILABLE",
                   " setupTime=",(string)setup.setupTime);
@@ -9483,7 +9495,10 @@ void STB_ScannerRun()
             MathMax(0.0,MathMin(100.0,candidate.opportunityScore));
 
          if(candidate.opportunityScore+1e-9<InpScannerMinScore)
+           {
+            scanScoreRejects++;
             continue;
+           }
 
          int idx=ArraySize(g_scannerCurrent);
          if(ArrayResize(g_scannerCurrent,idx+1)!=idx+1)
@@ -9719,6 +9734,11 @@ void STB_ScannerRun()
          " buyCandidates=",IntegerToString(g_scannerBuyCount),
          " sellCandidates=",IntegerToString(g_scannerSellCount),
          " candidates=",IntegerToString(g_scannerCandidateCount),
+         " directionGateRejects=",IntegerToString(scanDirectionGateRejects),
+         " buildSetupRejects=",IntegerToString(scanBuildSetupRejects),
+         " setupAgeRejects=",IntegerToString(scanSetupAgeRejects),
+         " scoreRejects=",IntegerToString(scanScoreRejects),
+         " minScore=",DoubleToString(InpScannerMinScore,1),
          " watchlist=",IntegerToString(g_scannerWatchlistCount),
          " top10=",IntegerToString(g_scannerTop10Count),
          " confidence=",g_scannerConfidence,
