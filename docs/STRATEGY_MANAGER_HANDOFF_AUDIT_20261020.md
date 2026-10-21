@@ -398,3 +398,13 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Correction:** Added a final pre-submit gate for trade environment, direction, spread, `ValidatePendingSetup()`, directional volume limits, entry-lock ownership, symbol-writer lease, and managed exposure. The gates run immediately before the order request. A static-audit assertion checks presence and ordering.
 
 **Verification status:** Source commit `661f678a83b6afee0f3f7410b21ad1f2b3fec563`; the integrated source blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80` was compiled unchanged in validation commit `2e5cf06c8a318f5343cf9b50f495c1a07e5ea036` with 0 errors/0 warnings; static audit and safety-default checks passed. Regression assertion is included in that validation tree. Runtime race/broker-rejection tests NOT RUN.
+
+### STR-A60 — Transaction-to-manager handoff lacked dedicated static regression tripwires
+
+**Review scope:** The integrated path from broker-accepted pending setup through transaction intake, pending-trail registration, fill detection, exposure/geometry baseline creation, and immediate position-management scheduling.
+
+**Source observations:** `OnTradeTransaction()` delegates to `STB_TradeIntakeFromTransaction()` before its adaptive-learning magic filter, allowing manual/foreign-origin positions within protection scope to enter the manager. Pending `ORDER_ADD` intake records terminal-confirmed geometry before pending-trail registration. On `DEAL_ADD`, the intake path attempts exposure allocation and records position geometry before immediate management; allocation failure is logged and the later immediate-management helper independently fails closed if allocation still cannot be obtained. The management-cycle guard defers nested cycle requests and caps the follow-up pass. `PlaceSetup()` commits the setup cooldown only after server acceptance and verification of the pending order's initial SL.
+
+**Change:** Added static regression assertions for these ordering and handoff invariants, plus the final pre-submit gate ordering. This is test coverage hardening; it does not claim a newly discovered runtime defect or prove transaction ordering under a live terminal.
+
+**Verification status:** Audit script update commit `ecd3016bcef2b70a45c9dcef62fdd9acb1994e92`. The updated script and its CI run must be fetched/checked before reporting the audit as passed. The EA source remains unchanged at blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`; the earlier MetaEditor compile and safety-default results apply to that unchanged EA source. Transaction-event permutations, exposure allocation fault injection, pending-to-position handoff, and broker behavior remain **NOT RUN**. Release status remains **NOT VERIFIED**.
