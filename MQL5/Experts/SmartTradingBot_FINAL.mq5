@@ -188,6 +188,7 @@ bool STB_DailyLossLimitHit()
             " lossPct=",DoubleToString(lossPct,2),
             " limitPct=",DoubleToString(InpMaxDailyLossPercent,2),
             " action=BLOCK_NEW_SETUPS");
+        }
       return true;
      }
    return false;
