@@ -44,3 +44,18 @@ This web-reference audit does **not** prove compatibility with the project's min
 **Recommendation:** prefer SHA-256 over CRC32 for the derived record-identity digest, subject to the evidence above. Do not mark the V2 digest gate approved solely because the API exists in the current online reference.
 
 No EA source, V1 codec, journal persistence, or runtime behavior was changed. LRN-04 remains **NOT VERIFIED** and release remains **BLOCKED / NOT VERIFIED**.
+
+## CI compile evidence — 2026-10-21
+
+The isolated script and the primary EA were compiled in GitHub Actions on Windows using MetaEditor **5.0.0.6274** at source commit `855d98200825fa87ce2b16dad13bf0fc95c03e04`.
+
+- Primary EA compile workflow: https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545114865 — **success**. The workflow requires the compiler log to report 0 errors and 0 warnings and checks that a fresh EX5 exists.
+- SHA-256 golden-vector script compile is a separate step in that same workflow — **success**. Its compiler log and EX5 are uploaded as workflow artifacts.
+- Journal contract reference tests: https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545114882 — **success**.
+- MQL5 static guardrails: https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545114890 — **success**.
+- Trading safety input defaults: https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545114884 — **success**.
+
+### Evidence boundary
+
+This is compile and CI evidence only. The workflow **compiles** the golden-vector script but does not launch it inside a running MetaTrader terminal. Therefore the script's `[PASS]` output has **not** yet been observed from MQL5 runtime. This does not verify digest behavior at runtime, durable file semantics, locking/fencing, recovery, or EA integration. The V2 digest gate remains pending and release remains **BLOCKED / NOT VERIFIED**.
+
