@@ -212,13 +212,18 @@ def main() -> int:
          "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "iHigh(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL)" in initial_pending_sl),
-        ("pending STOP trailing reads a closed M5 bar once and validates OHLC before consuming it",
-         bool(trail_source) and
-         "datetime lastProcessedM5Bar;" in trail_source and
-         "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
-         "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
-         "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
-         "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("pending STOP trailing evaluates every closed M5 extreme, validates OHLC, and consumes only deliberate skips or confirmed writes",
+          bool(trail_source) and
+          "datetime lastProcessedM5Bar;" in trail_source and
+          "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
+          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
+          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
+          "double barClose=iClose(symbol,PERIOD_M5,1);" in trail_source and
+          "extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);" in trail_source and
+          "M5_BAR_NOT_BEARISH" not in trail_source and
+          "M5_BAR_NOT_BULLISH" not in trail_source and
+          "if(committed)" in trail_source and
+          "g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;" in trail_source),
         ("pending trail retires disappeared orders before exposure-allocation checks",
          (lambda body: bool(body) and
           "if(!OrderSelect(g_stbPendingTrail[idx].ticket))" in body and
