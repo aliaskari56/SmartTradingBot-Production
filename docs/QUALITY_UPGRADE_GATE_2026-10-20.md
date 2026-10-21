@@ -134,3 +134,11 @@ STR-07–STR-12 remain test requirements, not completed runtime results. The bra
 
 
 **Audit follow-up:** The first run of the newly extended static audit exposed an incorrect test-region boundary (the assertion searched an empty source region), not a source-code failure. The region boundary was corrected in audit-script commit `c29e5cf754fe940529e9c58b0e0f0f5c2fb837f9`. The corrected static audit passed on run `39532316384`; the later documentation-only head `5485581f02d5c1f8e3b6e1c17311c5ee09099bbc` also passed static audit on run `39532326754`. This is source-level coverage only, not runtime proof.
+
+
+## Startup/reattach recovery checkpoint — 2026-10-21
+
+- Added static regression checks for the `OnInit()` order: pending-trail rebuild → exposure/geometry reconciliation → management cycle → scanner. Added checks that pending-order reconciliation fails closed on exposure allocation failure and that known position geometry baselines are not overwritten by periodic reconciliation.
+- Audit-script commit: `fee9cc308931ee1e8f35ed09a763f4cbe72ef19a`. Updated static audit passed (run `39532544020`) and safety-default check passed (run `39532544001`).
+- EA source blob remains `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`; no source code change in this checkpoint. A prior MetaEditor compile on that exact source passed (run `39532360739`); the compile triggered by the latest audit-script commit was still running when recorded.
+- Still not covered: runtime fault injection, event-order permutations, terminal restart/reattach lifecycle, end-to-end scanner-to-manager behavior, and Strategy Tester baseline/OOS. **Not release-ready / NOT VERIFIED.**
