@@ -320,9 +320,25 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
     for record in records:
         if not required_fields.issubset(record):
             raise JournalContractError("missing required reference-model field")
+        # Validate every numeric field before using the reference record.
+        # This is a model-level contract check; V2 scales and sentinels remain
+        # unresolved and are intentionally not guessed here.
+        unsigned_fields = (
+            "record_seq", "magic", "prepared_seq", "deal_ticket",
+            "position_id", "lifecycle_id", "wins_scaled", "losses_scaled",
+            "rcount", "decay_time",
+        )
+        signed_fields = ("pnl_minor", "r_scaled", "rsum_scaled")
+        for name in unsigned_fields:
+            value = record[name]
+            if not UINT_RE.fullmatch(value) or int(value) > UINT64_MAX:
+                raise JournalContractError(f"invalid unsigned numeric field: {name}")
+        for name in signed_fields:
+            value = record[name]
+            if not SINT_RE.fullmatch(value) or not INT64_MIN <= int(value) <= INT64_MAX:
+                raise JournalContractError(f"invalid signed numeric field: {name}")
+
         seq_text = record["record_seq"]
-        if not UINT_RE.fullmatch(seq_text) or int(seq_text) > UINT64_MAX:
-            raise JournalContractError("invalid record sequence encoding")
         seq = int(seq_text)
         if seq != previous_seq + 1:
             raise JournalContractError("sequence gap or reuse")
@@ -401,6 +417,26 @@ def v2_reference_record(
 
 
 class JournalV2ReferenceStateTests(unittest.TestCase):
+    def test_noncanonical_numeric_fields_rejected(self):
+        numeric_cases = (
+            ("magic", "01"),
+            ("deal_ticket", "+9001"),
+            ("position_id", "-1"),
+            ("wins_scaled", "-1"),
+            ("pnl_minor", "+125"),
+            ("r_scaled", "-01"),
+            ("rsum_scaled", str(INT64_MAX + 1)),
+            ("decay_time", str(UINT64_MAX + 1)),
+        )
+        for field, value in numeric_cases:
+            with self.subTest(field=field, value=value):
+                record = v2_reference_record(
+                    1, "PREPARED", "op-1", "GENESIS", "digest-1"
+                )
+                record[field] = value
+                with self.assertRaises(JournalContractError):
+                    validate_v2_reference_history([record])
+
     def test_valid_prepared_committed_pair(self):
         prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
         committed = v2_reference_record(
