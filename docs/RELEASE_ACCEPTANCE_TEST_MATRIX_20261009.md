@@ -3,6 +3,10 @@ Date: 2026-10-21
 Branch: `fix/structure-first-fvg-trailing-20261020`
 Scope: test plan for the current source; this document records required tests, not tests already executed.
 
+## Latest CI verification (2026-10-21)
+
+Latest branch commit at verification time: `e8faa080a4742e4666ede2da3c60eab4763a0865`. All three required CI workflows completed successfully on this commit: MetaEditor compile run `39535710438` (MetaEditor `5.0.0.6274`, 0 errors/0 warnings, 3390 ms; artifact ID `12317348477`), static audit run `39535710529`, and trading-safety-defaults run `39535710556`. Downloaded artifact ZIP digest independently matched the GitHub artifact digest; archive contains only `provenance.json`, `SmartTradingBot_FINAL.ex5`, and `SmartTradingBot_FINAL.compile.log`. Source code was unchanged by this documentation-only commit; these checks do not resolve the runtime test blockers or `LRN-04`.
+
 ## Release rule
 
 Do not label the build production-ready until the exact source revision has a recorded successful MetaEditor compile, the applicable Strategy Tester suite passes, demo-account scenarios pass on each supported account mode, and source-to-EX5 provenance plus dependency/license review are documented. Static CI success alone is insufficient.
@@ -11,8 +15,8 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile exact branch revision `79e5f892a906b9f07270ef59afc9964fc4f3aae1` using MetaEditor 5.0.0.6274; retain compiler log and provenance artifact | 0 errors, 0 warnings; confirmed by workflow run `39534764998` | PASS — CI COMPILE |
-| BLD-02 | Artifact provenance | Retain workflow artifact `metaeditor-build-79e5f892a906b9f07270ef59afc9964fc4f3aae1` (artifact ID `12316433503`) containing compiler log, EX5 and `provenance.json`; independently inspect manifest hashes before release | ZIP SHA-256 matches GitHub artifact digest; EX5 SHA-256 matches manifest; source SHA-256 matches the exact GitHub source after Windows CRLF normalization; manifest commit/compiler match workflow | PASS — ARTIFACT INTEGRITY CHECKS |
+| BLD-01 | Exact-source compile | Compile exact branch revision `e8faa080a4742e4666ede2da3c60eab4763a0865` using MetaEditor 5.0.0.6274; retain compiler log and provenance artifact | 0 errors, 0 warnings; confirmed by workflow run `39535710438` | PASS — CI COMPILE |
+| BLD-02 | Artifact provenance | Retain workflow artifact `metaeditor-build-e8faa080a4742e4666ede2da3c60eab4763a0865` (artifact ID `12317348477`) containing compiler log, EX5 and `provenance.json`; independently inspect manifest hashes before release | ZIP SHA-256 `0887ec4d6a8089220b3aa15776e5c1de63e6c7f8a88ac515bc13083dd0addc82` matches GitHub artifact digest; EX5 SHA-256 `DD973F94CCDD2E1104233F9954C688F086FB9B49FF24873E4DBBE908A3A16C13` matches manifest; source SHA-256 `66E30E79D5ED15CCD970AAE5534F603A52A319F30473EA0C568439107F1A8E60`; manifest commit/compiler match workflow | PASS — ARTIFACT INTEGRITY CHECKS |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Source-level closure is enumerated; origin, license and redistribution terms for every component are evidenced and reviewed | SOURCE CLOSURE TRACED — LICENSE REVIEW OPEN |
 | BLD-04 | Package audit | Extract and inspect CI artifact ZIP; separately assemble and inspect intended release package with applicable notices | CI artifact contains exactly provenance.json, compile log and EX5, with no extra files; intended distributable release package and notices are separately reviewed | CI ARTIFACT INSPECTED — RELEASE PACKAGE NOT ASSEMBLED/REVIEWED |
 
