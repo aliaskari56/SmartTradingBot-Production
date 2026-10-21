@@ -24,7 +24,7 @@ UINT64_MAX = (1 << 64) - 1
 INT64_MIN = -(1 << 63)
 INT64_MAX = (1 << 63) - 1
 TOKEN_RE = re.compile(r"^[A-Z0-9_-]+$")
-SYMBOL_RE = re.compile(r"^[A-Z0-9_.-]+$")
+SYMBOL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 MAX_RECORD_BYTES = 1024
 ALLOWED = {
     "schema": {"LRN04V1"},
