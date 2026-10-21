@@ -149,6 +149,32 @@ class JournalContractTests(unittest.TestCase):
                 rf"#define STB_LRN04_F_{macro_name}\s+{expected_index}\b",
             )
 
+    def test_sha256_golden_vector_script_is_pinned(self):
+        """Static guard for the isolated MQL5 vectors; runtime execution remains separate."""
+        import hashlib
+
+        root = Path(__file__).resolve().parents[1]
+        script = (root / "MQL5" / "Scripts" / "LRN04_SHA256_GoldenVector.mq5").read_text(
+            encoding="utf-8"
+        )
+
+        vectors = {
+            b"abc": "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
+            b"abc\\n": "EDEAAFF3F1774AD2888673770C6D64097E391BC362D7D6FB34982DDF0EFD18CB",
+        }
+        for payload, expected in vectors.items():
+            with self.subTest(payload=payload):
+                self.assertEqual(hashlib.sha256(payload).hexdigest().upper(), expected)
+                self.assertIn(expected, script)
+
+        # Guard the key byte-boundary decisions without claiming MQL5 runtime proof.
+        self.assertIn("ArrayResize(bytes, length)", script)
+        self.assertIn("bytes[i] = (uchar)ch;", script)
+        self.assertIn('"abc\\n"', script)
+        self.assertIn("CryptEncode(CRYPT_HASH_SHA256, data, key, digest)", script)
+        self.assertIn("digest_size != 32", script)
+        self.assertNotIn("StringToCharArray", script)
+
     def test_torn_tail_rejected(self):
         raw = encode_record(sample())
         for cut in range(1, len(raw) + 1):
