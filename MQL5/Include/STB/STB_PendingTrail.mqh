@@ -606,10 +606,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return true;
      }
 
-   // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
-   // BUY STOP moves only after a bearish M5 candle and anchors to its low.
-   // SELL STOP moves only after a bullish M5 candle and anchors to its high.
-   // Other pending types retain their previous live-extreme behavior.
+   // 1) STOP orders use closed M5 structure, never the forming candle.
+   // BUY STOP evaluates each closed candle's low; SELL STOP its high.
+   // Candle body color is deliberately irrelevant: a wick can create the
+   // favorable extreme. Other pending types retain live Bid/Ask behavior.
    double extreme=0.0;
    datetime actionableClosedBar=0;
    if(candleStop)
@@ -629,11 +629,23 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       double barClose=iClose(symbol,PERIOD_M5,1);
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
-      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+      bool ohlcFinite=(MathIsValidNumber(barOpen) &&
+                       MathIsValidNumber(barClose) &&
+                       MathIsValidNumber(barLow) &&
+                       MathIsValidNumber(barHigh));
+      bool ohlcPositive=(barOpen>0.0 && barClose>0.0 &&
+                         barLow>0.0 && barHigh>0.0);
+      bool ohlcOrdered=(barLow<=barHigh &&
+                        barLow<=MathMin(barOpen,barClose) &&
+                        barHigh>=MathMax(barOpen,barClose));
+      if(!ohlcFinite || !ohlcPositive || !ohlcOrdered)
         {
          Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
                " type=",STB_PendingTrailTypeName(orderType),
                " reason=M5_OHLC_INVALID",
+               " finite=",ohlcFinite,
+               " positive=",ohlcPositive,
+               " ordered=",ohlcOrdered,
                " open=",DoubleToString(barOpen,10),
                " close=",DoubleToString(barClose,10),
                " low=",DoubleToString(barLow,10),
