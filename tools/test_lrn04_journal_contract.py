@@ -719,7 +719,7 @@ def _extract_function_body(source: str, signature: str) -> str | None:
         elif state in ("string", "char"):
             if escaped:
                 escaped = False
-            elif ch == "\\\\":
+            elif ch == "\\":
                 escaped = True
             elif (state == "string" and ch == '"') or (state == "char" and ch == "'"):
                 state = "code"
