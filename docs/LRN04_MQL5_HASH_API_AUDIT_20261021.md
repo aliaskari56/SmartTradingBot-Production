@@ -59,3 +59,19 @@ The isolated script and the primary EA were compiled in GitHub Actions on Window
 
 This is compile and CI evidence only. The workflow **compiles** the golden-vector script but does not launch it inside a running MetaTrader terminal. Therefore the script's `[PASS]` output has **not** yet been observed from MQL5 runtime. This does not verify digest behavior at runtime, durable file semantics, locking/fencing, recovery, or EA integration. The V2 digest gate remains pending and release remains **BLOCKED / NOT VERIFIED**.
 
+## Latest CI evidence — 2026-10-21 (empty-input vector)
+
+The isolated MQL5 SHA-256 script now includes three known-answer vectors:
+
+- Empty byte sequence (0 bytes): `E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`.
+- ASCII `abc` (3 bytes): `BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD`.
+- ASCII `abc` plus one LF byte (4 bytes): `EDEAAFF3F1774AD2888673770C6D64097E391BC362D7D6FB34982DDF0EFD18CB`.
+
+At commit `a521425f352a87ff7c4d621caa9c6915329de4a1`, the following GitHub Actions checks completed successfully:
+
+- [MetaEditor compile (Windows), run 39545304450](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545304450): primary EA and isolated SHA-256 script both compiled; the workflow log reports `0 errors, 0 warnings` for the script and confirms a fresh EX5 artifact.
+- [LRN-04 journal contract tests, run 39545304484](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545304484): success.
+- [MQL5 static audit, run 39545304505](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545304505): success.
+- [Trading safety defaults, run 39545304457](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39545304457): success.
+
+**Evidence boundary:** the Windows CI workflow compiles the SHA-256 script but does not execute it inside a MetaTrader terminal. The vector outputs have not been observed at MQL5 runtime. Python reference tests and compilation do not establish runtime digest parity, file durability, locking/fencing, recovery, or EA integration. The V2 digest decision remains unapproved; LRN-04 remains **NOT VERIFIED** and release remains **BLOCKED / NOT VERIFIED**.
