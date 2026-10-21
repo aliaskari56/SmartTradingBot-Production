@@ -182,6 +182,20 @@ def main() -> int:
     initial_pending_sl = source_region(
         source, "bool CalculateInitialPendingProtectionSL(",
         "bool VerifyPendingInitialSL(")
+    adaptive_be = source_region(
+        source, "bool STB_AdaptiveBreakEvenProtection(",
+        "// The next stage upgrades break-even")
+    adaptive_lock = source_region(
+        source, "bool STB_AdaptiveProfitLockProtection(",
+        "// ATR trailing complements confirmed swing trailing")
+    adaptive_trail = source_region(
+        source, "bool STB_AdaptiveATRTrail(",
+        "bool TrailPositionByLivePrice(")
+    position_manager = source_region(
+        source, "void ManagePositions()", "// PENDING ORDER MANAGEMENT")
+    position_sl_resolver = source_region(
+        source, "bool STB_ResolvePositionSL(",
+        "bool STB_QueuePositionSL(")
     checks: list[tuple[str, bool]] = [
         ("live automatic trading remains opt-in by default",
          "input bool    InpAutoTrading            = false;" in source),
@@ -693,6 +707,43 @@ def main() -> int:
          "if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry and
          "STB_GeomStore(ticket,true," in reconcile_registry),
     ]
+        ("adaptive break-even requires confirmed initial SL, ATR movement, net cost coverage, broker-valid geometry, and queues through the shared writer",
+         bool(adaptive_be) and all(token in adaptive_be for token in (
+             "currentSL<=0.0", "STB_GetAdaptiveProtectionATR(symbol,atr)",
+             "STB_AdaptiveBreakEvenOffsetPips(ticket,symbol,side,entry,pip)",
+             "movePips*pip<triggerPrice",
+             "PositionNetProfitPips(ticket)<offsetPips",
+             "IsValidSLForPosition(symbol,side,target)",
+             "STB_SubmitPositionSL(ticket,target,STB_SL_SRC_PROFIT_PROTECTION",
+             "currentSL>=target", "currentSL<=target"))),
+        ("adaptive break-even cost buffer accounts for commission, adverse swap, spread, and pip value",
+         bool(adaptive_be) and
+         "PositionPipValue(symbol,side,volume,entry)" in source and
+         "PositionCommissionMoney(ticket)" in source and
+         "PositionGetDouble(POSITION_SWAP)" in source and
+         "spreadPips*0.25" in source and
+         "observedCostPips*MathMax(1.0,InpBreakEvenCostMultiplier)" in source),
+        ("adaptive profit lock and ATR trail are monotonic and use shared SL arbitration",
+         bool(adaptive_lock) and bool(adaptive_trail) and
+         "STB_SubmitPositionSL(ticket,target,STB_SL_SRC_PROFIT_PROTECTION" in adaptive_lock and
+         "STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL" in adaptive_trail and
+         "currentSL>=target" in adaptive_lock and
+         "currentSL<=target" in adaptive_lock and
+         "candidate<=currentSL" in adaptive_trail and
+         "candidate>=currentSL" in adaptive_trail),
+        ("position management confirms initial SL before adaptive BE/lock, batches trailing proposals, flushes once, then considers missing TP",
+         bool(position_manager) and
+         position_manager.index("EnsureInitialSL(ticket);") <
+             position_manager.index("STB_AdaptiveBreakEvenProtection(ticket);") <
+             position_manager.index("STB_AdaptiveProfitLockProtection(ticket);") <
+             position_manager.index("STB_FlushPositionSLProposals();") <
+             position_manager.index("EnsureInitialTPForPosition(ticket)")),
+        ("SL resolver evaluates all queued candidates against a shared quote/constraint snapshot and preserves monotonic protection",
+         bool(position_sl_resolver) and
+         "MqlTick decisionTick" in position_sl_resolver and
+         "STB_IsValidSLForDecisionSnapshot" in position_sl_resolver and
+         "currentSL>0.0 && c<=currentSL" in position_sl_resolver and
+         "currentSL>0.0 && c>=currentSL" in position_sl_resolver),
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
