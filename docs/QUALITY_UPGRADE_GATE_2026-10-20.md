@@ -124,3 +124,10 @@ STR-07–STR-12 remain test requirements, not completed runtime results. The bra
 - CHoCH/BOS and Universal/H4 policy decisions remain explicit open items; this checkpoint did not change strategy weights or attempt to optimize trading returns.
 
 **Status: source compile/static/safety checks passed; runtime behavior and release readiness remain NOT VERIFIED.** The EX5 in artifact `12295809473` is a CI validation artifact, not a deployed terminal binary.
+
+## Transaction-to-manager regression-coverage checkpoint — 2026-10-21
+
+- The canonical EA remains `MQL5/Experts/SmartTradingBot_FINAL.mq5`; source blob remains `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`. No EA source changes were made in this checkpoint.
+- Static audit update commit: `ecd3016bcef2b70a45c9dcef62fdd9acb1994e92`. New assertions cover transaction intake before adaptive-magic filtering, pending-order geometry baseline before pending-trail registration, exposure/geometry seeding before immediate fill management, reentrancy-deferred management cycles, initial-SL verification before cooldown commit, and final pre-submit gate ordering.
+- The new assertions are source-level regression tripwires only. They do not simulate broker event permutations, allocation failures, fill/reversal behavior, terminal restarts, or manager outcomes. Fetch the resulting audit workflow run and inspect its conclusion before treating the updated audit as passing.
+- Earlier exact-source MetaEditor compile and safety-default checks remain relevant because the EA source did not change. Runtime/fault-injection, end-to-end handoff, Strategy Tester baseline/OOS, and demo lifecycle tests remain **NOT RUN**. **Status: NOT release-ready / NOT VERIFIED.**
