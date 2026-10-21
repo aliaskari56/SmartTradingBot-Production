@@ -459,6 +459,8 @@ def main() -> int:
              "decisionPriceMovePips>=STB_ProfitLockTriggerPips()",
              "bool enforceProfitLockFloor=",
              "profitLockTarget=NormalizePrice(symbol,",
+             "if(enforceProfitLockFloor &&",
+             "!STB_IsValidSLForDecisionSnapshot(side,profitLockTarget,decisionTick,",
              "bool meetsProfitLockFloor=!enforceProfitLockFloor ||",
              "currentSL<=0.0 && props[i].source!=STB_SL_SRC_PROFIT_PROTECTION",
              "if(!found && unprotectedFallbackFound)",
