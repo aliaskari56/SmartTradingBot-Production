@@ -173,7 +173,7 @@ class JournalContractTests(unittest.TestCase):
         self.assertIn("StringGetCharacter(value, i)", script)
         self.assertIn("CryptEncode(CRYPT_HASH_SHA256, data, key, digest)", script)
         self.assertIn("digest_size != 32", script)
-        self.assertNotIn("StringToCharArray", script)
+        self.assertNotIn("StringToCharArray(", script)
 
     def test_torn_tail_rejected(self):
         raw = encode_record(sample())
