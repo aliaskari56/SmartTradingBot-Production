@@ -14,7 +14,7 @@
 
 ## Proposed record envelope
 
-Keep one canonical ASCII line per record, with LF terminator, exactly **26 serialized fields including the checksum**, a checksum over the exact body bytes, and a maximum encoded size. The exact field order must be pinned by golden vectors before implementation.
+Keep one canonical ASCII line per record, with LF terminator, exactly **26 serialized fields including the checksum**, a checksum over the exact body bytes, and a maximum encoded size. The checksum detects accidental corruption; it is not the record-identity digest. A separate, derived digest is computed from the complete canonical serialized record and is not an additional serialized field. The exact digest algorithm remains an implementation gate until MQL5 support and test vectors are verified. The exact field order must be pinned by golden vectors before implementation.
 
 Required fields:
 
@@ -27,7 +27,7 @@ Required fields:
 7. `magic`: unsigned EA magic.
 8. `operation_id`: stable ID shared by the PREPARED and COMMITTED pair.
 9. `prepared_seq`: zero for PREPARED; exact PREPARED sequence for COMMITTED.
-10. `prepared_digest`: genesis/sentinel for PREPARED; exact digest of the PREPARED canonical body for COMMITTED.
+10. `prepared_digest`: genesis/sentinel for PREPARED; exact derived digest of the complete serialized PREPARED record for COMMITTED. The digest covers the canonical record bytes, including its checksum and LF terminator; its algorithm and encoding must be frozen before implementation.
 11. `deal_ticket`: unsigned deal ticket; zero is allowed only for explicitly documented non-deal snapshots.
 12. `position_id`: unsigned position identifier.
 13. `lifecycle_id`: stable lifecycle epoch, distinct across a reversal.
@@ -42,7 +42,7 @@ Required fields:
 22. `rsum_scaled`: fixed-point absolute post-event R-sum aggregate.
 23. `rcount`: unsigned canonical count of valid R samples in the post-event aggregate.
 24. `decay_time`: canonical Unix timestamp in seconds, with explicit zero/sentinel semantics.
-25. `previous_record_digest`: digest of the immediately preceding valid record, or a fixed genesis token for the first record.
+25. `previous_record_digest`: derived digest of the immediately preceding valid serialized record, or a fixed genesis token for the first record. The current record's derived digest is computed from its complete canonical serialized bytes; it is referenced by the next record and is not serialized as a separate field.
 26. `checksum`: fixed-width uppercase hexadecimal checksum over fields 1–25 and their separators.
 
 The 26 fields above are the proposed serialized count, including the final checksum. This is a candidate field list, not a claim that the present V1 record already contains these fields.
@@ -77,9 +77,10 @@ A previously committed key must never update the aggregate a second time. The sa
 ### Sequence and chain validation
 
 - Sequence numbers must be strictly increasing without reuse.
-- The previous-record digest must match the canonical prior record.
+- The previous-record digest must match the derived digest of the complete canonical prior record.
 - A missing sequence, digest mismatch, impossible state transition, orphan COMMITTED, conflicting operation ID, or interior corrupt record fails closed.
-- An incomplete final line may be ignored only if byte-level parsing proves it is the final incomplete append. It must not be silently treated as a valid record.
+- A truncated or malformed final record fails closed by default. Do not silently skip, truncate, or repair it. Any future exception requires an explicitly approved format-level proof that the tail is an incomplete append and dedicated fault-injection tests.
+- The initial version performs no automatic truncation, compaction, or migration.
 - Recovery must enforce a maximum record count/byte budget and report a distinct diagnostic if the budget is exceeded.
 
 ## Values that must be frozen before coding
