@@ -90,3 +90,25 @@ Inspection of the current EA confirms the following implementation constraints:
 ### Implementation consequence
 
 Do not wire the existing CSV logger into the close-event path as if it were a transaction log. Implement a separate versioned journal abstraction with validated records and explicit recovery, and use a dedicated lock namespace. Verify file location/namespace separation between live terminal and Strategy Tester before writing code. Add deterministic unit-style checks for record encoding/checksum/truncated tails where feasible, plus terminal integration tests for restart/fault boundaries. Keep the adaptive learner fail-closed if journal recovery cannot be proven safe.
+
+
+## MQL5 persistence-semantics audit (2026-10-21)
+
+Official MQL5 reference checked before selecting an implementation strategy:
+
+- `FileFlush(handle)` flushes the MQL file I/O buffer to disk, but returns no status value. Therefore callers cannot treat its return value as a success signal, and a successful call alone is not proof against every OS, storage-device, or power-loss failure mode. The implementation must validate the bytes/records on the next read and must state the durability guarantee narrowly. Reference: https://www.mql5.com/en/docs/files/fileflush
+- `GlobalVariablesFlush()` forces terminal global-variable contents to disk, also with no return value. It improves persistence but does not make a group of separate global-variable writes atomic. Reference: https://www.mql5.com/en/docs/globals/globalvariablesflush
+- `FileOpen()` confines files to the terminal's file sandbox unless `FILE_COMMON` is specified. `FILE_COMMON` shares files across client terminals; Strategy Tester uses its own agent sandbox by default, and common-folder use changes that isolation. Journal naming and mode must be chosen deliberately so tester data cannot be confused with terminal/account state. References: https://www.mql5.com/en/docs/files/fileopen and https://www.mql5.com/en/docs/runtime/testing
+- `FILE_SHARE_READ` / `FILE_SHARE_WRITE` are sharing flags, not a journal transaction lock. They must not be treated as cross-instance serialization.
+
+### Consequences for the implementation
+
+1. Use a per-terminal-sandbox journal by default; do not use `FILE_COMMON` unless an explicit multi-terminal coordination design and isolation tests justify it.
+2. Treat each flush as a persistence boundary to test, not as proof of atomicity. Recovery must validate framing, version, sequence, checksum, ticket identity, and target-state consistency.
+3. The journal writer lock needs an independent CAS-based protocol with a unique account+magic namespace, bounded acquisition, stale-owner recovery rules, and guaranteed release. Since terminal Global Variables are shared among programs in the same terminal, lock identity must include a stable terminal/account context and must not rely on chart ID alone.
+4. Since flush APIs return no status, verify post-write state by reopening/reading the journal where practical, and fail closed on any invalid or ambiguous state. This still does not claim hardware-level fsync guarantees.
+5. Before source implementation, define deterministic byte/record encoding and checksum implementation supported by MQL5, plus explicit handling of a torn final record. The journal must not depend on CSV locale/string formatting or floating-point serialization that can change the replayed target values.
+
+### Updated approval gate
+
+The official API references clarify available flush and sandbox behavior, but they do not prove crash consistency or inter-instance lock correctness in the target terminal. Source implementation remains gated on a separately reviewable record codec/recovery unit and fault-injection coverage. Status remains **LRN-04 NOT FIXED / NOT RUN**; release remains **BLOCKED / NOT VERIFIED**.
