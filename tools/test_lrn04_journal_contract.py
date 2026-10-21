@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import zlib
 import unittest
+from pathlib import Path
 
 FIELDS = (
     "schema", "record_seq", "state", "account_scope", "magic",
@@ -116,7 +117,41 @@ class JournalContractTests(unittest.TestCase):
     def test_round_trip_and_golden_checksum(self):
         raw = encode_record(sample())
         self.assertEqual(decode_record(raw), sample())
+        self.assertEqual(raw[-9:-1], b"47054993")
         self.assertEqual(raw[-9:-1], f"{zlib.crc32(raw[:-10]) & 0xFFFFFFFF:08X}".encode())
+
+    def test_mql5_codec_source_matches_reference_contract(self):
+        """Static source-parity check; this is not an MQL5 runtime test."""
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "MQL5" / "Include" / "STB" / "STB_LRN04Journal.mqh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("#define STB_LRN04_FIELD_COUNT       20", source)
+        self.assertIn('#define STB_LRN04_SCHEMA            "LRN04V1"', source)
+        self.assertIn("0xEDB88320", source)
+        self.assertIn('record=body+"|"+checksum+"\\n";', source)
+        self.assertIn("bool STB_LRN04_EncodeRecord(", source)
+        self.assertIn("bool STB_LRN04_DecodeRecord(", source)
+
+        for index, field in enumerate(FIELDS):
+            macro = "STB_LRN04_F_" + field.upper()
+            # The MQL5 field macro names intentionally use domain-specific
+            # abbreviations, so validate the corresponding numeric slots below.
+            expected_index = {
+                "schema": 0, "record_seq": 1, "state": 2, "account_scope": 3,
+                "magic": 4, "deal_ticket": 5, "position_id": 6,
+                "lifecycle_id": 7, "symbol_code": 8, "direction": 9,
+                "entry_kind": 10, "pnl_minor": 11, "risk_state": 12,
+                "r_scaled": 13, "wins_scaled": 14, "losses_scaled": 15,
+                "rsum_scaled": 16, "rcount": 17, "decay_time": 18,
+                "previous_record_hash": 19,
+            }[field]
+            self.assertEqual(index, expected_index)
+            self.assertRegex(
+                source,
+                rf"#define STB_LRN04_F_\\w+\\s+{expected_index}\\b",
+            )
 
     def test_torn_tail_rejected(self):
         raw = encode_record(sample())
