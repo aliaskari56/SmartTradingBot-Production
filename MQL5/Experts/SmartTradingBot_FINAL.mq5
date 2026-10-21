@@ -5372,6 +5372,15 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    long freezeLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
+
+   // Do not let an unplaceable legacy +20-pip floor block a valid, positive
+   // adaptive break-even stop. Existing stops are still monotonic: disabling
+   // this cycle's floor cannot loosen an SL already installed on the server.
+   if(enforceProfitLockFloor &&
+      !STB_IsValidSLForDecisionSnapshot(side,profitLockTarget,decisionTick,
+                                        point,stopsLevel,freezeLevel))
+      enforceProfitLockFloor=false;
+
    bool found=false;
    bool unprotectedFallbackFound=false;
    double unprotectedFallbackSL=0.0;
