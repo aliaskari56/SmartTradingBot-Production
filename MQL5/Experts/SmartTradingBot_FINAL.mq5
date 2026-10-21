@@ -2066,16 +2066,33 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const bool isUserAction=false)
   {
    if(ticket==0 || !OrderSelect(ticket))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " stage=PRECHECK reason=TICKET_NOT_SELECTABLE");
       return false;
+     }
 
-   string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   if(!IsManagedOrder(ticket))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=PRECHECK reason=SYMBOL_NOT_MANAGED");
+      return false;
+     } // P1 writer safety barrier
    if(STB_ExposureEnsure(ticket,false)<0)
      {
       Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
             " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
       return false;
      }
-   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=PRECHECK reason=SYMBOL_WRITER_NOT_OWNED");
+      return false;
+     } // P6/P10 cross-instance single pending writer
 
    MqlTick pendingWriteTick;
    string pendingQuoteReason="";
@@ -2099,17 +2116,45 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=INVALID_SL_GEOMETRY",
+            " entry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " sl=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
+     }
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=ENTRY_DIRECTION",
+            " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
+     }
 
    if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=RISK_FLOOR",
+            " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " oldSL=",DoubleToString(stbCurSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
-
+     }
 
    if(newEntry<=0.0)
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=ENTRY_NONPOSITIVE",
+            " entry=",DoubleToString(newEntry,10));
       return false;
+     }
 
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
@@ -2147,7 +2192,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // prevents ManagePendingOrders' initial-SL repair and the trailing engine
    // from both modifying the same pending ticket in one cycle.
    if(STB_CycleWriteAlreadyDone(ticket))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=WRITE_GATE reason=ONE_WRITE_PER_CYCLE");
       return false;
+     }
 
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
@@ -2165,7 +2215,13 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    ResetLastError();
 
    if(!OrderCheck(req,check))
+     {
+      Print("STB PENDING MODIFY ORDERCHECK ERROR ticket=",ticket,
+            " symbol=",symbol,
+            " lastError=",GetLastError(),
+            " comment=",check.comment);
       return false;
+     }
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
@@ -2180,10 +2236,20 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // OrderCheck can take time. Re-read the ticket and verify that both the
    // symbol-writer lease and the geometry snapshot are still ours to modify.
    if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_GONE_OR_SCOPE_CHANGED");
       return false;
+     }
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_IDENTITY_CHANGED");
       return false;
+     }
    // Do not re-enable a manual-override pause after OrderCheck: every
    // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
@@ -2196,13 +2262,41 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
       MathAbs(latestSL-stbCurSL)>latestTolerance ||
       MathAbs(latestTP-stbCurTP)>latestTolerance)
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_GEOMETRY_CHANGED");
       return false;
+     }
 
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
-      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
-      !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
-      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=SYMBOL_WRITER_LEASE_LOST");
       return false;
+     }
+   if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=INVALID_SL_GEOMETRY");
+      return false;
+     }
+   if(!STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ENTRY_DIRECTION");
+      return false;
+     }
+   if(!STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=RISK_FLOOR");
+      return false;
+     }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -2216,6 +2310,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
      {
+      Print("STB PENDING MODIFY SERVER FAILURE ticket=",ticket,
+            " symbol=",symbol,
+            " retcode=",trade.ResultRetcode(),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",GetLastError());
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
@@ -2226,6 +2325,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
    if(!TradeRetcodeModifySucceeded())
      {
+      Print("STB PENDING MODIFY RETCODE REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " retcode=",trade.ResultRetcode(),
+            " description=",trade.ResultRetcodeDescription());
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
