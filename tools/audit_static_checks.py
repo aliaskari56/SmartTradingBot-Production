@@ -201,6 +201,29 @@ def main() -> int:
          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
          "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("pending trail retires disappeared orders before exposure-allocation checks",
+         bool(trail_source) and
+         trail_source.index("if(!OrderSelect(g_stbPendingTrail[idx].ticket))") <
+             trail_source.index("if(STB_ExposureEnsure(ticket,false)<0)") and
+         "g_stbPendingTrail[idx].active=false;" in
+             source_region(trail_source,
+                           "bool STB_PendingTrailManageOne(",
+                           "int STB_PendingTrailProcess(")),
+        ("partial pending fills retain trailing only while a managed remainder remains",
+         bool(trail_source) and
+         "DEAL_ADD can represent a partial fill" in trail_source and
+         "if(OrderSelect(ticket) &&" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery") and
+         "action=KEEP_TRAIL_ACTIVE" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery") and
+         "g_stbPendingTrail[idx].active=false;" in
+             source_region(trail_source,
+                           "void STB_PendingTrailOnOrderFilled(",
+                           "//--- Restart recovery")),
         ("manual/mobile pending override metadata does not disable automatic SL protection or trailing",
          "Do not impose protection on an order explicitly assigned to the user." not in source and
          "if(!isUserAction && STB_ManualOverrideIs(ticket) && !stbCandleStop)" not in source and
