@@ -221,8 +221,41 @@ bool STB_DailyLossLimitHit()
 
    if(!persistedStateValid)
      {
-      // New server day or no valid baseline yet: establish and persist once.
-      // A failed write is fail-closed so the EA cannot silently bypass the cap.
+      // Do not silently reset a damaged same-day baseline to current equity:
+      // that could erase already-incurred daily drawdown. A missing/invalid
+      // state is allowed to initialize only when no prior state exists.
+      bool anyStatePresent=(GlobalVariableCheck(dayName) ||
+                            GlobalVariableCheck(equityName) ||
+                            GlobalVariableCheck(loggedName));
+      if(anyStatePresent)
+        {
+         if(!GlobalVariableCheck(dayName))
+           {
+            Print("STB DAILY RISK STATE CORRUPT: day key missing; entries blocked.");
+            return true;
+           }
+
+         double storedDay=GlobalVariableGet(dayName);
+         if(!MathIsValidNumber(storedDay) ||
+            storedDay<20000101.0 || storedDay>99991231.0)
+           {
+            Print("STB DAILY RISK STATE CORRUPT: invalid day key; entries blocked.");
+            return true;
+           }
+
+         // Same-day partial/corrupt state must fail closed. A future stored
+         // day indicates a clock rollback or test-time regression and also
+         // fails closed. Only a genuine forward day transition resets baseline.
+         if(storedDay>=(double)dayKey)
+           {
+            Print("STB DAILY RISK STATE CORRUPT/DATE REGRESSION: entries blocked.",
+                  " storedDay=",DoubleToString(storedDay,0),
+                  " currentDay=",dayKey);
+            return true;
+           }
+        }
+
+      // Fresh installation or confirmed forward server-day rollover.
       g_stbDailyKey=dayKey;
       g_stbDailyStartEquity=equity;
       g_stbDailyLimitLogged=false;
