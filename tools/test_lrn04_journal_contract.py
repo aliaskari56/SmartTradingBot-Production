@@ -36,13 +36,13 @@ def encode_record(values: dict[str, str]) -> bytes:
             raise JournalContractError(f"invalid field: {name}")
         if name in {
             "record_seq", "magic", "deal_ticket", "position_id",
-            "lifecycle_id", "symbol_code", "pnl_minor", "r_scaled",
+            "lifecycle_id", "pnl_minor", "r_scaled",
             "wins_scaled", "losses_scaled", "rsum_scaled", "rcount",
             "decay_time",
         } and not UINT_RE.fullmatch(value):
             raise JournalContractError(f"invalid unsigned integer: {name}")
         if name in {"schema", "state", "account_scope", "direction",
-                    "entry_kind", "risk_state", "previous_record_hash"}:
+                    "entry_kind", "risk_state", "symbol_code", "previous_record_hash"}:
             if not TOKEN_RE.fullmatch(value):
                 raise JournalContractError(f"invalid token: {name}")
     body = "|".join(parts).encode("ascii")
