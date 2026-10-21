@@ -544,7 +544,8 @@ class JournalRecoveryPolicyConsistencyTests(unittest.TestCase):
         )
         self.assertIn("reject a truncated final record by default", plan)
         self.assertIn("fail-closed for a truncated final record", plan)
-        self.assertIn("Truncated final record fail closed by default", recovery)
+        self.assertIn("Final bytes do not end in LF, or final record is truncated", recovery)
+        self.assertIn("Fail closed by default", recovery)
         self.assertIn("No automatic truncation, compaction, or migration", plan)
 
 
