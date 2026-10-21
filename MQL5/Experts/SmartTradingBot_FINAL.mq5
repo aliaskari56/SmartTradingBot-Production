@@ -10760,8 +10760,10 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   STB_RunManagementCycle();
+   // Recover terminal-visible positions/orders before the manager pass so a
+   // missed or delayed transaction handoff can be protected in this timer cycle.
    STB_ReconcileTradeRegistry();
+   STB_RunManagementCycle();
    ulong cycleBefore=g_scannerCycle;
    STB_ScannerRun();
    if(g_scannerCycle!=cycleBefore)
