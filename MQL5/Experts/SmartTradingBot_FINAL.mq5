@@ -4733,11 +4733,6 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB HEDGE REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB HEDGE REJECTED: daily equity loss limit active.");
@@ -8422,10 +8417,9 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
-   // Defense-in-depth: never submit pending orders outside Strategy Tester.
-   if(!MQLInfoInteger(MQL_TESTER))
-      return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
-
+   // Live execution still respects the dedicated AUTO state below.
+   // With AUTO off, scanner candidates are logged but no new automated order
+   // is submitted by this function.
    if(!s.valid)
       return false;
 
@@ -9081,11 +9075,6 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9227,11 +9216,6 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
@@ -11069,14 +11053,9 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // SAFETY GATE: this build is restricted to Strategy Tester.
-   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
-      return INIT_FAILED;
-     }
-
+   // The EA is allowed to initialize on ordinary MT5 charts.
+   // New automated entries remain controlled independently by AUTO, which
+   // defaults to OFF through InpAutoTrading=false on non-tester terminals.
    g_autoStateName=ScopedStateName("AUTO");
 
    if(!ValidateInputs())
