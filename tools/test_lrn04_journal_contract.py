@@ -134,23 +134,19 @@ class JournalContractTests(unittest.TestCase):
         self.assertIn("bool STB_LRN04_EncodeRecord(", source)
         self.assertIn("bool STB_LRN04_DecodeRecord(", source)
 
-        for index, field in enumerate(FIELDS):
-            macro = "STB_LRN04_F_" + field.upper()
-            # The MQL5 field macro names intentionally use domain-specific
-            # abbreviations, so validate the corresponding numeric slots below.
-            expected_index = {
-                "schema": 0, "record_seq": 1, "state": 2, "account_scope": 3,
-                "magic": 4, "deal_ticket": 5, "position_id": 6,
-                "lifecycle_id": 7, "symbol_code": 8, "direction": 9,
-                "entry_kind": 10, "pnl_minor": 11, "risk_state": 12,
-                "r_scaled": 13, "wins_scaled": 14, "losses_scaled": 15,
-                "rsum_scaled": 16, "rcount": 17, "decay_time": 18,
-                "previous_record_hash": 19,
-            }[field]
-            self.assertEqual(index, expected_index)
+        macro_slots = (
+            ("SCHEMA", 0), ("SEQ", 1), ("STATE", 2), ("ACCOUNT", 3),
+            ("MAGIC", 4), ("DEAL", 5), ("POSITION", 6), ("LIFECYCLE", 7),
+            ("SYMBOL", 8), ("DIRECTION", 9), ("ENTRY_KIND", 10), ("PNL", 11),
+            ("RISK_STATE", 12), ("R", 13), ("WINS", 14), ("LOSSES", 15),
+            ("RSUM", 16), ("RCOUNT", 17), ("DECAY_TIME", 18),
+            ("PREVIOUS_HASH", 19),
+        )
+        self.assertEqual(len(macro_slots), len(FIELDS))
+        for macro_name, expected_index in macro_slots:
             self.assertRegex(
                 source,
-                rf"#define STB_LRN04_F_\\w+\\s+{expected_index}\\b",
+                rf"#define STB_LRN04_F_{macro_name}\\s+{expected_index}\\b",
             )
 
     def test_torn_tail_rejected(self):
