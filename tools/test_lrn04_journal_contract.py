@@ -594,6 +594,76 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
 
 
 
+
+class JournalV2ReferenceNegativeMatrixTests(unittest.TestCase):
+    """Broaden state-machine rejection coverage; still only an in-memory model."""
+
+    def _valid_pair(self):
+        prepared = v2_reference_record(
+            1, "PREPARED", "op-1", "GENESIS", "digest-1"
+        )
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        return prepared, committed
+
+    def test_each_event_identity_field_must_match_prepared_record(self):
+        identity_fields = (
+            "environment", "server_scope", "account_scope", "magic",
+            "operation_id", "deal_ticket", "position_id", "lifecycle_id",
+            "symbol_code", "direction", "entry_kind",
+        )
+        for field in identity_fields:
+            with self.subTest(field=field):
+                prepared, committed = self._valid_pair()
+                committed[field] = "DIFFERENT"
+                with self.assertRaises(JournalContractError):
+                    validate_v2_reference_history([prepared, committed])
+
+    def test_each_aggregate_snapshot_field_must_match_prepared_record(self):
+        snapshot_fields = (
+            "pnl_minor", "risk_state", "r_scaled", "wins_scaled",
+            "losses_scaled", "rsum_scaled", "rcount", "decay_time",
+        )
+        for field in snapshot_fields:
+            with self.subTest(field=field):
+                prepared, committed = self._valid_pair()
+                committed[field] = (
+                    "UNKNOWN" if field == "risk_state"
+                    else ("126" if field == "pnl_minor" else "999")
+                )
+                with self.assertRaises(JournalContractError):
+                    validate_v2_reference_history([prepared, committed])
+
+    def test_interleaved_prepared_operations_are_rejected(self):
+        first = v2_reference_record(
+            1, "PREPARED", "op-1", "GENESIS", "digest-1"
+        )
+        second = v2_reference_record(
+            2, "PREPARED", "op-2", "digest-1", "digest-2"
+        )
+        with self.assertRaisesRegex(
+            JournalContractError, "interleaved PREPARED"
+        ):
+            validate_v2_reference_history([first, second])
+
+    def test_operation_id_cannot_be_reused_after_commit(self):
+        prepared1, committed1 = self._valid_pair()
+        prepared2 = v2_reference_record(
+            3, "PREPARED", "op-1", "digest-2", "digest-3"
+        )
+        with self.assertRaisesRegex(JournalContractError, "operation ID reused"):
+            validate_v2_reference_history([prepared1, committed1, prepared2])
+
+    def test_uncommitted_prepared_record_is_accepted_as_a_prefix(self):
+        prepared = v2_reference_record(
+            1, "PREPARED", "op-1", "GENESIS", "digest-1"
+        )
+        # Acceptance here means only that the in-memory sequence is a valid
+        # prefix. It does not mean PREPARED data is applied to any projection.
+        validate_v2_reference_history([prepared])
+
 class JournalRecoveryProposalTests(unittest.TestCase):
     def test_recovery_proposal_covers_fail_closed_conditions(self):
         """Pin key recovery requirements in the proposal; not a storage test."""
