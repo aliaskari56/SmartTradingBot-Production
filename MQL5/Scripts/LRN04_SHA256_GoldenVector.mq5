@@ -38,14 +38,14 @@ string BytesToUpperHex(const uchar &bytes[], const int count)
 }
 
 bool CheckVector(const string label,
-                 const string input,
+                 const string input_text,
                  const string expected_hex)
 {
    uchar data[];
    uchar key[];
    uchar digest[];
 
-   if(!AsciiBytes(input, data))
+   if(!AsciiBytes(input_text, data))
    {
       Print("[FAIL] ", label, ": input is not ASCII or allocation failed.");
       return false;
