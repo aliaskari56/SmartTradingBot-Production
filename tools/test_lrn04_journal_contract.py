@@ -692,58 +692,6 @@ class JournalV2ProvisionalDecisionRecordTests(unittest.TestCase):
         self.assertIn("Do not enable live deployment", doc)
 
 
-def _extract_function_body(source: str, signature: str) -> str | None:
-    """Extract a C-like function body while ignoring braces in comments/strings."""
-    start = source.find(signature)
-    if start < 0:
-        return None
-    opening = source.find("{", start + len(signature))
-    if opening < 0:
-        return None
-
-    depth = 0
-    state = "code"
-    escaped = False
-    i = opening
-    while i < len(source):
-        ch = source[i]
-        nxt = source[i + 1] if i + 1 < len(source) else ""
-
-        if state == "line_comment":
-            if ch == "\\n":
-                state = "code"
-        elif state == "block_comment":
-            if ch == "*" and nxt == "/":
-                state = "code"
-                i += 1
-        elif state in ("string", "char"):
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif (state == "string" and ch == '"') or (state == "char" and ch == "'"):
-                state = "code"
-        else:
-            if ch == "/" and nxt == "/":
-                state = "line_comment"
-                i += 1
-            elif ch == "/" and nxt == "*":
-                state = "block_comment"
-                i += 1
-            elif ch == '"':
-                state = "string"
-            elif ch == "'":
-                state = "char"
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return source[opening + 1:i]
-        i += 1
-    return None
-
-
 class JournalIntegrationReleaseGateTests(unittest.TestCase):
     def test_primary_ea_transaction_handler_remains_unwired_to_journal_codec(self):
         """Prevent premature journal integration before V2/runtime gates pass."""
@@ -751,8 +699,11 @@ class JournalIntegrationReleaseGateTests(unittest.TestCase):
         ea = (
             root / "MQL5" / "Experts" / "SmartTradingBot_FINAL.mq5"
         ).read_text(encoding="utf-8")
-        handler = _extract_function_body(ea, "void OnTradeTransaction(")
-        self.assertIsNotNone(handler, "primary EA transaction handler body missing")
+        start = ea.find("void OnTradeTransaction(")
+        self.assertGreaterEqual(start, 0, "primary EA transaction handler missing")
+        end = ea.find("\\nvoid STB_ToggleDashboard(", start)
+        self.assertGreater(end, start, "transaction handler boundary changed")
+        handler = ea[start:end]
         self.assertNotIn("STB_LRN04_EncodeRecord(", handler)
         self.assertNotIn("STB_LRN04_DecodeRecord(", handler)
         self.assertNotIn("STB_LRN04_Append", handler)
