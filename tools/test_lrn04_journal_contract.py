@@ -19,6 +19,10 @@ FIELDS = (
 )
 CHECKSUM_RE = re.compile(r"^[0-9A-F]{8}$")
 UINT_RE = re.compile(r"^(0|[1-9][0-9]*)$")
+SINT_RE = re.compile(r"^(0|-?[1-9][0-9]*)$")
+UINT64_MAX = (1 << 64) - 1
+INT64_MIN = -(1 << 63)
+INT64_MAX = (1 << 63) - 1
 TOKEN_RE = re.compile(r"^[A-Z0-9_-]+$")
 MAX_RECORD_BYTES = 1024
 ALLOWED = {
@@ -43,11 +47,14 @@ def encode_record(values: dict[str, str]) -> bytes:
             raise JournalContractError(f"invalid field: {name}")
         if name in {
             "record_seq", "magic", "deal_ticket", "position_id",
-            "lifecycle_id", "pnl_minor", "r_scaled",
-            "wins_scaled", "losses_scaled", "rsum_scaled", "rcount",
+            "lifecycle_id", "wins_scaled", "losses_scaled", "rcount",
             "decay_time",
-        } and not UINT_RE.fullmatch(value):
-            raise JournalContractError(f"invalid unsigned integer: {name}")
+        }:
+            if not UINT_RE.fullmatch(value) or int(value) > UINT64_MAX:
+                raise JournalContractError(f"invalid unsigned 64-bit integer: {name}")
+        if name in {"pnl_minor", "r_scaled", "rsum_scaled"}:
+            if not SINT_RE.fullmatch(value) or not INT64_MIN <= int(value) <= INT64_MAX:
+                raise JournalContractError(f"invalid signed 64-bit integer: {name}")
         if name in {"schema", "state", "account_scope", "direction",
                     "entry_kind", "risk_state", "symbol_code", "previous_record_hash"}:
             if not TOKEN_RE.fullmatch(value):
@@ -94,9 +101,9 @@ def sample() -> dict[str, str]:
         "account_scope": "ACCTHASH01", "magic": "26093001",
         "deal_ticket": "12345", "position_id": "67890",
         "lifecycle_id": "1", "symbol_code": "EURUSD",
-        "direction": "BUY", "entry_kind": "OUT", "pnl_minor": "1250",
-        "risk_state": "KNOWN", "r_scaled": "250", "wins_scaled": "1",
-        "losses_scaled": "0", "rsum_scaled": "250", "rcount": "1",
+        "direction": "BUY", "entry_kind": "OUT", "pnl_minor": "-1250",
+        "risk_state": "KNOWN", "r_scaled": "-250", "wins_scaled": "1",
+        "losses_scaled": "0", "rsum_scaled": "-250", "rcount": "1",
         "decay_time": "1792540800", "previous_record_hash": "GENESIS",
     }
 
@@ -105,12 +112,11 @@ class JournalContractTests(unittest.TestCase):
     def test_round_trip_and_golden_checksum(self):
         raw = encode_record(sample())
         self.assertEqual(decode_record(raw), sample())
-        self.assertEqual(raw.split(b"|")[-2], b"") if False else None
         self.assertEqual(raw[-9:-1], f"{zlib.crc32(raw[:-10]) & 0xFFFFFFFF:08X}".encode())
 
     def test_torn_tail_rejected(self):
         raw = encode_record(sample())
-        for cut in (1, 2, 5, len(raw) // 2):
+        for cut in range(1, len(raw) + 1):
             with self.subTest(cut=cut):
                 with self.assertRaises(JournalContractError):
                     decode_record(raw[:-cut])
@@ -138,6 +144,24 @@ class JournalContractTests(unittest.TestCase):
     def test_noncanonical_integer_rejected(self):
         values = sample()
         values["record_seq"] = "01"
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
+
+    def test_signed_values_and_integer_bounds(self):
+        values = sample()
+        values["pnl_minor"] = str(INT64_MIN)
+        values["r_scaled"] = str(INT64_MAX)
+        values["rsum_scaled"] = "-1"
+        self.assertEqual(decode_record(encode_record(values)), values)
+        values["record_seq"] = str(UINT64_MAX + 1)
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
+        values = sample()
+        values["pnl_minor"] = str(INT64_MAX + 1)
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
+        values = sample()
+        values["r_scaled"] = "-0"
         with self.assertRaises(JournalContractError):
             encode_record(values)
 
