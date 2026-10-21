@@ -1748,63 +1748,14 @@ bool GetRates(const string symbol,
    if(count<=0 || !SymbolSelect(symbol,true))
       return false;
 
-   // CopyRates is the request that starts/continues construction or download
-   // of this symbol/timeframe history. Do not pre-empt it with the symbol-wide
-   // SymbolIsSynchronized flag: that flag is not timeframe-specific and can
-   // block the very request needed to make a new series available.
+   if(!SymbolIsSynchronized(symbol))
+      return false;
+
    ArraySetAsSeries(rates,true);
 
-   ResetLastError();
    int copied=CopyRates(symbol,tf,0,count,rates);
 
    return copied>=count;
-  }
-
-// Request history while allowing a bounded, fully synchronized partial series.
-// This is used only by H4 swing discovery: a symbol may have fewer bars than
-// the configured lookback, but still have enough closed history to evaluate
-// the confirmed swings required for the H4 trend gate. Incomplete/unsynced
-// partial history is never accepted.
-bool GetRatesAtLeast(const string symbol,
-                     const ENUM_TIMEFRAMES tf,
-                     const int count,
-                     const int minimumCount,
-                     MqlRates &rates[],
-                     int &copiedOut)
-  {
-   copiedOut=0;
-
-   if(count<=0 || minimumCount<=0 || minimumCount>count ||
-      !SymbolSelect(symbol,true))
-      return false;
-
-   ArraySetAsSeries(rates,true);
-
-   ResetLastError();
-   copiedOut=CopyRates(symbol,tf,0,count,rates);
-
-   if(copiedOut<minimumCount || copiedOut>count)
-      return false;
-
-   // If the full request is not present yet, only consume partial bars once
-   // this exact symbol/timeframe series is reported synchronized.
-   if(copiedOut<count)
-     {
-      long seriesSynchronized=0;
-      if(!SeriesInfoInteger(symbol,tf,SERIES_SYNCHRONIZED,seriesSynchronized) ||
-         seriesSynchronized==0)
-         return false;
-     }
-
-   int arraySize=ArraySize(rates);
-   if(arraySize<copiedOut)
-      return false;
-
-   if(arraySize>copiedOut && ArrayResize(rates,copiedOut)!=copiedOut)
-      return false;
-
-   ArraySetAsSeries(rates,true);
-   return true;
   }
 
 //+------------------------------------------------------------------+
@@ -2782,33 +2733,9 @@ int CollectSwings(const string symbol,
                   SwingPoint &highs[],
                   SwingPoint &lows[])
   {
-   if(maxBars<=0)
-      return 0;
-
-   int left  = STB_EffectiveSwingLeft(tf);
-   int right = STB_EffectiveSwingRight(tf);
    MqlRates r[];
-   int copiedBars=0;
-   bool ratesReady=false;
 
-   if(tf==PERIOD_H4)
-     {
-      // The requested lookback is a maximum, not a requirement that the
-      // server must supply every bar. Require at least 60 H4 bars, or the
-      // whole configured window when it is shorter, before evaluating swings.
-      int minimumBars=MathMin(maxBars,MathMax(60,left+right+10));
-      ratesReady=GetRatesAtLeast(symbol,tf,maxBars,minimumBars,r,copiedBars);
-     }
-   else
-     {
-      // Keep full-lookback semantics for the other timeframes; their callers
-      // may rely on the exact requested bar window.
-      ratesReady=GetRates(symbol,tf,maxBars,r);
-      if(ratesReady)
-         copiedBars=MathMin(maxBars,ArraySize(r));
-     }
-
-   if(!ratesReady)
+   if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
    if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)
@@ -2818,8 +2745,9 @@ int CollectSwings(const string symbol,
       return 0;
      }
 
-   int availableBars=MathMin(copiedBars,ArraySize(r));
-   int maxShift=availableBars-left-1;
+   int left  = STB_EffectiveSwingLeft(tf);
+   int right = STB_EffectiveSwingRight(tf);
+   int maxShift=maxBars-left-1;
    int minShift=right+1;
 
    if(maxShift<minShift)
