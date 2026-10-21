@@ -489,10 +489,10 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([prepared, intervening, committed])
 
-    def test_uncommitted_prepared_at_end_is_not_applied(self):
+    def test_uncommitted_prepared_at_end_is_valid_prefix(self):
         prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
-        # Validation accepts the valid prefix; the recovery policy must not apply
-        # this snapshot because no matching COMMITTED record exists.
+        # The reference validator accepts the well-formed prefix. This does not
+        # test persistence or projection/application behavior.
         validate_v2_reference_history([prepared])
 
 
