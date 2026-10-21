@@ -161,6 +161,12 @@ def main() -> int:
         "// Serialize final scanner revalidation/submission")
     place_setup = source_region(
         source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
+    on_trade_transaction = source_region(
+        source, "void OnTradeTransaction(", "// EXPOSURE MANAGEMENT")
+    trade_intake = source_region(
+        source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
+    management_cycle = source_region(
+        source, "void STB_RunManagementCycle()", "void OnTick()")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
     indicator_cache = source_region(
@@ -513,6 +519,35 @@ def main() -> int:
          "STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);" in source and
          source.index("STB_CycleMarkWritten(ticket);\n\n   ResetLastError();\n   bool requestOK=trade.PositionModify(ticket,newSL,newTP);") <
          source.index("bool ModifyPositionSL(")),
+        ("transaction intake runs before deal-magic filtering so manual and foreign-magic fills enter protection",
+         "STB_TradeIntakeFromTransaction(trans);" in on_trade_transaction and
+         on_trade_transaction.index("STB_TradeIntakeFromTransaction(trans);") <
+         on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+        ("pending-order intake records actual server geometry before registering pending trail state",
+         "if(trans.type==TRADE_TRANSACTION_ORDER_ADD" in trade_intake and
+         trade_intake.index("STB_GeomStore(trans.order,false,") <
+         trade_intake.index("STB_PendingTrailRegister(trans.order,\"TRADE_TRANSACTION\")")),
+        ("filled positions seed exposure and geometry before immediate manager handoff",
+         "STB_ExposureEnsure(trans.position,true)" in trade_intake and
+         "STB_GeomStore(trans.position,true," in trade_intake and
+         "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+         trade_intake.index("STB_ExposureEnsure(trans.position,true)") <
+         trade_intake.index("STB_GeomStore(trans.position,true,") <
+         trade_intake.index("STB_ManagePositionImmediately(trans.position);")),
+        ("immediate fill management is reentrancy-guarded and defers nested cycles",
+         "if(g_stbManagementCycleActive)" in management_cycle and
+         "g_stbManagementCyclePending=true;" in management_cycle and
+         "while(g_stbManagementCyclePending && pass<2);" in management_cycle),
+        ("accepted pending order is initial-SL-verified before setup cooldown is committed",
+         "if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))" in place_setup and
+         place_setup.index("VerifyPendingInitialSL(placedOrder)") <
+         place_setup.index("SetLastSetupTime(s.symbol,s.direction,s.setupTime)")),
+        ("final volatile-state and ownership checks are directly before broker submission",
+         place_setup.index("TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT") <
+         place_setup.index("bool ok=false;") <
+         place_setup.index("trade.BuyStop(volume,s.entry") and
+         place_setup.index("MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT") <
+         place_setup.index("bool ok=false;")),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
