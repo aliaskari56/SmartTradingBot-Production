@@ -90,7 +90,11 @@
 
 **Impact:** The candidate eventually attempted for placement may not itself satisfy the configured top-score gap as the leading eligible candidate. This is a ranking/eligibility consistency risk. The static path shows the missing recalculation; runtime frequency and consequences have not been measured.
 
-**Disposition:** Add a regression test where candidate 1 initially clears the gap but fails final revalidation, while candidates 2 and 3 are closer than the required gap. The approved policy should either stop after the winner fails, or recompute eligibility/confidence from the remaining freshly validated candidates before considering a fallback. Do not treat the original `CLEAR` value as proof that every fallback is clear.
+**Status update — source correction present on branch:** `STB_ExecuteTopCandidate()` now checks each fallback candidate against the revalidated watchlist, locates its current rank by symbol/direction/setup time, and recomputes the score floor and gap to the next watchlist candidate. It stops fallback consideration when the candidate is missing from the revalidated watchlist or fails the configured confidence rule. This prevents the original winner's `CLEAR` label from automatically authorizing every fallback.
+
+**Evidence:** Verified in `MQL5/Experts/SmartTradingBot_FINAL.mq5` at revision `ab9ed32d5277c4a9ff4442d02b88da46df041924`; that exact revision compiled with 0 errors and 0 warnings in workflow run `39534333105`.
+
+**Remaining verification:** The targeted regression described above is still **NOT RUN**. Static inspection confirms the guard is present but does not establish runtime ranking behavior.
 
 ### STR-AUD-09 — Local FVG and OB are not proven to belong to one common displacement/BOS event
 
