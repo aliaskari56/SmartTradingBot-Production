@@ -289,8 +289,22 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
         "losses_scaled", "rsum_scaled", "rcount", "decay_time",
     )
 
+    required_fields = {
+        "record_seq", "state", "environment", "server_scope", "account_scope",
+        "magic", "operation_id", "prepared_seq", "prepared_digest", "deal_ticket",
+        "position_id", "lifecycle_id", "symbol_code", "direction", "entry_kind",
+        "pnl_minor", "risk_state", "r_scaled", "wins_scaled", "losses_scaled",
+        "rsum_scaled", "rcount", "decay_time", "previous_record_digest",
+        "record_digest",
+    }
+
     for record in records:
-        seq = int(record["record_seq"])
+        if not required_fields.issubset(record):
+            raise JournalContractError("missing required reference-model field")
+        seq_text = record["record_seq"]
+        if not UINT_RE.fullmatch(seq_text) or int(seq_text) > UINT64_MAX:
+            raise JournalContractError("invalid record sequence encoding")
+        seq = int(seq_text)
         if seq != previous_seq + 1:
             raise JournalContractError("sequence gap or reuse")
         if record["previous_record_digest"] != previous_digest:
@@ -301,6 +315,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
 
         state = record["state"]
         op_id = record["operation_id"]
+        if not op_id:
+            raise JournalContractError("empty operation ID")
         if state == "PREPARED":
             if op_id in operation_states:
                 raise JournalContractError("operation ID reused")
@@ -311,7 +327,10 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
         elif state == "COMMITTED":
             if operation_states.get(op_id) != "PREPARED":
                 raise JournalContractError("orphan or duplicate COMMITTED")
-            ref_seq = int(record["prepared_seq"])
+            ref_text = record["prepared_seq"]
+            if not UINT_RE.fullmatch(ref_text) or int(ref_text) > UINT64_MAX:
+                raise JournalContractError("invalid PREPARED sequence encoding")
+            ref_seq = int(ref_text)
             prepared = prepared_by_seq.get(ref_seq)
             if prepared is None or ref_seq >= seq:
                 raise JournalContractError("invalid PREPARED sequence reference")
@@ -421,6 +440,37 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         )
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([prepared, committed, duplicate])
+
+    def test_event_identity_mismatch_rejected(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        committed["deal_ticket"] = "9999"
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, committed])
+
+    def test_operation_id_reuse_rejected(self):
+        first = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        second = v2_reference_record(2, "PREPARED", "op-1", "digest-1", "digest-2")
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([first, second])
+
+    def test_missing_digest_and_invalid_sequence_rejected(self):
+        missing_digest = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "")
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([missing_digest])
+        invalid_seq = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        invalid_seq["record_seq"] = "01"
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([invalid_seq])
+
+    def test_missing_required_field_rejected(self):
+        record = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        del record["account_scope"]
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([record])
 
 
 if __name__ == "__main__":
