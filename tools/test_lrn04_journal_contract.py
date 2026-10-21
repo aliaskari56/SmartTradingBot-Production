@@ -284,7 +284,7 @@ class JournalContractTests(unittest.TestCase):
         self.assertIn("not an additional serialized field", proposal)
         self.assertIn("complete serialized PREPARED record", proposal)
         self.assertIn("A truncated or malformed final record fails closed by default", proposal)
-        self.assertIn("No automatic truncation, compaction, or migration", proposal)
+        self.assertIn("performs no automatic truncation, compaction, or migration", proposal)
         self.assertNotIn("An incomplete final line may be ignored", proposal)
 
 
