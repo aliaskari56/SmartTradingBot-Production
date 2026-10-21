@@ -560,9 +560,10 @@ def main() -> int:
          on_init.index("STB_ReconcileTradeRegistry();") <
          on_init.index("STB_RunManagementCycle();") <
          on_init.index("STB_ScannerRun();")),
-        ("periodic timer recovery reconciles terminal positions/orders before scanner execution",
+        ("periodic timer recovery reconciles terminal positions/orders before management and scanner execution",
          "STB_ReconcileTradeRegistry();" in on_timer and
          on_timer.index("STB_ReconcileTradeRegistry();") <
+             on_timer.index("STB_RunManagementCycle();") <
              on_timer.index("STB_ScannerRun();")),
         ("tick recovery reconciles after a new M15 bar without bypassing the central management cycle",
          "STB_RunManagementCycle();" in on_tick and
