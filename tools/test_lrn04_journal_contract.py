@@ -320,6 +320,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
     for record in records:
         if not required_fields.issubset(record):
             raise JournalContractError("missing required reference-model field")
+        if any(not isinstance(record[name], str) for name in required_fields):
+            raise JournalContractError("reference-model fields must be strings")
         # Validate every numeric field before using the reference record.
         # This is a model-level contract check; V2 scales and sentinels remain
         # unresolved and are intentionally not guessed here.
@@ -592,6 +594,31 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         # test persistence or projection/application behavior.
         validate_v2_reference_history([prepared])
 
+
+
+
+
+class JournalV2ReferenceTypeSafetyTests(unittest.TestCase):
+    def test_all_required_reference_fields_must_be_strings(self):
+        required = (
+            "record_seq", "state", "environment", "server_scope", "account_scope",
+            "magic", "operation_id", "prepared_seq", "prepared_digest", "deal_ticket",
+            "position_id", "lifecycle_id", "symbol_code", "direction", "entry_kind",
+            "pnl_minor", "risk_state", "r_scaled", "wins_scaled", "losses_scaled",
+            "rsum_scaled", "rcount", "decay_time", "previous_record_digest",
+            "record_digest",
+        )
+        for field in required:
+            for invalid in (None, 123, ["not", "a", "string"]):
+                with self.subTest(field=field, value=repr(invalid)):
+                    record = v2_reference_record(
+                        1, "PREPARED", "op-1", "GENESIS", "digest-1"
+                    )
+                    record[field] = invalid
+                    with self.assertRaisesRegex(
+                        JournalContractError, "fields must be strings"
+                    ):
+                        validate_v2_reference_history([record])
 
 
 
