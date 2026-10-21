@@ -318,6 +318,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
     }
 
     for record in records:
+        if not isinstance(record, dict):
+            raise JournalContractError("reference-model record must be a mapping")
         if not required_fields.issubset(record):
             raise JournalContractError("missing required reference-model field")
         if set(record) != required_fields:
@@ -609,6 +611,14 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
 
 
 class JournalV2ReferenceTypeSafetyTests(unittest.TestCase):
+    def test_each_history_item_must_be_a_mapping(self):
+        for invalid in (None, 123, "not-a-record", ["not", "a", "mapping"]):
+            with self.subTest(value=repr(invalid)):
+                with self.assertRaisesRegex(
+                    JournalContractError, "record must be a mapping"
+                ):
+                    validate_v2_reference_history([invalid])
+
     def test_all_required_reference_fields_must_be_strings(self):
         required = (
             "record_seq", "state", "environment", "server_scope", "account_scope",
