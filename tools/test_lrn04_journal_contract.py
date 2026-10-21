@@ -32,7 +32,7 @@ def encode_record(values: dict[str, str]) -> bytes:
         raise JournalContractError("field set mismatch")
     parts = [values[name] for name in FIELDS]
     for name, value in zip(FIELDS, parts):
-        if not value or "|" in value or "\\n" in value or "\\r" in value:
+        if not value or "|" in value or "\n" in value or "\r" in value:
             raise JournalContractError(f"invalid field: {name}")
         if name in {
             "record_seq", "magic", "deal_ticket", "position_id",
@@ -47,14 +47,14 @@ def encode_record(values: dict[str, str]) -> bytes:
                 raise JournalContractError(f"invalid token: {name}")
     body = "|".join(parts).encode("ascii")
     checksum = f"{zlib.crc32(body) & 0xFFFFFFFF:08X}".encode("ascii")
-    record = body + b"|" + checksum + b"\\n"
+    record = body + b"|" + checksum + b"\n"
     if len(record) > MAX_RECORD_BYTES:
         raise JournalContractError("record too long")
     return record
 
 
 def decode_record(raw: bytes) -> dict[str, str]:
-    if not raw.endswith(b"\\n"):
+    if not raw.endswith(b"\n"):
         raise JournalContractError("incomplete record")
     if len(raw) > MAX_RECORD_BYTES:
         raise JournalContractError("record too long")
@@ -116,9 +116,9 @@ class JournalContractTests(unittest.TestCase):
     def test_missing_and_extra_fields_rejected(self):
         raw = encode_record(sample())
         with self.assertRaises(JournalContractError):
-            decode_record(b"|".join(raw.split(b"|")[:-2]) + b"\\n")
+            decode_record(b"|".join(raw.split(b"|")[:-2]) + b"\n")
         with self.assertRaises(JournalContractError):
-            decode_record(raw[:-1] + b"|EXTRA\\n")
+            decode_record(raw[:-1] + b"|EXTRA\n")
 
     def test_noncanonical_integer_rejected(self):
         values = sample()
@@ -132,7 +132,7 @@ class JournalContractTests(unittest.TestCase):
         with self.assertRaises(JournalContractError):
             encode_record(values)
         with self.assertRaises(JournalContractError):
-            decode_record(b"\xff\\n")
+            decode_record(b"\xff\n")
 
 
 if __name__ == "__main__":
