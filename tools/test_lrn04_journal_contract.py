@@ -473,5 +473,36 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
             validate_v2_reference_history([record])
 
 
+
+class JournalRecoveryProposalTests(unittest.TestCase):
+    def test_recovery_proposal_covers_fail_closed_conditions(self):
+        """Pin key recovery requirements in the proposal; not a storage test."""
+        root = Path(__file__).resolve().parents[1]
+        doc = (root / "docs" / "LRN04_CRASH_RECOVERY_CONTRACT_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        required_phrases = (
+            "Status: design proposal only; not approved or implemented",
+            "Treat an unreadable file as empty",
+            "Reject the history",
+            "COMMITTED without its referenced PREPARED record",
+            "Two writer attempts contending",
+            "Release remains **BLOCKED / NOT VERIFIED**",
+        )
+        for phrase in required_phrases:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, doc)
+
+    def test_recovery_proposal_forbids_silent_repair_and_duplicate_apply(self):
+        root = Path(__file__).resolve().parents[1]
+        doc = (root / "docs" / "LRN04_CRASH_RECOVERY_CONTRACT_20261021.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Silently skip malformed bytes", doc)
+        self.assertIn("increment aggregate statistics twice", doc.lower())
+        self.assertIn("No automatic truncation, compaction, or migration", doc)
+        self.assertIn("Do not connect LRN-04 to", doc)
+
+
 if __name__ == "__main__":
     unittest.main()
