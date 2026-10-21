@@ -10591,12 +10591,30 @@ bool ValidateInputs()
       !MathIsValidNumber(InpTrailStepPips) ||
       !MathIsValidNumber(InpStructuralTrailStartATR) ||
       !MathIsValidNumber(InpStructuralTrailBufferATR) ||
+      !MathIsValidNumber(InpBreakEvenTriggerATR) ||
+      !MathIsValidNumber(InpBreakEvenMinOffsetPips) ||
+      !MathIsValidNumber(InpBreakEvenCostMultiplier) ||
+      !MathIsValidNumber(InpAdaptiveLockTriggerATR) ||
+      !MathIsValidNumber(InpAdaptiveLockATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailStartATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailDistanceATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailStepATR) ||
       !MathIsValidNumber(InpRiskPercent) ||
       !MathIsValidNumber(InpMaxRiskVolume) ||
       !MathIsValidNumber(InpBaseLots) ||
       !MathIsValidNumber(InpTrendLotMultiplier) ||
       !MathIsValidNumber(InpUniversalLotMultiplier)
      )
+      return false;
+
+   if(InpBreakEvenTriggerATR<0.1 || InpBreakEvenTriggerATR>3.0 ||
+      InpBreakEvenMinOffsetPips<0.0 || InpBreakEvenMinOffsetPips>1000.0 ||
+      InpBreakEvenCostMultiplier<1.0 || InpBreakEvenCostMultiplier>5.0 ||
+      InpAdaptiveLockTriggerATR<0.1 || InpAdaptiveLockTriggerATR>5.0 ||
+      InpAdaptiveLockATR<0.0 || InpAdaptiveLockATR>3.0 ||
+      InpAdaptiveTrailStartATR<0.1 || InpAdaptiveTrailStartATR>5.0 ||
+      InpAdaptiveTrailDistanceATR<0.1 || InpAdaptiveTrailDistanceATR>5.0 ||
+      InpAdaptiveTrailStepATR<0.01 || InpAdaptiveTrailStepATR>2.0)
       return false;
 
    if(InpScannerMinQuality<0.0 ||
