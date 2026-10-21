@@ -9556,7 +9556,10 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
+     {
+      q.reason="REJECT_TICK_UNAVAILABLE";
       return false;
+     }
 
    string quoteReason="";
    if(!STB_ScannerQuoteValid(tick,quoteReason))
@@ -9568,11 +9571,21 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    double pip=PipSize(symbol);
    if(pip<=0.0)
+     {
+      q.reason="REJECT_PIP_SIZE_INVALID";
       return false;
+     }
 
    MqlRates rates[];
+   ResetLastError();
    if(!GetRates(symbol,PERIOD_M15,48,rates))
+     {
+      int historyError=GetLastError();
+      int availableBars=Bars(symbol,PERIOD_M15);
+      q.reason=StringFormat("REJECT_M15_HISTORY_UNAVAILABLE bars=%d need=48 err=%d",
+                            availableBars,historyError);
       return false;
+     }
 
    double atrNow=LocalATR(rates,1,14);
    double atrBase=LocalATR(rates,20,14);
@@ -9600,7 +9613,10 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
      }
 
    if(volCount<=0)
+     {
+      q.reason="REJECT_TICK_VOLUME_HISTORY_UNAVAILABLE";
       return false;
+     }
 
    avgVol/=volCount;
    q.activityRatio=(avgVol>0.0 ?
@@ -10121,8 +10137,13 @@ void STB_ScannerRun()
                " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
                " score=",DoubleToString(quality.score,1),
                " spreadPips=",DoubleToString(quality.spreadPips,2),
+               " relativeSpreadPct=",DoubleToString(quality.relativeSpread,2),
+               " atrM15=",DoubleToString(quality.volatility,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " freshnessScore=",DoubleToString(quality.freshnessScore,1),
                " activityRatio=",DoubleToString(quality.activityRatio,2),
-               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
+               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2),
+               " barsM15=",IntegerToString(Bars(symbol,PERIOD_M15)),
+               " lastError=",IntegerToString(GetLastError()));
          continue;
         }
       g_scannerQualityCount++;
@@ -10443,6 +10464,7 @@ void STB_ScannerRun()
          " universe=",IntegerToString(g_scannerUniverseCount),
          " eligible=",IntegerToString(g_scannerEligibleCount),
          " quality=",IntegerToString(g_scannerQualityCount),
+         " qualityRejects=",IntegerToString(MathMax(0,g_scannerEligibleCount-g_scannerQualityCount)),
          " regime=",IntegerToString(g_scannerRegimeCount),
          " buyCandidates=",IntegerToString(g_scannerBuyCount),
          " sellCandidates=",IntegerToString(g_scannerSellCount),
