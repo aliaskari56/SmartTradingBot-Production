@@ -1,0 +1,76 @@
+# LRN-04 — Crash-consistent adaptive close-event processing design
+
+Status: **DESIGN REQUIRED — IMPLEMENTATION NOT APPROVED**
+
+Scope: `MQL5/Experts/SmartTradingBot_FINAL.mq5`, the existing `SmartTradingBot_FINAL` EA only. This document does not change runtime behavior and does not authorize merging, deployment, or live use.
+
+## Confirmed failure mode
+
+The current `OnTradeTransaction()` close path mutates the accumulated position PnL and adaptive profile aggregates in separate operations. A repeated `DEAL_ENTRY_OUT` / `DEAL_ENTRY_OUT_BY` after the accumulator has been consumed can be interpreted as a new lifecycle; `DEAL_ENTRY_INOUT` also consumes accumulated PnL and records a reversal outcome without a durable per-deal idempotency key. A marker written before or after the existing increments alone is insufficient: a terminal interruption can leave the marker and aggregates inconsistent.
+
+## Required invariants
+
+1. A terminal deal ticket is the stable idempotency key. The same close deal must not add to lifecycle PnL or profile aggregates more than once.
+2. A lifecycle is identified by position identifier plus its opening/reversal boundary. `OUT` and `OUT_BY` may be partial exits; do not commit a lifecycle while the position identifier remains open. `INOUT` closes the old side and starts a new side in the same deal, so the close and new lifecycle must be represented separately.
+3. Duplicate event delivery, restart recovery, and recovery after interruption at every persistence boundary must converge to the same final state.
+4. Do not delete position profile/risk/PnL state until the close outcome is durably committed or can be deterministically reconstructed from history.
+5. Unknown profile or unknown initial risk must not be fabricated. Missing risk excludes the R observation but does not suppress a valid win/loss lifecycle observation.
+6. Concurrent charts/EA instances sharing the same account+magic state must not overwrite one another's aggregate snapshots. A lock must have bounded acquisition/recovery behavior and be released on all exits.
+7. If durable journal creation, write, flush, parsing, or recovery fails, fail closed: do not apply an unjournaled adaptive update; retain recoverable state and emit a clear diagnostic.
+
+## Proposed implementation protocol (not yet implemented)
+
+### A. Deterministic lifecycle reconstruction
+
+For a candidate terminal close/reversal deal, select history by position identifier and build a canonical lifecycle from opening deal through its terminal close boundary. Include each relevant deal's profit, swap, commission and fee exactly once; explicitly define treatment of non-EA/manual exits, hedges, partial closes, and netting reversals. Do not derive the result by incrementing a possibly already-consumed accumulator. Validate deal tickets, entry types, symbol, direction, and chronology before accepting the lifecycle.
+
+### B. Write-ahead journal
+
+Use a versioned, account+magic-scoped journal with one record per terminal close-deal ticket. The record must include at least:
+- schema version and checksum;
+- close deal ticket, position identifier, lifecycle boundary/type;
+- symbol, original direction, resolved profile (or explicit unknown);
+- canonical lifecycle PnL and risk-valid R observation (or explicit unavailable);
+- the deterministic adaptive aggregate update to apply;
+- state `PREPARED` / `COMMITTED`, and enough information to verify replay.
+
+Journal persistence must use a supported MQL5 file API with explicit flush and validated record framing. A truncated final record must be detected and ignored/quarantined, not interpreted as committed. Do not assume that several terminal Global Variables form an atomic transaction.
+
+### C. Serialized, idempotent aggregate application
+
+Acquire an account+magic journal writer lock before reading current aggregate state. For a new close ticket, compute the decayed current values and the exact post-event values for `W`, `L`, `RSUM`, `RCOUNT`, and `T`. Persist and flush a complete `PREPARED` record containing those absolute target values before changing aggregates. Apply target values (not increments), flush terminal Global Variables, then append/flush a `COMMITTED` record. Replaying a prepared record must write the same absolute targets, never add the observation again. If other close events can be committed concurrently, process them under the same lock and in a deterministic order; do not prepare snapshots from stale aggregates.
+
+### D. Recovery and cleanup ordering
+
+On initialization, recover the journal before processing new close events. Validate checksums and record sequence; replay any valid prepared-but-uncommitted target snapshot idempotently, then mark it committed. Verify committed records against applied-state metadata. Only after durable commit may position profile/risk/PnL cleanup proceed. Cleanup itself must be repeatable. If journal and terminal-global state disagree beyond deterministic repair, disable adaptive writes and report the unresolved ticket rather than guessing.
+
+### E. Event handling
+
+`OnTradeTransaction()` should perform bounded intake and schedule/retry close processing through one serialized processor. The processor must deduplicate by deal ticket, reconstruct lifecycle context from history, and distinguish:
+- partial `OUT` / `OUT_BY` while position remains open;
+- final `OUT` / `OUT_BY`;
+- `INOUT` reversal boundary;
+- hedges and non-profiled/manual deals.
+
+A processed-deal marker is an index/cache only, never the source of truth. The durable journal plus deterministic target-state replay is the source of truth.
+
+## Required tests before implementation approval
+
+| Test | Fault/invocation | Required result |
+|---|---|---|
+| LRN-04-A | Same final `OUT` ticket delivered twice in one session | One lifecycle outcome and one aggregate update |
+| LRN-04-B | Duplicate `OUT_BY` ticket | One update only |
+| LRN-04-C | Duplicate `INOUT` reversal ticket | Old lifecycle closes once; new-side state is retained/reconstructed |
+| LRN-04-D | Restart after `PREPARED` flush, before aggregate writes | Recovery applies target snapshot once |
+| LRN-04-E | Restart after some aggregate writes, before `COMMITTED` flush | Recovery converges to target snapshot without incrementing twice |
+| LRN-04-F | Restart after `COMMITTED`, before profile/risk cleanup | No repeated learning update; cleanup completes |
+| LRN-04-G | Truncated/corrupt journal tail | Tail rejected safely; earlier committed records retained |
+| LRN-04-H | Two charts attempt close processing concurrently | Serialization prevents lost updates and duplicate outcomes |
+| LRN-04-I | Partial close followed by final close, with restart between events | Partial PnL included once; lifecycle committed only at the correct boundary |
+| LRN-04-J | Missing initial-risk state | Win/loss observation handled per policy; no invented R sample |
+| LRN-04-K | Journal write/flush/lock failure | No unjournaled profile mutation; actionable diagnostic and retry path |
+| LRN-04-L | Account/magic separation and Strategy Tester namespace | No cross-account, cross-magic, or tester/live state contamination |
+
+## Approval gate
+
+Do not implement this as a marker-only patch. Before source changes, confirm MQL5 file/flush semantics and cross-chart locking behavior against the target terminal, implement the journal as a separately reviewable unit, add repeatable tests for every fault boundary, then compile the exact commit and rerun static/safety CI. Strategy Tester and terminal restart/fault-injection tests remain mandatory. Until those steps pass, LRN-04 remains **NOT FIXED / NOT RUN**, and release remains **BLOCKED / NOT VERIFIED**.
