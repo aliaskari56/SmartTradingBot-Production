@@ -730,6 +730,78 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                  res,
                                  g_stbPendingTrail[idx].slBufferPips);
 
+   // A new M5 extreme can place the raw STOP entry inside the live market
+   // (BUY STOP: at/below Ask; SELL STOP: at/above Bid). That is a normal
+   // trailing geometry conflict, not a reason to abandon the new extreme.
+   // Retry once at the nearest broker-valid market-side boundary. The central
+   // writer still enforces favorable-only entry movement, SL validity and the
+   // immutable risk floor; if those constraints cannot all be met it rejects.
+   if((!resolved || !res.valid) && candleStop &&
+      (res.reason=="BUY_ENTRY_INSIDE_BROKER_ZONE" ||
+       res.reason=="SELL_ENTRY_INSIDE_BROKER_ZONE"))
+     {
+      MqlTick trailTick;
+      double pointSize=SymbolInfoDouble(symbol,SYMBOL_POINT);
+      double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+      double minDistance=TradeMinDistance(symbol);
+
+      if(SymbolInfoTick(symbol,trailTick) &&
+         trailTick.bid>0.0 && trailTick.ask>0.0 &&
+         pointSize>0.0 && minDistance>=0.0)
+        {
+         if(tickSize<=0.0)
+            tickSize=pointSize;
+
+         double spread=MathMax(0.0,trailTick.ask-trailTick.bid);
+         double effectiveOffset=MathMax(g_stbPendingTrail[idx].entryBufferPips*pip,
+                                         spread+minDistance+pointSize);
+         double safeEntry=0.0;
+         double adjustedExtreme=0.0;
+
+         if(orderType==(long)ORDER_TYPE_BUY_STOP)
+           {
+            safeEntry=STB_TickAlignPrice(symbol,
+                                         trailTick.ask+minDistance+2.0*tickSize);
+            adjustedExtreme=safeEntry-effectiveOffset;
+           }
+         else if(orderType==(long)ORDER_TYPE_SELL_STOP)
+           {
+            safeEntry=STB_TickAlignPrice(symbol,
+                                         trailTick.bid-minDistance-2.0*tickSize);
+            adjustedExtreme=safeEntry+effectiveOffset;
+           }
+
+         if(safeEntry>0.0 && adjustedExtreme>0.0)
+           {
+            STBPendingResolution boundaryRes;
+            bool boundaryResolved=
+               STB_ResolvePendingDistance(symbol,
+                                          (ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType,
+                                          adjustedExtreme,
+                                          g_stbPendingTrail[idx].entryBufferPips,
+                                          boundaryRes,
+                                          g_stbPendingTrail[idx].slBufferPips);
+            if(boundaryResolved && boundaryRes.valid)
+              {
+               Print("PENDING_TRAIL_BOUNDARY_ADJUST ticket=",ticket,
+                     " symbol=",symbol,
+                     " type=",STB_PendingTrailTypeName(orderType),
+                     " reason=MARKET_SIDE_BOUNDARY",
+                     " candleExtreme=",DoubleToString(extreme,digits),
+                     " adjustedExtreme=",DoubleToString(adjustedExtreme,digits),
+                     " entry=",DoubleToString(boundaryRes.entry,digits));
+               res=boundaryRes;
+               resolved=true;
+              }
+            else
+              {
+               res=boundaryRes;
+               resolved=false;
+              }
+           }
+        }
+     }
+
    if(!resolved || !res.valid)
    {
       datetime bar=iTime(symbol,PERIOD_M15,1);
