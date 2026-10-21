@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.126"
+#property version   "1.127"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -53,9 +53,10 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = false; // false preserves fixed-lot mode
-input double  InpRiskPercent           = 0.50;  // account equity risk per setup
+input bool    InpUseRiskSizing         = true;  // conservative equity-risk sizing enabled by default
+input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
+input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
 
 input group "=== ADAPTIVE LEARNING ==="
 input bool    InpAdaptiveLearning       = true;
@@ -143,6 +144,49 @@ input double  InpLiveTrailDistancePips   = 30.0;  // legacy live-distance trail 
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
 bool g_modifyWasNoChanges=false;
+
+// Daily equity guard state. This build remains Strategy-Tester-only.
+double g_stbDailyStartEquity=0.0;
+int    g_stbDailyKey=0;
+
+bool STB_DailyLossLimitHit()
+  {
+   MqlDateTime nowParts;
+   datetime now=TimeCurrent();
+   if(now<=0 || !TimeToStruct(now,nowParts))
+      return true; // fail closed when the test clock is invalid
+
+   int dayKey=nowParts.year*10000+nowParts.mon*100+nowParts.day;
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(!MathIsValidNumber(equity) || equity<=0.0)
+      return true; // fail closed on invalid equity
+
+   if(g_stbDailyKey!=dayKey || g_stbDailyStartEquity<=0.0)
+     {
+      g_stbDailyKey=dayKey;
+      g_stbDailyStartEquity=equity;
+      Print("STB DAILY RISK BASELINE day=",dayKey,
+            " equity=",DoubleToString(equity,2),
+            " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2));
+      return false;
+     }
+
+   if(InpMaxDailyLossPercent<=0.0)
+      return false;
+
+   double lossPct=(g_stbDailyStartEquity-equity)/g_stbDailyStartEquity*100.0;
+   if(lossPct+1e-9>=InpMaxDailyLossPercent)
+     {
+      Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
+            " startEquity=",DoubleToString(g_stbDailyStartEquity,2),
+            " equity=",DoubleToString(equity,2),
+            " lossPct=",DoubleToString(lossPct,2),
+            " limitPct=",DoubleToString(InpMaxDailyLossPercent,2),
+            " action=BLOCK_NEW_SETUPS");
+      return true;
+     }
+   return false;
+  }
 
 //==================================================================
 // UNIVERSAL PROFIT LOCK POLICY
@@ -8130,6 +8174,9 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    if(!s.valid)
       return false;
 
+   if(STB_DailyLossLimitHit())
+      return STB_LogPlaceReject(s,"DAILY_EQUITY_LOSS_LIMIT");
+
    if(!STB_EntryLockStillOwned(s.symbol,entryLockToken))
       return STB_LogPlaceReject(s,"ENTRY_LOCK_NOT_OWNED");
 
@@ -10558,12 +10605,13 @@ bool ValidateInputs()
       InpMaxSetupAgeBars<0 ||
       InpPipPointsOverride<0.0 ||
       InpRiskPercent<0.0 ||
-      InpMaxRiskVolume<0.0)
+      InpMaxRiskVolume<0.0 ||
+      InpMaxDailyLossPercent<0.0 || InpMaxDailyLossPercent>10.0)
       return false;
 
    // Risk-sizing mode must not silently become a no-trade mode because a
    // stale .set file supplies zero risk.
-   if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>100.0))
+   if(InpUseRiskSizing && (InpRiskPercent<=0.0 || InpRiskPercent>1.0))
       return false;
 
    // Reject NaN/Infinity for every floating-point input before range checks.
@@ -10680,6 +10728,10 @@ int OnInit()
       Print("STB INIT FAILED: invalid input configuration.");
       return INIT_PARAMETERS_INCORRECT;
      }
+
+   // Establish the initial daily equity baseline; it rolls over on server-date changes.
+   if(STB_DailyLossLimitHit())
+      Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
 // Keep AUTO TRADING state across chart timeframe/symbol reinitialization,
 // but isolate it by account + EA magic to avoid terminal-wide collisions.
