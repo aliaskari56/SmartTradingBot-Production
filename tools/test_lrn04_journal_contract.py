@@ -281,6 +281,11 @@ class JournalContractTests(unittest.TestCase):
         self.assertIn("File append/read/flush/close semantics", proposal)
         self.assertIn("Do not wire this protocol into `OnTradeTransaction()`", proposal)
         self.assertIn("not approved for runtime use", proposal)
+        self.assertIn("not an additional serialized field", proposal)
+        self.assertIn("complete serialized PREPARED record", proposal)
+        self.assertIn("A truncated or malformed final record fails closed by default", proposal)
+        self.assertIn("No automatic truncation, compaction, or migration", proposal)
+        self.assertNotIn("An incomplete final line may be ignored", proposal)
 
 
 def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
