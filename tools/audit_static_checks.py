@@ -436,9 +436,10 @@ def main() -> int:
           (source[source.find("bool ApplyProfitLock("):source.find("void AutoProfitProtection()",
              source.find("bool ApplyProfitLock("))]) if "bool ApplyProfitLock(" in source and
           "void AutoProfitProtection()" in source else False),
-        ("arbitration confirmation rejects missing SL before profit-lock bookkeeping",
+        ("arbitration confirmation rejects missing SL before positive-lock bookkeeping",
          (lambda body: bool(body) and "if(actualSL<=0.0)" in body and
-          body.index("if(actualSL<=0.0)") < body.index("if(hasProfitCandidate)") and
+          body.index("if(actualSL<=0.0)") < body.index("double pip=PipSize(symbol);") and
+          body.index("if(actualSL<=0.0)") < body.index("SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));") and
           "STB SL arbitration verification failed: position has no SL" in body)
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("partial exits preserve SL-lock state; full close and reversal clear it before magic filtering",
@@ -466,12 +467,13 @@ def main() -> int:
              source.find("if(!meetsProfitLockFloor)") and
          source.find("if(!found && unprotectedFallbackFound)") <
              source.find("if(!found || !IsValidSLForPosition(symbol,side,finalSL))")),
-        ("profit-lock state is committed only when the actual SL satisfies the lock target",
+        ("only a broker-confirmed positive actual SL is persisted as locked pips",
          (lambda body: bool(body) and
-          "double lockTargetSL=" in body and
-          "bool lockTargetConfirmed=" in body and
-          "if(lockTargetConfirmed)" in body and
-          body.find("if(lockTargetConfirmed)") < body.find("SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));"))
+          "if(actualSL<=0.0)" in body and
+          "double achieved=(side==POSITION_TYPE_BUY" in body and
+          "if(achieved>0.0)" in body and
+          "SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));" in body and
+          body.index("if(actualSL<=0.0)") < body.index("SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));"))
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
@@ -497,6 +499,28 @@ def main() -> int:
          "CollectSwings(symbol,InpTrailTF,lookback,highs,lows)" in source and
          "movePrice<atr*InpStructuralTrailStartATR" in source and
          "atr*InpStructuralTrailBufferATR" in source),
+        ("adaptive break-even, ATR profit lock and ATR trail share the central arbiter",
+         all(token in source for token in (
+             "bool STB_AdaptiveBreakEvenProtection(",
+             "bool STB_AdaptiveProfitLockProtection(",
+             "bool STB_AdaptiveATRTrail(",
+             'STB_SubmitPositionSL(ticket,target,STB_SL_SRC_PROFIT_PROTECTION,',
+             'STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL,"ADAPTIVE_ATR_TRAIL")',
+             "STB_AdaptiveBreakEvenProtection(ticket);",
+             "STB_AdaptiveProfitLockProtection(ticket);",
+             "STB_AdaptiveATRTrail(ticket);"))),
+        ("adaptive break-even validates cost offset and net PnL before locking",
+         all(token in source for token in (
+             "STB_AdaptiveBreakEvenOffsetPips(ticket,symbol,side,entry,pip)",
+             "PositionNetProfitPips(ticket)<offsetPips",
+             "InpBreakEvenTriggerATR",
+             '"ADAPTIVE_BREAK_EVEN"'))),
+        ("adaptive ATR trail retains a positive buffer beyond entry and routes through arbiter",
+         all(token in source for token in (
+             "candidate<=entry+minimumLockedPrice",
+             "candidate>=entry-minimumLockedPrice",
+             'STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL,"ADAPTIVE_ATR_TRAIL")',
+             "InpAdaptiveTrailDistanceATR"))),
         ("HTF and structural trail floating inputs are finite-checked",
          all(token in source for token in (
              "!MathIsValidNumber(InpHTFZoneMaxGapATR)",
