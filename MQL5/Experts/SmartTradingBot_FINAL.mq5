@@ -10,7 +10,7 @@
 
 CTrade trade;
 
-// Shared quote-integrity gate used at broker-facing execution boundaries.
+// Shared quote-integrity gate for broker-facing order submission and position/pending management writes.
 bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 
 //==================================================================
