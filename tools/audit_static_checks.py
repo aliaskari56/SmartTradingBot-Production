@@ -615,6 +615,31 @@ def main() -> int:
          on_tick.index("STB_ReconcileTradeRegistry();") <
              on_tick.index("STB_RunManagementCycle();") <
              on_tick.index("STB_ScannerRun();")),
+         ("transaction intake fails closed before registering a managed pending order",
+          "STB_ExposureEnsure(trans.order,false)" in trade_intake and
+          "if(exposureIdx<0)" in trade_intake and
+          "STB ORDER INTAKE DEFERRED" in trade_intake and
+          trade_intake.index("if(exposureIdx<0)") <
+              trade_intake.index("STB_GeomStore(trans.order,false") <
+              trade_intake.index('STB_PendingTrailRegister(trans.order,"TRADE_TRANSACTION")')),
+         ("filled managed position handoff is guarded and defers cleanly on exposure allocation failure",
+          "STB_ExposureEnsure(trans.position,true)" in trade_intake and
+          "STB POSITION BASELINE DEFERRED after fill" in trade_intake and
+          "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+          "STB POSITION HANDOFF DEFERRED" in source),
+         ("partial close retains per-ticket lock state while position remains; full close or reversal clears it before magic filtering",
+          "entryType==DEAL_ENTRY_OUT" in on_trade_transaction and
+          "entryType==DEAL_ENTRY_OUT_BY" in on_trade_transaction and
+          "entryType==DEAL_ENTRY_INOUT" in on_trade_transaction and
+          "bool positionRemains=PositionSelectByTicket(closedTicket);" in on_trade_transaction and
+          "if(exposureReversed || !positionRemains)" in on_trade_transaction and
+          "GlobalVariableDel(TicketLockName(closedTicket));" in on_trade_transaction and
+          on_trade_transaction.index("if(exposureReversed || !positionRemains)") <
+              on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+         ("pending trail fill transition is attempted before immediate position handoff",
+          "STB_PendingTrailOnOrderFilled(trans.order);" in trade_intake and
+          trade_intake.index("STB_PendingTrailOnOrderFilled(trans.order);") <
+              trade_intake.index("STB_ManagePositionImmediately(trans.position);")),
         ("pending-order reconciliation fails closed on exposure allocation and preserves known geometry baselines",
          "int exposureIdx=STB_ExposureEnsure(ticket,false);" in reconcile_registry and
          "if(exposureIdx<0)" in reconcile_registry and
