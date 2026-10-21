@@ -10,6 +10,9 @@
 
 CTrade trade;
 
+// Shared quote-integrity gate used at broker-facing execution boundaries.
+bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
+
 //==================================================================
 // INPUTS
 //==================================================================
@@ -1914,6 +1917,17 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
      }
    if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
+
+   MqlTick pendingWriteTick;
+   string pendingQuoteReason="";
+   if(!SymbolInfoTick(symbol,pendingWriteTick) ||
+      !STB_ScannerQuoteValid(pendingWriteTick,pendingQuoteReason))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " reason=",(pendingQuoteReason=="" ? "QUOTE_UNAVAILABLE":pendingQuoteReason));
+      return false;
+     }
 
    //--- P4 central writer: verify symbol, re-read geometry, validate
    //--- broker constraints, monotonic entry direction and risk floor.
@@ -4541,7 +4555,17 @@ bool OneClickHedge()
       return false;
      }
 
-   bool ok=(hedgeType==POSITION_TYPE_BUY)
+   MqlTick hedgeSubmitTick;
+    string hedgeQuoteReason="";
+    if(!SymbolInfoTick(symbol,hedgeSubmitTick) ||
+       !STB_ScannerQuoteValid(hedgeSubmitTick,hedgeQuoteReason))
+      {
+       Print("STB HEDGE REJECTED: quote invalid/stale before submit symbol=",symbol,
+             " reason=",(hedgeQuoteReason=="" ? "QUOTE_UNAVAILABLE":hedgeQuoteReason));
+       return false;
+      }
+
+    bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
 
@@ -5519,7 +5543,18 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
    if(symbol=="" || !STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
-   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
+       MqlTick positionWriteTick;
+    string positionQuoteReason="";
+    if(!SymbolInfoTick(symbol,positionWriteTick) ||
+       !STB_ScannerQuoteValid(positionWriteTick,positionQuoteReason))
+      {
+       Print("STB POSITION MODIFY DEFERRED ticket=",ticket,
+             " operation=",operation,
+             " reason=",(positionQuoteReason=="" ? "QUOTE_UNAVAILABLE":positionQuoteReason));
+       return false;
+      }
+
+if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
       !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
       !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
       !AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
@@ -7922,7 +7957,15 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    if(HasManagedExposure(s.symbol))
       return STB_LogPlaceReject(s,"MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT");
 
-   bool ok=false;
+   MqlTick submitTick;
+    string submitQuoteReason="";
+    if(!SymbolInfoTick(s.symbol,submitTick) ||
+       !STB_ScannerQuoteValid(submitTick,submitQuoteReason))
+       return STB_LogPlaceReject(s,
+          "QUOTE_INVALID_OR_STALE_BEFORE_SUBMIT:"+
+          (submitQuoteReason=="" ? "QUOTE_UNAVAILABLE":submitQuoteReason));
+
+    bool ok=false;
 
    if(s.direction>0)
       ok=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
@@ -8496,7 +8539,16 @@ bool PlaceManualPendingDirection(const int direction)
    string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
       return false;
-   bool ok=(direction>0)
+   MqlTick manualSubmitTick;
+    string manualQuoteReason="";
+    if(!SymbolInfoTick(_Symbol,manualSubmitTick) ||
+       !STB_ScannerQuoteValid(manualSubmitTick,manualQuoteReason))
+      {
+       Print("STB MANUAL PENDING REJECTED: quote invalid/stale symbol=",_Symbol,
+             " reason=",(manualQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualQuoteReason));
+       return false;
+      }
+    bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
@@ -8604,7 +8656,16 @@ bool PlaceManualLimitDirection(const int direction)
                   "|EB"+DoubleToString(effectiveManualOffset,8);
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
       return false;
-   bool ok=(direction>0)
+   MqlTick manualLimitSubmitTick;
+    string manualLimitQuoteReason="";
+    if(!SymbolInfoTick(_Symbol,manualLimitSubmitTick) ||
+       !STB_ScannerQuoteValid(manualLimitSubmitTick,manualLimitQuoteReason))
+      {
+       Print("STB MANUAL LIMIT REJECTED: quote invalid/stale symbol=",_Symbol,
+             " reason=",(manualLimitQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualLimitQuoteReason));
+       return false;
+      }
+    bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
