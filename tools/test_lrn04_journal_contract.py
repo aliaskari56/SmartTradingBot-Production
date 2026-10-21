@@ -455,6 +455,48 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([prepared, committed])
 
+    def test_each_identity_field_must_match_prepared_snapshot(self):
+        identity_fields = (
+            "environment", "server_scope", "account_scope", "magic",
+            "operation_id", "deal_ticket", "position_id", "lifecycle_id",
+            "symbol_code", "direction", "entry_kind",
+        )
+        for field in identity_fields:
+            with self.subTest(field=field):
+                prepared = v2_reference_record(
+                    1, "PREPARED", "op-1", "GENESIS", "digest-1"
+                )
+                committed = v2_reference_record(
+                    2, "COMMITTED", "op-1", "digest-1", "digest-2",
+                    prepared_seq=1, prepared_digest="digest-1",
+                )
+                committed[field] = "DIFFERENT"
+                with self.assertRaises(JournalContractError):
+                    validate_v2_reference_history([prepared, committed])
+
+    def test_each_aggregate_snapshot_field_must_match_prepared(self):
+        snapshot_fields = (
+            "pnl_minor", "risk_state", "r_scaled", "wins_scaled",
+            "losses_scaled", "rsum_scaled", "rcount", "decay_time",
+        )
+        for field in snapshot_fields:
+            with self.subTest(field=field):
+                prepared = v2_reference_record(
+                    1, "PREPARED", "op-1", "GENESIS", "digest-1"
+                )
+                committed = v2_reference_record(
+                    2, "COMMITTED", "op-1", "digest-1", "digest-2",
+                    prepared_seq=1, prepared_digest="digest-1",
+                )
+                committed[field] = "DIFFERENT"
+                with self.assertRaises(JournalContractError):
+                    validate_v2_reference_history([prepared, committed])
+
+    def test_unknown_state_rejected(self):
+        record = v2_reference_record(1, "DONE", "op-1", "GENESIS", "digest-1")
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([record])
+
     def test_operation_id_reuse_rejected(self):
         first = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
         second = v2_reference_record(2, "PREPARED", "op-1", "digest-1", "digest-2")
