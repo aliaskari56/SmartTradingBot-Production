@@ -661,3 +661,35 @@ class JournalV2DecisionChecklistTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JournalV2ProvisionalDecisionRecordTests(unittest.TestCase):
+    def test_provisional_decisions_keep_runtime_approval_explicit(self):
+        root = Path(__file__).resolve().parents[1]
+        doc = (
+            root / "docs" / "LRN04_V2_PROVISIONAL_DECISION_RECORD_20261021.md"
+        ).read_text(encoding="utf-8")
+        for phrase in (
+            "Nothing in this record is approved for runtime use",
+            "CRC32 remains only an accidental-corruption checksum",
+            "Do not guess account-currency precision",
+            "Require immediate adjacency under one writer lock",
+            "Reject by default; preserve source bytes",
+            "fencing generation",
+            "Recovery budget",
+            "schema approval, implementation, runtime verification and release acceptance remain outstanding",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, doc)
+
+    def test_provisional_record_requires_review_and_terminal_evidence(self):
+        root = Path(__file__).resolve().parents[1]
+        doc = (
+            root / "docs" / "LRN04_V2_PROVISIONAL_DECISION_RECORD_20261021.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("APPROVE", doc)
+        self.assertIn("REVISE", doc)
+        self.assertIn("REJECT", doc)
+        self.assertIn("minimum supported terminal build", doc)
+        self.assertIn("controlled non-live terminal evidence", doc)
+        self.assertIn("Do not enable live deployment", doc)
