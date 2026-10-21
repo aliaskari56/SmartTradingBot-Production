@@ -2123,6 +2123,11 @@ bool PreparePendingSetup(Setup &s)
    if(minDist<=0.0)
       minDist=point;
 
+   // Keep STOP entries strictly beyond the broker-distance boundary checked below.
+   double entryStep=SymbolInfoDouble(s.symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(entryStep<=0.0 || entryStep<point)
+      entryStep=point;
+
    double oldEntry=s.entry;
    double oldSL=s.sl;
    double oldTP=s.tp;
@@ -2141,7 +2146,7 @@ bool PreparePendingSetup(Setup &s)
          return false;
         }
 
-      double minEntry=tick.ask+minDist;
+      double minEntry=tick.ask+minDist+entryStep;
       if(s.entry<minEntry)
          s.entry=minEntry;
 
@@ -2221,7 +2226,7 @@ bool PreparePendingSetup(Setup &s)
          return false;
         }
 
-      double maxEntry=tick.bid-minDist;
+      double maxEntry=tick.bid-minDist-entryStep;
       if(s.entry>maxEntry)
          s.entry=maxEntry;
 
