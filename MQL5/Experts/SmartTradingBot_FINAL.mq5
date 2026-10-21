@@ -121,6 +121,18 @@ input bool    InpAllowOneClickHedge      = true;
 input group "=== TRENDLINE ==="
 input double  InpTrendlineTolerancePips = 10.0;
 
+input group "=== ADAPTIVE POSITION PROTECTION ==="
+input ENUM_TIMEFRAMES InpProtectionTF             = PERIOD_M5;   // faster closed-candle ATR for break-even and ATR trailing
+input bool            InpEnableAdaptiveProtection = true;
+input double          InpBreakEvenTriggerATR      = 0.45;         // start protection after a favourable move of 0.45 ATR
+input double          InpBreakEvenMinOffsetPips   = 1.5;          // never target exact entry; add a cost/slippage buffer
+input double          InpBreakEvenCostMultiplier  = 1.50;         // scale observed commission/swap costs conservatively
+input double          InpAdaptiveLockTriggerATR   = 0.85;         // advance from break-even to a meaningful profit lock
+input double          InpAdaptiveLockATR          = 0.20;         // lock at least 0.20 ATR when available
+input double          InpAdaptiveTrailStartATR    = 0.75;         // activate ATR trail after the position has room to breathe
+input double          InpAdaptiveTrailDistanceATR = 0.55;         // keep stop behind executable close-side price
+input double          InpAdaptiveTrailStepATR     = 0.08;         // suppress tiny modifications/noisy stop churn
+
 input group "=== TRAILING ==="
 input ENUM_TIMEFRAMES InpTrailTF        = PERIOD_M15;
 input bool    InpUseStructuralTrailing  = true;  // use confirmed swing structure instead of live-price distance
@@ -5360,6 +5372,15 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
    long freezeLevel=(long)SymbolInfoInteger(symbol,SYMBOL_TRADE_FREEZE_LEVEL);
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double tieTolerance=(tickSize>0.0 ? tickSize*0.25:0.0);
+
+   // Do not let an unplaceable legacy +20-pip floor block a valid, positive
+   // adaptive break-even stop. Existing stops are still monotonic: disabling
+   // this cycle's floor cannot loosen an SL already installed on the server.
+   if(enforceProfitLockFloor &&
+      !STB_IsValidSLForDecisionSnapshot(side,profitLockTarget,decisionTick,
+                                        point,stopsLevel,freezeLevel))
+      enforceProfitLockFloor=false;
+
    bool found=false;
    bool unprotectedFallbackFound=false;
    double unprotectedFallbackSL=0.0;
@@ -5839,10 +5860,6 @@ void STB_FlushPositionSLProposals()
       string symbol=PositionGetString(POSITION_SYMBOL);
       long side=PositionGetInteger(POSITION_TYPE);
       double entry=PositionGetDouble(POSITION_PRICE_OPEN);
-      bool hasProfitCandidate=false;
-      for(int j=0;j<count;j++)
-         if(props[j].valid && props[j].hasSL && props[j].source==STB_SL_SRC_PROFIT_PROTECTION)
-            hasProfitCandidate=true;
       // If no TP exists, calculate a target from the same chosen SL and attach
       // it to this single verified modify request. This prevents a continuously
       // improving trail from starving the missing-TP manager every cycle.
@@ -5878,29 +5895,16 @@ void STB_FlushPositionSLProposals()
       double tolerance=MathMax(point*0.5,tickSize>0.0 ? tickSize*0.5:point*0.5);
       if(side==POSITION_TYPE_BUY && actualSL+tolerance<chosenSL) continue;
       if(side==POSITION_TYPE_SELL && actualSL-tolerance>chosenSL) continue;
-      if(hasProfitCandidate)
+      // Persist every broker-confirmed positive lock, including adaptive
+      // break-even offsets smaller than the legacy +20-pip lock.
+      double pip=PipSize(symbol);
+      if(pip>0.0)
         {
-         double pip=PipSize(symbol);
-         double lockTargetSL=(pip>0.0 ?
-            NormalizePrice(symbol,
-               side==POSITION_TYPE_BUY
-               ? entry+STB_ProfitLockLockPips()*pip
-               : entry-STB_ProfitLockLockPips()*pip):0.0);
-         bool lockTargetConfirmed=
-            (lockTargetSL>0.0 && pip>0.0 &&
-             (side==POSITION_TYPE_BUY
-              ? actualSL+tolerance>=lockTargetSL
-              : actualSL-tolerance<=lockTargetSL));
-         // Do not persist a partial/sub-minimum lock merely because some
-         // profit-protection proposal was queued but lost live validation.
-         if(lockTargetConfirmed)
-           {
-            double achieved=(side==POSITION_TYPE_BUY
-                             ? (actualSL-entry)/pip
-                             : (entry-actualSL)/pip);
-            if(achieved>0.0)
-               SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
-           }
+         double achieved=(side==POSITION_TYPE_BUY
+                          ? (actualSL-entry)/pip
+                          : (entry-actualSL)/pip);
+         if(achieved>0.0)
+            SetLockedPips(ticket,MathMax(GetLockedPips(ticket),achieved));
         }
       Print("STB SL arbitration confirmed ticket=",ticket," source=",chosenSource,
             " SL=",DoubleToString(actualSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
@@ -6073,6 +6077,285 @@ void ManualSavePlus20()
      }
 
    Print("STB SAVE +20 executed for managed positions count=",managed);
+  }
+
+// Cache closed-candle ATR per symbol. The value does not change within the
+// current protection candle, so several manager stages can safely share it.
+struct STBProtectionATRCacheEntry
+  {
+   string symbol;
+   datetime candle;
+   double atr;
+  };
+STBProtectionATRCacheEntry g_stbProtectionATRCache[];
+
+bool STB_GetAdaptiveProtectionATR(const string symbol,double &atrOut)
+  {
+   atrOut=0.0;
+   if(symbol=="" || !SymbolSelect(symbol,true))
+      return false;
+
+   datetime candle=iTime(symbol,InpProtectionTF,0);
+   if(candle<=0)
+      return false;
+
+   for(int i=0;i<ArraySize(g_stbProtectionATRCache);i++)
+     {
+      if(g_stbProtectionATRCache[i].symbol!=symbol)
+         continue;
+      if(g_stbProtectionATRCache[i].candle==candle &&
+         g_stbProtectionATRCache[i].atr>0.0)
+        {
+         atrOut=g_stbProtectionATRCache[i].atr;
+         return true;
+        }
+      break;
+     }
+
+   MqlRates rates[];
+   if(!GetRates(symbol,InpProtectionTF,24,rates))
+      return false;
+   double atr=LocalATR(rates,1,14);
+   if(atr<=0.0 || !MathIsValidNumber(atr))
+      return false;
+
+   int idx=-1;
+   for(int i=0;i<ArraySize(g_stbProtectionATRCache);i++)
+      if(g_stbProtectionATRCache[i].symbol==symbol)
+        {
+         idx=i;
+         break;
+        }
+   if(idx<0)
+     {
+      idx=ArraySize(g_stbProtectionATRCache);
+      if(ArrayResize(g_stbProtectionATRCache,idx+1)!=idx+1)
+         return false;
+      g_stbProtectionATRCache[idx].symbol=symbol;
+     }
+   g_stbProtectionATRCache[idx].candle=candle;
+   g_stbProtectionATRCache[idx].atr=atr;
+   atrOut=atr;
+   return true;
+  }
+
+double STB_AdaptiveBreakEvenOffsetPips(const ulong ticket,
+                                       const string symbol,
+                                       const long side,
+                                       const double entry,
+                                       const double pip)
+  {
+   if(ticket==0 || pip<=0.0 || !PositionSelectByTicket(ticket))
+      return 0.0;
+
+   double volume=PositionGetDouble(POSITION_VOLUME);
+   double pipValue=PositionPipValue(symbol,side,volume,entry);
+   if(pipValue<=0.0 || !MathIsValidNumber(pipValue))
+      return 0.0;
+
+   double commission=MathAbs(PositionCommissionMoney(ticket));
+   double adverseSwap=MathMax(0.0,-PositionGetDouble(POSITION_SWAP));
+   double observedCostPips=(commission+adverseSwap)/pipValue;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+      return 0.0;
+   double spreadPips=MathMax(0.0,(tick.ask-tick.bid)/pip);
+   double costOffset=observedCostPips*MathMax(1.0,InpBreakEvenCostMultiplier)
+                     +spreadPips*0.25;
+   return MathMax(MathMax(0.1,InpBreakEvenMinOffsetPips),costOffset);
+  }
+
+// Early break-even with a cost-aware positive offset. It never replaces the
+// initial SL, never loosens an existing SL, and uses the shared SL arbiter.
+bool STB_AdaptiveBreakEvenProtection(const ulong ticket)
+  {
+   if(!InpEnableAdaptiveProtection || ticket==0 ||
+      !STB_IsProtectionPosition(ticket) || !PositionSelectByTicket(ticket))
+      return false;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long side=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double pip=PipSize(symbol);
+   if(entry<=0.0 || currentSL<=0.0 || pip<=0.0)
+      return false; // wait until the initial SL is broker-confirmed
+
+   double atr=0.0;
+   if(!STB_GetAdaptiveProtectionATR(symbol,atr))
+      return false;
+
+   double offsetPips=STB_AdaptiveBreakEvenOffsetPips(ticket,symbol,side,entry,pip);
+   if(offsetPips<=0.0)
+      return false;
+
+   double movePips=STB_PositionPriceMovePips(ticket);
+   double triggerPrice=MathMax(MathMax(0.1,InpBreakEvenTriggerATR)*atr,
+                               offsetPips*pip*1.5);
+   if(movePips*pip<triggerPrice)
+      return false;
+
+   // Net PnL must already cover the protected buffer; otherwise the SL would
+   // be labelled break-even while known costs still leave the position net red.
+   if(PositionNetProfitPips(ticket)<offsetPips)
+      return false;
+
+   double target=NormalizePrice(symbol,
+      side==POSITION_TYPE_BUY ? entry+offsetPips*pip : entry-offsetPips*pip);
+   if(target<=0.0)
+      return false;
+
+   if(side==POSITION_TYPE_BUY && currentSL>=target)
+      return false;
+   if(side==POSITION_TYPE_SELL && currentSL<=target)
+      return false;
+   if(!IsValidSLForPosition(symbol,side,target))
+      return false;
+
+   bool queued=STB_SubmitPositionSL(ticket,target,STB_SL_SRC_PROFIT_PROTECTION,
+                                    "ADAPTIVE_BREAK_EVEN");
+   if(queued)
+      Print("STB ADAPTIVE BREAK-EVEN QUEUED ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(side==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " movePips=",DoubleToString(movePips,1),
+            " triggerATR=",DoubleToString(InpBreakEvenTriggerATR,2),
+            " offsetPips=",DoubleToString(offsetPips,1),
+            " targetSL=",DoubleToString(target,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+   return queued;
+  }
+
+// The next stage upgrades break-even into an ATR-scaled positive lock. The
+// legacy universal +50/+20 policy remains as a second independent floor.
+bool STB_AdaptiveProfitLockProtection(const ulong ticket)
+  {
+   if(!InpEnableAdaptiveProtection || ticket==0 ||
+      !STB_IsProtectionPosition(ticket) || !PositionSelectByTicket(ticket))
+      return false;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long side=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double pip=PipSize(symbol);
+   if(entry<=0.0 || currentSL<=0.0 || pip<=0.0)
+      return false;
+
+   double atr=0.0;
+   if(!STB_GetAdaptiveProtectionATR(symbol,atr))
+      return false;
+
+   double offsetPips=STB_AdaptiveBreakEvenOffsetPips(ticket,symbol,side,entry,pip);
+   if(offsetPips<=0.0)
+      return false;
+   double lockPips=MathMax(offsetPips,
+                           MathMax(0.0,InpAdaptiveLockATR)*atr/pip);
+   double movePips=STB_PositionPriceMovePips(ticket);
+   double triggerPips=MathMax(MathMax(0.1,InpAdaptiveLockTriggerATR)*atr/pip,
+                              lockPips+MathMax(0.5,offsetPips*0.25));
+   if(movePips<triggerPips || PositionNetProfitPips(ticket)<lockPips)
+      return false;
+
+   double target=NormalizePrice(symbol,
+      side==POSITION_TYPE_BUY ? entry+lockPips*pip : entry-lockPips*pip);
+   if(target<=0.0)
+      return false;
+   if(side==POSITION_TYPE_BUY && currentSL>=target)
+      return false;
+   if(side==POSITION_TYPE_SELL && currentSL<=target)
+      return false;
+   if(!IsValidSLForPosition(symbol,side,target))
+      return false;
+
+   bool queued=STB_SubmitPositionSL(ticket,target,STB_SL_SRC_PROFIT_PROTECTION,
+                                    "ADAPTIVE_PROFIT_LOCK");
+   if(queued)
+      Print("STB ADAPTIVE PROFIT LOCK QUEUED ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(side==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " movePips=",DoubleToString(movePips,1),
+            " triggerPips=",DoubleToString(triggerPips,1),
+            " lockPips=",DoubleToString(lockPips,1),
+            " targetSL=",DoubleToString(target,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+   return queued;
+  }
+
+// ATR trailing complements confirmed swing trailing and remains inside the
+// one-write-per-ticket arbiter. It only accepts a stop beyond the entry-plus-cost
+// buffer, so activating the trail cannot silently move protection back to loss.
+bool STB_AdaptiveATRTrail(const ulong ticket)
+  {
+   if(!InpEnableAdaptiveProtection || ticket==0 ||
+      !STB_IsProtectionPosition(ticket) || !PositionSelectByTicket(ticket))
+      return false;
+
+   string symbol=PositionGetString(POSITION_SYMBOL);
+   long side=PositionGetInteger(POSITION_TYPE);
+   double entry=PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL=PositionGetDouble(POSITION_SL);
+   double pip=PipSize(symbol);
+   if(entry<=0.0 || currentSL<=0.0 || pip<=0.0)
+      return false;
+
+   double atr=0.0;
+   if(!STB_GetAdaptiveProtectionATR(symbol,atr))
+      return false;
+
+   double movePips=STB_PositionPriceMovePips(ticket);
+   if(movePips*pip<MathMax(0.1,InpAdaptiveTrailStartATR)*atr)
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+      return false;
+   double minDist=TradeMinDistance(symbol);
+   if(minDist<=0.0)
+      return false;
+
+   double offsetPips=STB_AdaptiveBreakEvenOffsetPips(ticket,symbol,side,entry,pip);
+   if(offsetPips<=0.0 || PositionNetProfitPips(ticket)<offsetPips)
+      return false;
+   double minimumLockedPrice=offsetPips*pip;
+   double distance=MathMax(0.1,InpAdaptiveTrailDistanceATR)*atr;
+   double candidate=0.0;
+
+   if(side==POSITION_TYPE_BUY)
+     {
+      candidate=NormalizePrice(symbol,MathMin(tick.bid-distance,tick.bid-minDist));
+      if(candidate<=entry+minimumLockedPrice || candidate<=currentSL)
+         return false;
+      double step=MathMax(MathMax(0.0,InpTrailStepPips)*pip,
+                          MathMax(0.01,InpAdaptiveTrailStepATR)*atr);
+      if(candidate-currentSL+SymbolInfoDouble(symbol,SYMBOL_POINT)*0.1<step)
+         return false;
+     }
+   else if(side==POSITION_TYPE_SELL)
+     {
+      candidate=NormalizePrice(symbol,MathMax(tick.ask+distance,tick.ask+minDist));
+      if(candidate<=0.0 || candidate>=entry-minimumLockedPrice || candidate>=currentSL)
+         return false;
+      double step=MathMax(MathMax(0.0,InpTrailStepPips)*pip,
+                          MathMax(0.01,InpAdaptiveTrailStepATR)*atr);
+      if(currentSL-candidate+SymbolInfoDouble(symbol,SYMBOL_POINT)*0.1<step)
+         return false;
+     }
+   else
+      return false;
+
+   if(candidate<=0.0 || !IsValidSLForPosition(symbol,side,candidate))
+      return false;
+
+   bool queued=STB_SubmitPositionSL(ticket,candidate,STB_SL_SRC_TRAIL,"ADAPTIVE_ATR_TRAIL");
+   if(queued)
+      Print("STB ADAPTIVE ATR TRAIL QUEUED ticket=",ticket,
+            " symbol=",symbol,
+            " side=",(side==POSITION_TYPE_BUY ? "BUY":"SELL"),
+            " movePips=",DoubleToString(movePips,1),
+            " atr=",DoubleToString(atr,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " distanceATR=",DoubleToString(InpAdaptiveTrailDistanceATR,2),
+            " SL=",DoubleToString(candidate,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+   return queued;
   }
 
 // Rate-limit structural-trailing WAIT messages per position.
@@ -7386,8 +7669,8 @@ void ManagePositions()
       EnsureInitialSL(ticket);
      }
 
-   AutoProfitProtection();
-
+   // Stage 1: early cost-aware break-even and ATR-scaled profit lock.
+   // Both share the existing same-cycle resolver; neither writes directly.
    for(int i=PositionsTotal()-1;i>=0;i--)
      {
       ulong ticket=PositionGetTicket(i);
@@ -7397,6 +7680,24 @@ void ManagePositions()
       if(symbol=="" || !SymbolSelect(symbol,true) ||
          !STB_SymbolManagementOwnedVerified(symbol))
          continue;
+      STB_AdaptiveBreakEvenProtection(ticket);
+      STB_AdaptiveProfitLockProtection(ticket);
+     }
+
+   AutoProfitProtection();
+
+   // Stage 2: ATR distance trailing runs alongside confirmed structural trail.
+   // Arbitration retains the strongest valid stop and permits only one write.
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !STB_IsProtectionPosition(ticket))
+         continue;
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      if(symbol=="" || !SymbolSelect(symbol,true) ||
+         !STB_SymbolManagementOwnedVerified(symbol))
+         continue;
+      STB_AdaptiveATRTrail(ticket);
       TrailPositionByLivePrice(ticket);
      }
 
@@ -10299,12 +10600,30 @@ bool ValidateInputs()
       !MathIsValidNumber(InpTrailStepPips) ||
       !MathIsValidNumber(InpStructuralTrailStartATR) ||
       !MathIsValidNumber(InpStructuralTrailBufferATR) ||
+      !MathIsValidNumber(InpBreakEvenTriggerATR) ||
+      !MathIsValidNumber(InpBreakEvenMinOffsetPips) ||
+      !MathIsValidNumber(InpBreakEvenCostMultiplier) ||
+      !MathIsValidNumber(InpAdaptiveLockTriggerATR) ||
+      !MathIsValidNumber(InpAdaptiveLockATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailStartATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailDistanceATR) ||
+      !MathIsValidNumber(InpAdaptiveTrailStepATR) ||
       !MathIsValidNumber(InpRiskPercent) ||
       !MathIsValidNumber(InpMaxRiskVolume) ||
       !MathIsValidNumber(InpBaseLots) ||
       !MathIsValidNumber(InpTrendLotMultiplier) ||
       !MathIsValidNumber(InpUniversalLotMultiplier)
      )
+      return false;
+
+   if(InpBreakEvenTriggerATR<0.1 || InpBreakEvenTriggerATR>3.0 ||
+      InpBreakEvenMinOffsetPips<0.0 || InpBreakEvenMinOffsetPips>1000.0 ||
+      InpBreakEvenCostMultiplier<1.0 || InpBreakEvenCostMultiplier>5.0 ||
+      InpAdaptiveLockTriggerATR<0.1 || InpAdaptiveLockTriggerATR>5.0 ||
+      InpAdaptiveLockATR<0.0 || InpAdaptiveLockATR>3.0 ||
+      InpAdaptiveTrailStartATR<0.1 || InpAdaptiveTrailStartATR>5.0 ||
+      InpAdaptiveTrailDistanceATR<0.1 || InpAdaptiveTrailDistanceATR>5.0 ||
+      InpAdaptiveTrailStepATR<0.01 || InpAdaptiveTrailStepATR>2.0)
       return false;
 
    if(InpScannerMinQuality<0.0 ||
