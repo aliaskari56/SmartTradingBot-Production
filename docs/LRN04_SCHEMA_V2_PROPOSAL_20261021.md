@@ -14,7 +14,7 @@
 
 ## Proposed record envelope
 
-Keep one canonical ASCII line per record, with LF terminator, a fixed field count, a checksum over the exact body bytes, and a maximum encoded size. The exact field order must be pinned by golden vectors before implementation.
+Keep one canonical ASCII line per record, with LF terminator, exactly **26 serialized fields including the checksum**, a checksum over the exact body bytes, and a maximum encoded size. The exact field order must be pinned by golden vectors before implementation.
 
 Required fields:
 
@@ -37,13 +37,15 @@ Required fields:
 17. `pnl_minor`: signed integer in account-currency minor units; currency precision conversion must be defined from terminal metadata and validated for overflow.
 18. `risk_state`: `KNOWN`, `UNKNOWN`, or `NOT_APPLICABLE`.
 19. `r_scaled`: signed fixed-point R value when risk is known; otherwise a reserved canonical sentinel.
-20. `wins_scaled`, `losses_scaled`: fixed-point absolute post-event aggregate values.
-21. `rsum_scaled`, `rcount`: fixed-point absolute post-event R aggregate values.
-22. `decay_time`: canonical Unix timestamp in seconds, with explicit zero/sentinel semantics.
-23. `previous_record_digest`: digest of the immediately preceding valid record, or a fixed genesis token for the first record.
-24. `checksum`: fixed-width uppercase hexadecimal checksum over all preceding fields and separators.
+20. `wins_scaled`: fixed-point absolute post-event wins aggregate.
+21. `losses_scaled`: fixed-point absolute post-event losses aggregate.
+22. `rsum_scaled`: fixed-point absolute post-event R-sum aggregate.
+23. `rcount`: unsigned canonical count of valid R samples in the post-event aggregate.
+24. `decay_time`: canonical Unix timestamp in seconds, with explicit zero/sentinel semantics.
+25. `previous_record_digest`: digest of the immediately preceding valid record, or a fixed genesis token for the first record.
+26. `checksum`: fixed-width uppercase hexadecimal checksum over fields 1–25 and their separators.
 
-This is a candidate field list, not a claim that the present V1 record already contains these fields.
+The 26 fields above are the proposed serialized count, including the final checksum. This is a candidate field list, not a claim that the present V1 record already contains these fields.
 
 ## State-machine rules
 
