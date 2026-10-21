@@ -74,3 +74,19 @@ A processed-deal marker is an index/cache only, never the source of truth. The d
 ## Approval gate
 
 Do not implement this as a marker-only patch. Before source changes, confirm MQL5 file/flush semantics and cross-chart locking behavior against the target terminal, implement the journal as a separately reviewable unit, add repeatable tests for every fault boundary, then compile the exact commit and rerun static/safety CI. Strategy Tester and terminal restart/fault-injection tests remain mandatory. Until those steps pass, LRN-04 remains **NOT FIXED / NOT RUN**, and release remains **BLOCKED / NOT VERIFIED**.
+
+
+## Codebase feasibility audit (2026-10-21)
+
+Inspection of the current EA confirms the following implementation constraints:
+
+- The EA already uses `FileOpen`, `FileWrite`, `FileFlush`, and `FileClose` for adaptive CSV logging. This proves those APIs are already used by this source, but the CSV logger is append-only telemetry and is **not** a journal: it does not validate records, persist target aggregate snapshots, or recover interrupted updates.
+- The existing cross-chart broker-writer lease uses `GlobalVariableSetOnCondition` (CAS), but its ownership key is scoped by purpose and symbol and is designed for broker writes. It is not an account+magic-wide learning-journal lock and must not be repurposed without a separate lock contract.
+- The existing entry lock uses a short time-based token with a chart-derived fractional tag. It is also not an appropriate durable journal lock.
+- Existing adaptive profile aggregates are stored as separate terminal Global Variables. Therefore the current implementation does not provide an atomic multi-key commit for `W`, `L`, `RSUM`, `RCOUNT`, and `T`.
+- Current source uses terminal Global Variables for position risk/profile/PnL state. The journal must define restart recovery and cleanup ordering across those state keys, not only deduplicate the final deal ticket.
+- The current CI compile/static checks do not substitute for terminal-level restart and injected-failure tests. A passing compile cannot prove crash consistency.
+
+### Implementation consequence
+
+Do not wire the existing CSV logger into the close-event path as if it were a transaction log. Implement a separate versioned journal abstraction with validated records and explicit recovery, and use a dedicated lock namespace. Verify file location/namespace separation between live terminal and Strategy Tester before writing code. Add deterministic unit-style checks for record encoding/checksum/truncated tails where feasible, plus terminal integration tests for restart/fault boundaries. Keep the adaptive learner fail-closed if journal recovery cannot be proven safe.
