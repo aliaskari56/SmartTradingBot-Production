@@ -561,6 +561,12 @@ def main() -> int:
          trade_intake.index("STB_ExposureEnsure(trans.position,true)") <
          trade_intake.index("STB_GeomStore(trans.position,true,") <
          trade_intake.index("STB_ManagePositionImmediately(trans.position);")),
+        ("deal-add handoff safely defers unavailable positions to periodic terminal reconciliation",
+         "if(trans.position>0 && PositionSelectByTicket(trans.position))" in trade_intake and
+         "STB_ManagePositionImmediately(trans.position);" in trade_intake and
+         "STB_ReconcileTradeRegistry();" in on_timer and
+         on_timer.index("STB_ReconcileTradeRegistry();") <
+             on_timer.index("STB_RunManagementCycle();")),
         ("immediate fill management is reentrancy-guarded and defers nested cycles",
          "if(g_stbManagementCycleActive)" in management_cycle and
          "g_stbManagementCyclePending=true;" in management_cycle and
