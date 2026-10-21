@@ -146,7 +146,7 @@ class JournalContractTests(unittest.TestCase):
         for macro_name, expected_index in macro_slots:
             self.assertRegex(
                 source,
-                rf"#define STB_LRN04_F_{macro_name}\\s+{expected_index}\\b",
+                rf"#define STB_LRN04_F_{macro_name}\s+{expected_index}\b",
             )
 
     def test_torn_tail_rejected(self):
