@@ -167,6 +167,8 @@ def main() -> int:
         source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
     management_cycle = source_region(
         source, "void STB_RunManagementCycle()", "void OnTick()")
+    reconcile_registry = source_region(
+        source, "void STB_ReconcileTradeRegistry()", "void STB_ManagePositionImmediately")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
     indicator_cache = source_region(
@@ -548,6 +550,26 @@ def main() -> int:
          place_setup.index("trade.BuyStop(volume,s.entry") and
          place_setup.index("MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT") <
          place_setup.index("bool ok=false;")),
+        ("startup recovery rebuilds pending trails and reconciles exposure before management and scanner",
+         all(token in on_init for token in (
+             "STB_PendingTrailRebuildFromTerminal();",
+             "STB_ReconcileTradeRegistry();",
+             "STB_RunManagementCycle();",
+             "STB_ScannerRun();")) and
+         on_init.index("STB_PendingTrailRebuildFromTerminal();") <
+         on_init.index("STB_ReconcileTradeRegistry();") <
+         on_init.index("STB_RunManagementCycle();") <
+         on_init.index("STB_ScannerRun();")),
+        ("pending-order reconciliation fails closed on exposure allocation and preserves known geometry baselines",
+         "int exposureIdx=STB_ExposureEnsure(ticket,false);" in reconcile_registry and
+         "if(exposureIdx<0)" in reconcile_registry and
+         "STB ORDER RECONCILE DEFERRED" in reconcile_registry and
+         "STB_PendingTrailRegister(ticket,\"RECONCILE\");" in reconcile_registry and
+         "if(g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry),
+        ("position reconciliation seeds only an unknown geometry baseline",
+         "int exposureIdx=STB_ExposureEnsure(ticket,true);" in reconcile_registry and
+         "if(exposureIdx>=0 && g_stbExposure[exposureIdx].entry<=0.0)" in reconcile_registry and
+         "STB_GeomStore(ticket,true," in reconcile_registry),
     ]
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
