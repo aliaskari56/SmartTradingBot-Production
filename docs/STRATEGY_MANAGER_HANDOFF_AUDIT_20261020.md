@@ -411,3 +411,14 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 
 
 **Audit follow-up:** The first run of the newly extended static audit exposed an incorrect test-region boundary (the assertion searched an empty source region), not a source-code failure. The region boundary was corrected in audit-script commit `c29e5cf754fe940529e9c58b0e0f0f5c2fb837f9`. The corrected static audit passed on run `39532316384`; the later documentation-only head `5485581f02d5c1f8e3b6e1c17311c5ee09099bbc` also passed static audit on run `39532326754`. This is source-level coverage only, not runtime proof.
+
+
+### STR-A61 — Startup/reattach recovery regression coverage
+
+**Review scope:** Recovery ordering when the EA initializes or reattaches with existing positions and pending orders.
+
+**Source observations:** `OnInit()` rebuilds pending-trail state from terminal orders, reconciles the per-ticket exposure/geometry registry, runs the management cycle, and only then starts a fresh scanner cycle. Pending-order reconciliation defers trail registration when exposure allocation fails and seeds geometry only for unknown baselines; position reconciliation similarly seeds only unknown geometry, preserving an already-known baseline against accidental overwrite.
+
+**Change:** Added three static regression assertions for startup ordering, fail-closed pending-order reconciliation, and position baseline preservation. Audit-script commit: `fee9cc308931ee1e8f35ed09a763f4cbe72ef19a`. The updated static audit passed on run `39532544020`; the safety-default check passed on run `39532544001`. These results validate source-level guardrails only.
+
+**Source/compile status:** Canonical EA file remains `MQL5/Experts/SmartTradingBot_FINAL.mq5`, blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`; no EA source changes were made. A MetaEditor compile on the same EA source passed on run `39532360739` (documentation/test-script commits do not alter the EA source). A newer compile triggered by the audit-script commit was still running at the time of this note; check its final result separately. Runtime reattach/restart tests and allocation fault injection remain **NOT RUN**. Release status remains **NOT VERIFIED**.
