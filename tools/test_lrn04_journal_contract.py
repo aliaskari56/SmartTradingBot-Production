@@ -493,6 +493,28 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([first, broken_chain])
 
+    def test_same_event_key_cannot_be_committed_under_new_operation_id(self):
+        prepared1 = v2_reference_record(
+            1, "PREPARED", "op-1", "GENESIS", "digest-1"
+        )
+        committed1 = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        # Same environment/account/magic/deal/lifecycle/entry key, but a new
+        # operation ID and otherwise valid sequential PREPARED/COMMITTED pair.
+        prepared2 = v2_reference_record(
+            3, "PREPARED", "op-2", "digest-2", "digest-3"
+        )
+        committed2 = v2_reference_record(
+            4, "COMMITTED", "op-2", "digest-3", "digest-4",
+            prepared_seq=3, prepared_digest="digest-3",
+        )
+        with self.assertRaisesRegex(JournalContractError, "duplicate committed event key"):
+            validate_v2_reference_history(
+                [prepared1, committed1, prepared2, committed2]
+            )
+
     def test_duplicate_commit_rejected(self):
         prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
         committed = v2_reference_record(
