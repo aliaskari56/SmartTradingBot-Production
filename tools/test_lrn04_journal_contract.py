@@ -269,5 +269,159 @@ class JournalContractTests(unittest.TestCase):
         self.assertEqual(names[-1], "checksum")
 
 
+def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
+    """Validate proposed V2 state transitions in memory; not an MQL5 journal."""
+    if not records:
+        return
+    prepared_by_seq: dict[int, dict[str, str]] = {}
+    committed_keys: set[tuple[str, ...]] = set()
+    operation_states: dict[str, str] = {}
+    previous_digest = "GENESIS"
+    previous_seq = 0
+
+    identity_fields = (
+        "environment", "server_scope", "account_scope", "magic",
+        "operation_id", "deal_ticket", "position_id", "lifecycle_id",
+        "symbol_code", "direction", "entry_kind",
+    )
+    snapshot_fields = (
+        "pnl_minor", "risk_state", "r_scaled", "wins_scaled",
+        "losses_scaled", "rsum_scaled", "rcount", "decay_time",
+    )
+
+    for record in records:
+        seq = int(record["record_seq"])
+        if seq != previous_seq + 1:
+            raise JournalContractError("sequence gap or reuse")
+        if record["previous_record_digest"] != previous_digest:
+            raise JournalContractError("previous-record digest mismatch")
+        digest = record.get("record_digest", "")
+        if not digest:
+            raise JournalContractError("missing externally computed record digest")
+
+        state = record["state"]
+        op_id = record["operation_id"]
+        if state == "PREPARED":
+            if op_id in operation_states:
+                raise JournalContractError("operation ID reused")
+            if record["prepared_seq"] != "0" or record["prepared_digest"] != "GENESIS":
+                raise JournalContractError("invalid PREPARED reference fields")
+            operation_states[op_id] = "PREPARED"
+            prepared_by_seq[seq] = record
+        elif state == "COMMITTED":
+            if operation_states.get(op_id) != "PREPARED":
+                raise JournalContractError("orphan or duplicate COMMITTED")
+            ref_seq = int(record["prepared_seq"])
+            prepared = prepared_by_seq.get(ref_seq)
+            if prepared is None or ref_seq >= seq:
+                raise JournalContractError("invalid PREPARED sequence reference")
+            if record["prepared_digest"] != prepared["record_digest"]:
+                raise JournalContractError("PREPARED digest mismatch")
+            for name in identity_fields:
+                if record[name] != prepared[name]:
+                    raise JournalContractError(f"event identity mismatch: {name}")
+            for name in snapshot_fields:
+                if record[name] != prepared[name]:
+                    raise JournalContractError(f"aggregate snapshot mismatch: {name}")
+            key = tuple(record[name] for name in (
+                "environment", "server_scope", "account_scope", "magic",
+                "deal_ticket", "lifecycle_id", "entry_kind",
+            ))
+            if key in committed_keys:
+                raise JournalContractError("duplicate committed event key")
+            committed_keys.add(key)
+            operation_states[op_id] = "COMMITTED"
+        else:
+            raise JournalContractError("unsupported state")
+
+        previous_seq = seq
+        previous_digest = digest
+
+
+def v2_reference_record(
+    seq: int, state: str, operation_id: str, previous_digest: str,
+    record_digest: str, prepared_seq: int = 0, prepared_digest: str = "GENESIS",
+) -> dict[str, str]:
+    """Small synthetic record for state-machine tests, not a serialized V2 record."""
+    record = {
+        "record_seq": str(seq), "state": state, "environment": "TESTER",
+        "server_scope": "BROKER1", "account_scope": "ACCT1", "magic": "123",
+        "operation_id": operation_id, "prepared_seq": str(prepared_seq),
+        "prepared_digest": prepared_digest, "deal_ticket": "9001",
+        "position_id": "8001", "lifecycle_id": "2", "symbol_code": "EURUSD.a",
+        "direction": "BUY", "entry_kind": "OUT", "pnl_minor": "125",
+        "risk_state": "KNOWN", "r_scaled": "100", "wins_scaled": "2",
+        "losses_scaled": "1", "rsum_scaled": "300", "rcount": "3",
+        "decay_time": "1792540800", "previous_record_digest": previous_digest,
+        "record_digest": record_digest,
+    }
+    return record
+
+
+class JournalV2ReferenceStateTests(unittest.TestCase):
+    def test_valid_prepared_committed_pair(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        validate_v2_reference_history([prepared, committed])
+
+    def test_orphan_commit_rejected(self):
+        committed = v2_reference_record(
+            1, "COMMITTED", "op-1", "GENESIS", "digest-1",
+            prepared_seq=0, prepared_digest="GENESIS",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([committed])
+
+    def test_mismatched_prepared_digest_rejected(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="wrong-digest",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, committed])
+
+    def test_snapshot_mismatch_rejected(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        committed["wins_scaled"] = "999"
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, committed])
+
+    def test_sequence_gap_and_chain_mismatch_rejected(self):
+        first = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        gap = v2_reference_record(
+            3, "COMMITTED", "op-1", "digest-1", "digest-3",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([first, gap])
+        broken_chain = v2_reference_record(
+            2, "COMMITTED", "op-1", "not-digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([first, broken_chain])
+
+    def test_duplicate_commit_rejected(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        duplicate = v2_reference_record(
+            3, "COMMITTED", "op-1", "digest-2", "digest-3",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, committed, duplicate])
+
+
 if __name__ == "__main__":
     unittest.main()
