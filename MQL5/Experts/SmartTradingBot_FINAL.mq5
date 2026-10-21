@@ -8975,7 +8975,7 @@ bool PlaceManualPendingDirection(const int direction)
    double volume=0.0;
    if(InpUseRiskSizing)
      {
-      Setup manualRiskSetup;
+      Setup manualRiskSetup={};
       manualRiskSetup.symbol=_Symbol;
       manualRiskSetup.direction=direction;
       manualRiskSetup.entry=entry;
@@ -9121,7 +9121,7 @@ bool PlaceManualLimitDirection(const int direction)
    double volume=0.0;
    if(InpUseRiskSizing)
      {
-      Setup manualRiskSetup;
+      Setup manualRiskSetup={};
       manualRiskSetup.symbol=_Symbol;
       manualRiskSetup.direction=direction;
       manualRiskSetup.entry=entry;
