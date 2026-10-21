@@ -1,6 +1,6 @@
 # Release Acceptance Test Matrix — SmartTradingBot FINAL
-Date: 2026-10-09
-Branch: `audit/expose-cleaned-source-20261009`
+Date: 2026-10-21
+Branch: `fix/structure-first-fvg-trailing-20261020`
 Scope: test plan for the current source; this document records required tests, not tests already executed.
 
 ## Release rule
@@ -82,7 +82,7 @@ Do not label the build production-ready until the exact source revision has a re
 
 ## G. Evidence to attach before approval
 
-- [ ] Exact source commit and raw-file SHA-256 (current Git blob ID: `6bca33bc8e0c961f317b0828e46faf7a6b9929b4`)
+- [ ] Exact source commit and raw-file SHA-256, verified against the provenance manifest for the exact source revision under review
 - [ ] MetaEditor version/build and complete compile log
 - [ ] EX5 SHA-256 and source-to-binary provenance manifest
 - [ ] Strategy Tester configuration, data range, modelling mode, report and journal
@@ -140,7 +140,7 @@ All rows below are **functional tests**. Passing CI compilation or static string
 | UNIV-01 | Manual/mobile universal management | Create positions/pending orders from phone, terminal UI and EA on symbols not currently selected in Market Watch | Manager subscribes to exposure symbols, obtains the symbol lease, and adds missing protection independent of EA entry AUTO; existing SL/TP are preserved/tightened only under the documented rules | NOT RUN |
 | UNIV-02 | Internal AUTO vs terminal permission | Disable the EA's internal AUTO while the terminal's global Algo Trading remains enabled; separately disable global Algo Trading | Internal AUTO disables new EA entries but exposure management remains enabled; global terminal trading permission may block broker modifications and is reported rather than bypassed | NOT RUN |
 
-## Current branch checkpoint — 2026-10-20
+## Historical branch checkpoint — 2026-10-20 (superseded by the refreshed evidence summary above)
 
 - Production `main` remains at `578621216f2f62ade33ab8e341a506e253b22bbf`. All changes are confined to `fix/structure-first-fvg-trailing-20261020`; nothing was merged to `main` or deployed to the active terminal.
 - Latest source-code commit: `5b14166acb84c367bb02b4616a348c0816ab4cc8`; source blob `c8a09e3a05f7ac8aea37ccd421a7aa1012191ffd`.
