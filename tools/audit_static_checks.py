@@ -210,7 +210,7 @@ def main() -> int:
           "g_stbPendingTrail[idx].active=false;" in body)
          (source_region(trail_source,
                         "bool STB_PendingTrailManageOne(",
-                        "int STB_PendingTrailProcess(")),
+                        "int STB_PendingTrailProcess("))),
         ("partial pending fills retain trailing only while a managed remainder remains",
          bool(trail_source) and
          "DEAL_ADD can represent a partial fill" in trail_source and
