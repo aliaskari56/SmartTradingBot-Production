@@ -178,7 +178,7 @@ class JournalContractTests(unittest.TestCase):
         raw = encode_record(sample())
         with self.assertRaises(JournalContractError):
             decode_record(raw[:-1] + bytes((13, 10)))
-        bad = raw[:-9] + b"abcdef12\\n"
+        bad = raw[:-9] + b"abcdef12\n"
         with self.assertRaises(JournalContractError):
             decode_record(bad)
 
