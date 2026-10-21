@@ -176,6 +176,16 @@ bool STB_DailyRiskPersist(const int dayKey,const double startEquity,
    return true;
   }
 
+void STB_DailyRiskClearState()
+  {
+   GlobalVariableDel(STB_DailyRiskStateName("DAY"));
+   GlobalVariableDel(STB_DailyRiskStateName("EQ"));
+   GlobalVariableDel(STB_DailyRiskStateName("LOG"));
+   g_stbDailyKey=0;
+   g_stbDailyStartEquity=0.0;
+   g_stbDailyLimitLogged=false;
+  }
+
 bool STB_DailyLossLimitHit()
   {
    MqlDateTime nowParts;
@@ -11009,6 +11019,16 @@ double OnTester()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+
+   // Keep the daily baseline through ordinary EA reinitializations, but clear
+   // tester-agent state when this instance is finally unloaded. This prevents
+   // a completed test's baseline from contaminating a later test on the same agent.
+   if(MQLInfoInteger(MQL_TESTER) &&
+      (reason==REASON_PROGRAM || reason==REASON_REMOVE ||
+       reason==REASON_CHARTCLOSE || reason==REASON_CLOSE ||
+       reason==REASON_INITFAILED))
+      STB_DailyRiskClearState();
+
    STB_ReleaseAllSymbolManagement(); // P10 release every symbol lease owned by this chart
 
    ObjectDelete(0,g_prefix+"BUY_STOP");
