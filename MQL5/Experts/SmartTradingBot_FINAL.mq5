@@ -4495,6 +4495,12 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
+   if(STB_DailyLossLimitHit())
+     {
+      Print("STB HEDGE REJECTED: daily equity loss limit active.");
+      return false;
+     }
+
    if(!InpAllowOneClickHedge || !IsHedgingAccount() ||
       !STB_TradeEnvironmentAllowed())
       return false;
@@ -8832,6 +8838,12 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
+   if(STB_DailyLossLimitHit())
+     {
+      Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
+      return false;
+     }
+
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
       return false;
@@ -8948,6 +8960,12 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
+   if(STB_DailyLossLimitHit())
+     {
+      Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
+      return false;
+     }
+
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
       return false;
