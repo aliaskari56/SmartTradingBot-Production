@@ -596,14 +596,13 @@ def main() -> int:
          on_timer.index("STB_ReconcileTradeRegistry();") <
              on_timer.index("STB_RunManagementCycle();") <
              on_timer.index("STB_ScannerRun();")),
-        ("tick recovery reconciles after a new M15 bar without bypassing the central management cycle",
+        ("tick recovery reconciles a newly detected M15-bar exposure before the central management cycle",
          "STB_RunManagementCycle();" in on_tick and
          "bool m15Bar=NewM15Bar();" in on_tick and
          "if(m15Bar)" in on_tick and
          on_tick.index("STB_ReconcileTradeRegistry();") <
-             on_tick.index("STB_ScannerRun();") and
-         on_tick.index("STB_RunManagementCycle();") <
-             on_tick.index("STB_ReconcileTradeRegistry();")),
+             on_tick.index("STB_RunManagementCycle();") <
+             on_tick.index("STB_ScannerRun();")),
         ("pending-order reconciliation fails closed on exposure allocation and preserves known geometry baselines",
          "int exposureIdx=STB_ExposureEnsure(ticket,false);" in reconcile_registry and
          "if(exposureIdx<0)" in reconcile_registry and
