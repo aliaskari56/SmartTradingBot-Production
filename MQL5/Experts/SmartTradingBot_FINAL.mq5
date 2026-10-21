@@ -1748,9 +1748,10 @@ bool GetRates(const string symbol,
    if(count<=0 || !SymbolSelect(symbol,true))
       return false;
 
-   if(!SymbolIsSynchronized(symbol))
-      return false;
-
+   // Do not block the history request on the symbol-wide synchronization flag.
+   // CopyRates initiates/continues downloading or building the requested
+   // symbol/timeframe series. Keep the full-count requirement so incomplete
+   // history is never consumed by the structure and entry calculations.
    ArraySetAsSeries(rates,true);
 
    int copied=CopyRates(symbol,tf,0,count,rates);
