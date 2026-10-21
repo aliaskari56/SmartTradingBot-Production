@@ -601,8 +601,14 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    if(candleStop)
      {
       datetime closedBar=iTime(symbol,PERIOD_M5,1);
-      if(closedBar<=0 ||
-         closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
+      if(closedBar<=0)
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=M5_CLOSED_BAR_UNAVAILABLE");
+         return true;
+        }
+      if(closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
 
       double barOpen=iOpen(symbol,PERIOD_M5,1);
@@ -621,6 +627,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          if(barClose>=barOpen)
            {
             g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+            Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+                  " type=BUY_STOP reason=M5_BAR_NOT_BEARISH",
+                  " open=",DoubleToString(barOpen,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                  " close=",DoubleToString(barClose,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
             return true; // this candle cannot move BUY STOP down
            }
          extreme=barLow;
@@ -630,6 +640,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          if(barClose<=barOpen)
            {
             g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
+            Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+                  " type=SELL_STOP reason=M5_BAR_NOT_BULLISH",
+                  " open=",DoubleToString(barOpen,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                  " close=",DoubleToString(barClose,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
             return true; // this candle cannot move SELL STOP up
            }
          extreme=barHigh;
@@ -661,6 +675,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(candleStop && actionableClosedBar>0)
          g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
 
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=NO_NEW_EXTREME",
+            " extreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
       return true;
@@ -727,6 +746,12 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       MathAbs(prop.sl-currentSL)<step)
      {
       g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=STEP_GATE",
+            " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
+            " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
+            " stepPips=",DoubleToString(InpTrailStepPips,2));
       return true;
      }
 
