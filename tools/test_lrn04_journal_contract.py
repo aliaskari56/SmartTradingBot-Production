@@ -174,5 +174,20 @@ class JournalContractTests(unittest.TestCase):
             decode_record(b"\xff\n")
 
 
+    def test_crlf_and_bad_checksum_encoding_rejected(self):
+        raw = encode_record(sample())
+        with self.assertRaises(JournalContractError):
+            decode_record(raw[:-1] + bytes((13, 10)))
+        bad = raw[:-9] + b"abcdef12\\n"
+        with self.assertRaises(JournalContractError):
+            decode_record(bad)
+
+    def test_overlong_record_rejected(self):
+        values = sample()
+        values["symbol_code"] = "S" * 1100
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
+
+
 if __name__ == "__main__":
     unittest.main()
