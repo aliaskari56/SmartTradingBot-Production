@@ -24,6 +24,7 @@ UINT64_MAX = (1 << 64) - 1
 INT64_MIN = -(1 << 63)
 INT64_MAX = (1 << 63) - 1
 TOKEN_RE = re.compile(r"^[A-Z0-9_-]+$")
+SYMBOL_RE = re.compile(r"^[A-Z0-9_.-]+$")
 MAX_RECORD_BYTES = 1024
 ALLOWED = {
     "schema": {"LRN04V1"},
@@ -55,8 +56,11 @@ def encode_record(values: dict[str, str]) -> bytes:
         if name in {"pnl_minor", "r_scaled", "rsum_scaled"}:
             if not SINT_RE.fullmatch(value) or not INT64_MIN <= int(value) <= INT64_MAX:
                 raise JournalContractError(f"invalid signed 64-bit integer: {name}")
-        if name in {"schema", "state", "account_scope", "direction",
-                    "entry_kind", "risk_state", "symbol_code", "previous_record_hash"}:
+        if name == "symbol_code":
+            if not SYMBOL_RE.fullmatch(value):
+                raise JournalContractError(f"invalid symbol code: {name}")
+        elif name in {"schema", "state", "account_scope", "direction",
+                      "entry_kind", "risk_state", "previous_record_hash"}:
             if not TOKEN_RE.fullmatch(value):
                 raise JournalContractError(f"invalid token: {name}")
         if name in ALLOWED and value not in ALLOWED[name]:
@@ -181,6 +185,20 @@ class JournalContractTests(unittest.TestCase):
         bad = raw[:-9] + b"abcdef12\n"
         with self.assertRaises(JournalContractError):
             decode_record(bad)
+
+    def test_symbol_suffix_dot_is_supported(self):
+        values = sample()
+        values["symbol_code"] = "EURUSD.a"
+        self.assertEqual(decode_record(encode_record(values)), values)
+
+    def test_negative_leading_zero_is_rejected(self):
+        values = sample()
+        values["pnl_minor"] = "-01"
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
+        values["pnl_minor"] = "-0007"
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
 
     def test_overlong_record_rejected(self):
         values = sample()
