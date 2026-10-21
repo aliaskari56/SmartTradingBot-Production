@@ -8123,6 +8123,10 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
+   // Defense-in-depth: never submit pending orders outside Strategy Tester.
+   if(!MQLInfoInteger(MQL_TESTER))
+      return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
+
    if(!s.valid)
       return false;
 
@@ -10661,6 +10665,14 @@ bool ValidateInputs()
 
 int OnInit()
   {
+   // SAFETY GATE: this build is restricted to Strategy Tester.
+   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
+      return INIT_FAILED;
+     }
+
    g_autoStateName=ScopedStateName("AUTO");
 
    if(!ValidateInputs())
