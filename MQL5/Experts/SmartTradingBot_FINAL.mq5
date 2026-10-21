@@ -8939,10 +8939,7 @@ bool PlaceManualPendingDirection(const int direction)
       return false;
 
    double pip=PipSize(_Symbol);
-   double volume=NormalizeVolume(_Symbol,InpBaseLots);
-   if(pip<=0.0 || volume<=0.0)
-      return false;
-   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
+   if(pip<=0.0)
       return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
@@ -8972,6 +8969,28 @@ bool PlaceManualPendingDirection(const int direction)
 
    double sl=0.0;
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
+      return false;
+
+   // Manual pending entries obey the same equity-risk sizing policy as scanner setups.
+   double volume=0.0;
+   if(InpUseRiskSizing)
+     {
+      Setup manualRiskSetup;
+      manualRiskSetup.symbol=_Symbol;
+      manualRiskSetup.direction=direction;
+      manualRiskSetup.entry=entry;
+      manualRiskSetup.sl=sl;
+      volume=CalculateOrderVolumeByRisk(manualRiskSetup);
+     }
+   else
+      volume=NormalizeVolume(_Symbol,InpBaseLots);
+
+   if(volume<=0.0 || !MathIsValidNumber(volume))
+     {
+      Print("STB MANUAL PENDING REJECTED: risk volume invalid symbol=",_Symbol);
+      return false;
+     }
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
       return false;
 
    trade.SetExpertMagicNumber(0);
@@ -9066,10 +9085,7 @@ bool PlaceManualLimitDirection(const int direction)
       return false;
 
    double pip=PipSize(_Symbol);
-   double volume=NormalizeVolume(_Symbol,InpBaseLots);
-   if(pip<=0.0 || volume<=0.0)
-      return false;
-   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
+   if(pip<=0.0)
       return false;
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
@@ -9099,6 +9115,28 @@ bool PlaceManualLimitDirection(const int direction)
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
+      return false;
+
+   // Manual limit entries obey the same equity-risk sizing policy as scanner setups.
+   double volume=0.0;
+   if(InpUseRiskSizing)
+     {
+      Setup manualRiskSetup;
+      manualRiskSetup.symbol=_Symbol;
+      manualRiskSetup.direction=direction;
+      manualRiskSetup.entry=entry;
+      manualRiskSetup.sl=sl;
+      volume=CalculateOrderVolumeByRisk(manualRiskSetup);
+     }
+   else
+      volume=NormalizeVolume(_Symbol,InpBaseLots);
+
+   if(volume<=0.0 || !MathIsValidNumber(volume))
+     {
+      Print("STB MANUAL LIMIT REJECTED: risk volume invalid symbol=",_Symbol);
+      return false;
+     }
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
       return false;
 
    trade.SetExpertMagicNumber(0);
