@@ -21,6 +21,13 @@ CHECKSUM_RE = re.compile(r"^[0-9A-F]{8}$")
 UINT_RE = re.compile(r"^(0|[1-9][0-9]*)$")
 TOKEN_RE = re.compile(r"^[A-Z0-9_-]+$")
 MAX_RECORD_BYTES = 1024
+ALLOWED = {
+    "schema": {"LRN04V1"},
+    "state": {"PREPARED", "COMMITTED"},
+    "direction": {"BUY", "SELL", "FLAT", "NA"},
+    "entry_kind": {"IN", "OUT", "OUT_BY", "INOUT", "SNAPSHOT"},
+    "risk_state": {"KNOWN", "UNKNOWN", "NOT_APPLICABLE"},
+}
 
 
 class JournalContractError(ValueError):
@@ -45,6 +52,8 @@ def encode_record(values: dict[str, str]) -> bytes:
                     "entry_kind", "risk_state", "symbol_code", "previous_record_hash"}:
             if not TOKEN_RE.fullmatch(value):
                 raise JournalContractError(f"invalid token: {name}")
+        if name in ALLOWED and value not in ALLOWED[name]:
+            raise JournalContractError(f"unsupported enum: {name}")
     body = "|".join(parts).encode("ascii")
     checksum = f"{zlib.crc32(body) & 0xFFFFFFFF:08X}".encode("ascii")
     record = body + b"|" + checksum + b"\n"
@@ -119,6 +128,12 @@ class JournalContractTests(unittest.TestCase):
             decode_record(b"|".join(raw.split(b"|")[:-2]) + b"\n")
         with self.assertRaises(JournalContractError):
             decode_record(raw[:-1] + b"|EXTRA\n")
+
+    def test_unknown_enum_rejected(self):
+        values = sample()
+        values["state"] = "DONE"
+        with self.assertRaises(JournalContractError):
+            encode_record(values)
 
     def test_noncanonical_integer_rejected(self):
         values = sample()
