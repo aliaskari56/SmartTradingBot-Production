@@ -9466,10 +9466,25 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
       return false;
      }
 
-   if(!SymbolIsSynchronized(symbol))
+   // A newly selected symbol can be temporarily unsynchronized while its
+   // M15/H4 history is still being downloaded or built. Do not reject it
+   // before requesting that history: otherwise the scanner can repeatedly
+   // skip the symbol without ever starting the series request.
+   int needM15=MathMax(InpLookbackM15,40);
+   int needH4=MathMax(InpLookbackH4,40);
+   if(!SymbolIsSynchronized(symbol) ||
+      Bars(symbol,PERIOD_M15)<needM15 ||
+      Bars(symbol,PERIOD_H4)<needH4)
      {
-      reason="REJECT_DATA_UNAVAILABLE";
-      return false;
+      MqlRates warmM15[];
+      MqlRates warmH4[];
+      bool m15Ready=GetRates(symbol,PERIOD_M15,needM15,warmM15);
+      bool h4Ready=GetRates(symbol,PERIOD_H4,needH4,warmH4);
+      if(!m15Ready || !h4Ready)
+        {
+         reason="REJECT_DATA_UNAVAILABLE";
+         return false;
+        }
      }
 
    MqlTick tick;
