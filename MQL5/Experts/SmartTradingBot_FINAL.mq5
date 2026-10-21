@@ -35,7 +35,7 @@ input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
 input bool    InpTesterForceAutoTrading  = true;  // tester only; prevents stale/missing .set state from disabling order placement
-input bool    InpTesterChartSymbolOnly   = true;  // tester only; isolates the test universe to _Symbol
+input bool    InpTesterChartSymbolOnly   = true;  // legacy .set: also restricts tester management scope to _Symbol
 
 input group "=== RSI + CCI COMPOSITE ==="
 input bool    InpOscillatorConfirmation    = true;
@@ -439,6 +439,7 @@ STBAdaptiveProfile g_activeAdaptiveProfile;
 bool               g_activeAdaptiveProfileValid=false;
 int                g_activeAdaptiveProfileId=0;
 string             g_lastBuildRejectReason="UNKNOWN";
+string             g_lastPendingSetupRejectReason="";
 STBDiagnosticState g_diagnosticStates[];
 string             g_dashboardLastAction="EA INITIALIZED";
 bool               g_dashHidden=false;
@@ -1748,9 +1749,10 @@ bool GetRates(const string symbol,
    if(count<=0 || !SymbolSelect(symbol,true))
       return false;
 
-   if(!SymbolIsSynchronized(symbol))
-      return false;
-
+   // Do not block the history request on the symbol-wide synchronization flag.
+   // CopyRates initiates/continues downloading or building the requested
+   // symbol/timeframe series. Keep the full-count requirement so incomplete
+   // history is never consumed by the structure and entry calculations.
    ArraySetAsSeries(rates,true);
 
    int copied=CopyRates(symbol,tf,0,count,rates);
@@ -2065,16 +2067,33 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const bool isUserAction=false)
   {
    if(ticket==0 || !OrderSelect(ticket))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " stage=PRECHECK reason=TICKET_NOT_SELECTABLE");
       return false;
+     }
 
-   string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   if(!IsManagedOrder(ticket))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=PRECHECK reason=SYMBOL_NOT_MANAGED");
+      return false;
+     } // P1 writer safety barrier
    if(STB_ExposureEnsure(ticket,false)<0)
      {
       Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
             " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
       return false;
      }
-   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=PRECHECK reason=SYMBOL_WRITER_NOT_OWNED");
+      return false;
+     } // P6/P10 cross-instance single pending writer
 
    MqlTick pendingWriteTick;
    string pendingQuoteReason="";
@@ -2098,17 +2117,45 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=INVALID_SL_GEOMETRY",
+            " entry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " sl=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
+     }
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=ENTRY_DIRECTION",
+            " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
+     }
 
    if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=RISK_FLOOR",
+            " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " oldSL=",DoubleToString(stbCurSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newEntry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " newSL=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       return false;
-
+     }
 
    if(newEntry<=0.0)
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=VALIDATION reason=ENTRY_NONPOSITIVE",
+            " entry=",DoubleToString(newEntry,10));
       return false;
+     }
 
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
@@ -2146,7 +2193,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // prevents ManagePendingOrders' initial-SL repair and the trailing engine
    // from both modifying the same pending ticket in one cycle.
    if(STB_CycleWriteAlreadyDone(ticket))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=WRITE_GATE reason=ONE_WRITE_PER_CYCLE");
       return false;
+     }
 
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
@@ -2164,7 +2216,13 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    ResetLastError();
 
    if(!OrderCheck(req,check))
+     {
+      Print("STB PENDING MODIFY ORDERCHECK ERROR ticket=",ticket,
+            " symbol=",symbol,
+            " lastError=",GetLastError(),
+            " comment=",check.comment);
       return false;
+     }
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
@@ -2179,10 +2237,20 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // OrderCheck can take time. Re-read the ticket and verify that both the
    // symbol-writer lease and the geometry snapshot are still ours to modify.
    if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_GONE_OR_SCOPE_CHANGED");
       return false;
+     }
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_IDENTITY_CHANGED");
       return false;
+     }
    // Do not re-enable a manual-override pause after OrderCheck: every
    // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
@@ -2195,13 +2263,41 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
       MathAbs(latestSL-stbCurSL)>latestTolerance ||
       MathAbs(latestTP-stbCurTP)>latestTolerance)
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ORDER_GEOMETRY_CHANGED");
       return false;
+     }
 
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
-      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
-      !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
-      !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=SYMBOL_WRITER_LEASE_LOST");
       return false;
+     }
+   if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=INVALID_SL_GEOMETRY");
+      return false;
+     }
+   if(!STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=ENTRY_DIRECTION");
+      return false;
+     }
+   if(!STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " stage=RECHECK reason=RISK_FLOOR");
+      return false;
+     }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -2215,6 +2311,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
      {
+      Print("STB PENDING MODIFY SERVER FAILURE ticket=",ticket,
+            " symbol=",symbol,
+            " retcode=",trade.ResultRetcode(),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",GetLastError());
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
@@ -2225,6 +2326,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
    if(!TradeRetcodeModifySucceeded())
      {
+      Print("STB PENDING MODIFY RETCODE REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " retcode=",trade.ResultRetcode(),
+            " description=",trade.ResultRetcodeDescription());
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
@@ -2278,19 +2383,51 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 // Normalize a pending setup against the live market and the broker's
 // symbol-specific stop/freeze constraints. Returns false if the resulting
 // geometry cannot satisfy the requested RR.
+bool STB_PendingSetupReject(const Setup &s,const string reason)
+  {
+   g_lastPendingSetupRejectReason=reason;
+
+   int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
+   if(digits<0 || digits>10)
+      digits=5;
+
+   MqlTick tick;
+   bool tickOK=SymbolInfoTick(s.symbol,tick);
+
+   Print("STB PENDING NORMALIZATION REJECT",
+         " symbol=",s.symbol,
+         " dir=",(s.direction>0 ? "BUY":"SELL"),
+         " reason=",reason,
+         " entry=",DoubleToString(s.entry,digits),
+         " sl=",DoubleToString(s.sl,digits),
+         " tp=",DoubleToString(s.tp,digits),
+         " bid=",DoubleToString(tickOK ? tick.bid:0.0,digits),
+         " ask=",DoubleToString(tickOK ? tick.ask:0.0,digits),
+         " point=",DoubleToString(SymbolInfoDouble(s.symbol,SYMBOL_POINT),digits),
+         " tickSize=",DoubleToString(SymbolInfoDouble(s.symbol,SYMBOL_TRADE_TICK_SIZE),digits),
+         " stopsLevelPts=",IntegerToString((int)SymbolInfoInteger(s.symbol,SYMBOL_TRADE_STOPS_LEVEL)));
+
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool PreparePendingSetup(Setup &s)
   {
+   g_lastPendingSetupRejectReason="";
+
    MqlTick tick;
 
    if(!SymbolInfoTick(s.symbol,tick))
-      return false;
+      return STB_PendingSetupReject(s,"TICK_UNAVAILABLE");
 
    double point=SymbolInfoDouble(s.symbol,SYMBOL_POINT);
    int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
    double minDist=TradeMinDistance(s.symbol);
 
    if(point<=0.0)
-      return false;
+      return STB_PendingSetupReject(s,"SYMBOL_POINT_INVALID");
 
    if(minDist<=0.0)
       minDist=point;
@@ -2315,7 +2452,7 @@ bool PreparePendingSetup(Setup &s)
                s.symbol,
                " planned=",DoubleToString(s.entry,digits),
                " ask=",DoubleToString(tick.ask,digits));
-         return false;
+         return STB_PendingSetupReject(s,"BUY_STOP_TRIGGER_ALREADY_CROSSED");
         }
 
       double minEntry=tick.ask+minDist+entryStep;
@@ -2340,7 +2477,7 @@ bool PreparePendingSetup(Setup &s)
             structuralSL>=entrySL)
            {
             Print("STB setup rejected: BUY structural SL unresolved symbol=",s.symbol);
-            return false;
+            return STB_PendingSetupReject(s,"BUY_STRUCTURAL_SL_UNRESOLVED");
            }
 
          s.sl=structuralSL;
@@ -2349,13 +2486,13 @@ bool PreparePendingSetup(Setup &s)
       if(s.sl>=s.entry)
         {
          Print("STB setup rejected: BUY SL is not structurally below entry symbol=",s.symbol);
-         return false;
+         return STB_PendingSetupReject(s,"BUY_SL_NOT_BELOW_ENTRY");
         }
 
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
+         return STB_PendingSetupReject(s,"BUY_SWING_COLLECTION_FAILED");
 
       double risk=s.entry-s.sl;
       double target=DBL_MAX;
@@ -2379,7 +2516,7 @@ bool PreparePendingSetup(Setup &s)
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
+         return STB_PendingSetupReject(s,"BUY_TP_TARGET_MISSING_OR_TOO_CLOSE");
         }
 
       s.tp=NormalizePrice(s.symbol,target);
@@ -2395,7 +2532,7 @@ bool PreparePendingSetup(Setup &s)
                s.symbol,
                " planned=",DoubleToString(s.entry,digits),
                " bid=",DoubleToString(tick.bid,digits));
-         return false;
+         return STB_PendingSetupReject(s,"SELL_STOP_TRIGGER_ALREADY_CROSSED");
         }
 
       double maxEntry=tick.bid-minDist-entryStep;
@@ -2420,7 +2557,7 @@ bool PreparePendingSetup(Setup &s)
             structuralSL<=entrySL)
            {
             Print("STB setup rejected: SELL structural SL unresolved symbol=",s.symbol);
-            return false;
+            return STB_PendingSetupReject(s,"SELL_STRUCTURAL_SL_UNRESOLVED");
            }
 
          s.sl=structuralSL;
@@ -2429,13 +2566,13 @@ bool PreparePendingSetup(Setup &s)
       if(s.sl<=s.entry)
         {
          Print("STB setup rejected: SELL SL is not structurally above entry symbol=",s.symbol);
-         return false;
+         return STB_PendingSetupReject(s,"SELL_SL_NOT_ABOVE_ENTRY");
         }
 
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
-         return false;
+         return STB_PendingSetupReject(s,"SELL_SWING_COLLECTION_FAILED");
 
       double risk=s.sl-s.entry;
       double target=-DBL_MAX;
@@ -2459,7 +2596,7 @@ bool PreparePendingSetup(Setup &s)
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
-         return false;
+         return STB_PendingSetupReject(s,"SELL_TP_TARGET_MISSING_OR_TOO_CLOSE");
         }
 
       s.tp=NormalizePrice(s.symbol,target);
@@ -2473,7 +2610,7 @@ bool PreparePendingSetup(Setup &s)
    double reward=MathAbs(s.tp-s.entry);
 
    if(risk<=0.0 || reward<=0.0)
-      return false;
+      return STB_PendingSetupReject(s,"ZERO_RISK_OR_REWARD");
 
    if(InpMaxInitialSLPips>0.0 &&
       risk>InpMaxInitialSLPips*PipSize(s.symbol))
@@ -2482,7 +2619,7 @@ bool PreparePendingSetup(Setup &s)
             s.symbol,
             " riskPips=",DoubleToString(risk/PipSize(s.symbol),1),
             " capPips=",DoubleToString(InpMaxInitialSLPips,1));
-      return false;
+      return STB_PendingSetupReject(s,"INITIAL_SL_RISK_CAP_EXCEEDED");
      }
 
    s.rr=reward/risk;
@@ -2491,7 +2628,7 @@ bool PreparePendingSetup(Setup &s)
    if(!STB_ValidatePendingGeometry(s.symbol,s.direction,s.entry,s.sl,s.tp,true,STB_EffectiveMinimumRR(),geometryReason))
      {
       Print("STB pending geometry contract rejected symbol=",s.symbol," dir=",(s.direction>0 ? "BUY":"SELL")," reason=",geometryReason);
-      return false;
+      return STB_PendingSetupReject(s,"PENDING_GEOMETRY_"+geometryReason);
      }
 
    if(s.rr+1e-9<STB_EffectiveMinimumRR())
@@ -2503,7 +2640,7 @@ bool PreparePendingSetup(Setup &s)
             " entry=",DoubleToString(s.entry,digits),
             " sl=",DoubleToString(s.sl,digits),
             " tp=",DoubleToString(s.tp,digits));
-      return false;
+      return STB_PendingSetupReject(s,"RR_BELOW_MINIMUM");
      }
 
    bool changed=
@@ -3828,7 +3965,12 @@ bool BuildSetup(const string symbol,
      }
 
    if(!PreparePendingSetup(s))
-      return STB_BuildReject(symbol,direction,"BROKER_STOP_NORMALIZATION_FAILED");
+     {
+      string normalizationReason=g_lastPendingSetupRejectReason;
+      if(normalizationReason=="")
+         normalizationReason="BROKER_STOP_NORMALIZATION_FAILED";
+      return STB_BuildReject(symbol,direction,normalizationReason);
+     }
 
    if(s.rr+1e-9<minimumRR)
       return STB_BuildReject(symbol,direction,"RR_BELOW_PROFILE_MINIMUM");
@@ -4591,11 +4733,6 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB HEDGE REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB HEDGE REJECTED: daily equity loss limit active.");
@@ -8280,10 +8417,9 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
-   // Defense-in-depth: never submit pending orders outside Strategy Tester.
-   if(!MQLInfoInteger(MQL_TESTER))
-      return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
-
+   // Live execution still respects the dedicated AUTO state below.
+   // With AUTO off, scanner candidates are logged but no new automated order
+   // is submitted by this function.
    if(!s.valid)
       return false;
 
@@ -8939,11 +9075,6 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9085,11 +9216,6 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
@@ -9362,10 +9488,25 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
       return false;
      }
 
-   if(!SymbolIsSynchronized(symbol))
+   // A newly selected symbol can be temporarily unsynchronized while its
+   // M15/H4 history is still being downloaded or built. Do not reject it
+   // before requesting that history: otherwise the scanner can repeatedly
+   // skip the symbol without ever starting the series request.
+   int needM15=MathMax(InpLookbackM15,40);
+   int needH4=MathMax(InpLookbackH4,40);
+   if(!SymbolIsSynchronized(symbol) ||
+      Bars(symbol,PERIOD_M15)<needM15 ||
+      Bars(symbol,PERIOD_H4)<needH4)
      {
-      reason="REJECT_DATA_UNAVAILABLE";
-      return false;
+      MqlRates warmM15[];
+      MqlRates warmH4[];
+      bool m15Ready=GetRates(symbol,PERIOD_M15,needM15,warmM15);
+      bool h4Ready=GetRates(symbol,PERIOD_H4,needH4,warmH4);
+      if(!m15Ready || !h4Ready)
+        {
+         reason="REJECT_DATA_UNAVAILABLE";
+         return false;
+        }
      }
 
    MqlTick tick;
@@ -9437,7 +9578,10 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick))
+     {
+      q.reason="REJECT_TICK_UNAVAILABLE";
       return false;
+     }
 
    string quoteReason="";
    if(!STB_ScannerQuoteValid(tick,quoteReason))
@@ -9449,11 +9593,21 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    double pip=PipSize(symbol);
    if(pip<=0.0)
+     {
+      q.reason="REJECT_PIP_SIZE_INVALID";
       return false;
+     }
 
    MqlRates rates[];
+   ResetLastError();
    if(!GetRates(symbol,PERIOD_M15,48,rates))
+     {
+      int historyError=GetLastError();
+      int availableBars=Bars(symbol,PERIOD_M15);
+      q.reason=StringFormat("REJECT_M15_HISTORY_UNAVAILABLE bars=%d need=48 err=%d",
+                            availableBars,historyError);
       return false;
+     }
 
    double atrNow=LocalATR(rates,1,14);
    double atrBase=LocalATR(rates,20,14);
@@ -9481,7 +9635,10 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
      }
 
    if(volCount<=0)
+     {
+      q.reason="REJECT_TICK_VOLUME_HISTORY_UNAVAILABLE";
       return false;
+     }
 
    avgVol/=volCount;
    q.activityRatio=(avgVol>0.0 ?
@@ -9878,7 +10035,10 @@ void STB_ScannerRun()
    ArrayResize(symbols,0);
    bool universeAllocationFailed=false;
 
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+   // Strategy Tester only guarantees a coherent tick/history stream for the
+   // tested chart symbol. Never scan the whole Market Watch from a tester run,
+   // even if a legacy .set file has InpTesterChartSymbolOnly disabled.
+   if(MQLInfoInteger(MQL_TESTER))
      {
       if(ArrayResize(symbols,1)!=1)
         {
@@ -9999,8 +10159,13 @@ void STB_ScannerRun()
                " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
                " score=",DoubleToString(quality.score,1),
                " spreadPips=",DoubleToString(quality.spreadPips,2),
+               " relativeSpreadPct=",DoubleToString(quality.relativeSpread,2),
+               " atrM15=",DoubleToString(quality.volatility,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " freshnessScore=",DoubleToString(quality.freshnessScore,1),
                " activityRatio=",DoubleToString(quality.activityRatio,2),
-               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
+               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2),
+               " barsM15=",IntegerToString(Bars(symbol,PERIOD_M15)),
+               " lastError=",IntegerToString(GetLastError()));
          continue;
         }
       g_scannerQualityCount++;
@@ -10321,6 +10486,7 @@ void STB_ScannerRun()
          " universe=",IntegerToString(g_scannerUniverseCount),
          " eligible=",IntegerToString(g_scannerEligibleCount),
          " quality=",IntegerToString(g_scannerQualityCount),
+         " qualityRejects=",IntegerToString(MathMax(0,g_scannerEligibleCount-g_scannerQualityCount)),
          " regime=",IntegerToString(g_scannerRegimeCount),
          " buyCandidates=",IntegerToString(g_scannerBuyCount),
          " sellCandidates=",IntegerToString(g_scannerSellCount),
@@ -10887,14 +11053,9 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // SAFETY GATE: this build is restricted to Strategy Tester.
-   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
-      return INIT_FAILED;
-     }
-
+   // The EA is allowed to initialize on ordinary MT5 charts.
+   // New automated entries remain controlled independently by AUTO, which
+   // defaults to OFF through InpAutoTrading=false on non-tester terminals.
    g_autoStateName=ScopedStateName("AUTO");
 
    if(!ValidateInputs())
@@ -10951,6 +11112,11 @@ int OnInit()
          " accountExpert=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT) ? "ON":"OFF",
           " accountTrade=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ON":"OFF",
          " tester=",MQLInfoInteger(MQL_TESTER) ? "YES":"NO");
+
+   // Scanner scope is always chart-only in Strategy Tester. This note explains
+   // old .set files that still carry the former multi-symbol scanner setting.
+   if(MQLInfoInteger(MQL_TESTER) && !InpTesterChartSymbolOnly)
+      Print("STB TESTER SCOPE OVERRIDE: scanner uses chart symbol only; legacy multi-symbol scanner setting ignored.");
 
    Print("STB INIT symbol=",_Symbol,
          " chartTF=",EnumToString((ENUM_TIMEFRAMES)_Period),

@@ -173,6 +173,8 @@ def main() -> int:
         source, "void STB_ReconcileTradeRegistry()", "void STB_ManagePositionImmediately")
     collect_swings = source_region(
         source, "int CollectSwings(", "// H4 TREND")
+    get_rates = source_region(
+        source, "bool GetRates(", "bool IsSymbolTradable(")
     indicator_cache = source_region(
         source, "bool EnsureIndicatorHandles(", "// SWING ENGINE")
     diagnostic_reject = source_region(
@@ -210,13 +212,21 @@ def main() -> int:
          "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "iHigh(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL)" in initial_pending_sl),
-        ("pending STOP trailing reads a closed M5 bar once and validates OHLC before consuming it",
-         bool(trail_source) and
-         "datetime lastProcessedM5Bar;" in trail_source and
-         "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
-         "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
-         "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
-         "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("pending STOP trailing evaluates every closed M5 extreme, validates OHLC, and consumes only deliberate skips or confirmed writes",
+          bool(trail_source) and
+          "datetime lastProcessedM5Bar;" in trail_source and
+          "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
+          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
+          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
+          "double barClose=iClose(symbol,PERIOD_M5,1);" in trail_source and
+          "MathIsValidNumber(barOpen)" in trail_source and
+          "barLow<=MathMin(barOpen,barClose)" in trail_source and
+          "barHigh>=MathMax(barOpen,barClose)" in trail_source and
+          "extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);" in trail_source and
+          "M5_BAR_NOT_BEARISH" not in trail_source and
+          "M5_BAR_NOT_BULLISH" not in trail_source and
+          "if(committed)" in trail_source and
+          "g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;" in trail_source),
         ("pending trail retires disappeared orders before exposure-allocation checks",
          (lambda body: bool(body) and
           "if(!OrderSelect(g_stbPendingTrail[idx].ticket))" in body and
@@ -504,6 +514,17 @@ def main() -> int:
         ("H4 trend alignment is a configurable hard entry gate",
          "InpRequireH4TrendAlignment = true" in source and
          "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
+        ("CopyRates history request is not blocked by symbol-wide synchronization preflight",
+         bool(get_rates) and
+         "SymbolSelect(symbol,true)" in get_rates and
+         "CopyRates(symbol,tf,0,count,rates)" in get_rates and
+         "SymbolIsSynchronized" not in get_rates and
+         "return copied>=count;" in get_rates),
+        ("Strategy Tester scanner is chart-symbol-only even with legacy multi-symbol .set inputs",
+         "if(MQLInfoInteger(MQL_TESTER))" in scanner_run and
+         "symbols[0]=_Symbol;" in scanner_run and
+         "if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)" not in scanner_run and
+         "STB TESTER SCOPE OVERRIDE:" in on_init),
         ("required local M15 FVG and Order Block are hard rejection gates",
          "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
          "if((InpRequireOB || InpStrictPatternFilters || InpRequireHTFConfluence) && !hasOB)" in source),
