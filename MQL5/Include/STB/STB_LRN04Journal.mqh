@@ -90,6 +90,7 @@ bool STB_LRN04_IsSymbolCode(const string value)
    {
       ushort c=StringGetCharacter(value,i);
       bool valid=(c>='A' && c<='Z') ||
+                 (c>='a' && c<='z') ||
                  (c>='0' && c<='9') ||
                  c=='_' || c=='-' || c=='.';
       if(!valid)
