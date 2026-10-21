@@ -320,6 +320,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
         if state == "PREPARED":
             if op_id in operation_states:
                 raise JournalContractError("operation ID reused")
+            if any(status == "PREPARED" for status in operation_states.values()):
+                raise JournalContractError("interleaved PREPARED operations are not allowed")
             if record["prepared_seq"] != "0" or record["prepared_digest"] != "GENESIS":
                 raise JournalContractError("invalid PREPARED reference fields")
             operation_states[op_id] = "PREPARED"
@@ -334,6 +336,8 @@ def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
             prepared = prepared_by_seq.get(ref_seq)
             if prepared is None or ref_seq >= seq:
                 raise JournalContractError("invalid PREPARED sequence reference")
+            if ref_seq != seq - 1:
+                raise JournalContractError("PREPARED and COMMITTED must be adjacent")
             if record["prepared_digest"] != prepared["record_digest"]:
                 raise JournalContractError("PREPARED digest mismatch")
             for name in identity_fields:
@@ -471,6 +475,31 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
         del record["account_scope"]
         with self.assertRaises(JournalContractError):
             validate_v2_reference_history([record])
+
+
+    def test_non_adjacent_prepared_commit_pair_rejected(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        intervening = v2_reference_record(
+            2, "PREPARED", "op-2", "digest-1", "digest-2"
+        )
+        committed = v2_reference_record(
+            3, "COMMITTED", "op-1", "digest-2", "digest-3",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, intervening, committed])
+
+    def test_commit_must_immediately_follow_prepared(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        intervening = v2_reference_record(
+            2, "PREPARED", "op-2", "digest-1", "digest-2"
+        )
+        committed = v2_reference_record(
+            3, "COMMITTED", "op-1", "digest-2", "digest-3",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        with self.assertRaises(JournalContractError):
+            validate_v2_reference_history([prepared, intervening, committed])
 
 
 
