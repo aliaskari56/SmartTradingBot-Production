@@ -148,6 +148,7 @@ bool g_modifyWasNoChanges=false;
 // Daily equity guard state. This build remains Strategy-Tester-only.
 double g_stbDailyStartEquity=0.0;
 int    g_stbDailyKey=0;
+bool   g_stbDailyLimitLogged=false;
 
 bool STB_DailyLossLimitHit()
   {
@@ -165,6 +166,7 @@ bool STB_DailyLossLimitHit()
      {
       g_stbDailyKey=dayKey;
       g_stbDailyStartEquity=equity;
+      g_stbDailyLimitLogged=false;
       Print("STB DAILY RISK BASELINE day=",dayKey,
             " equity=",DoubleToString(equity,2),
             " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2));
@@ -177,7 +179,10 @@ bool STB_DailyLossLimitHit()
    double lossPct=(g_stbDailyStartEquity-equity)/g_stbDailyStartEquity*100.0;
    if(lossPct+1e-9>=InpMaxDailyLossPercent)
      {
-      Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
+      if(!g_stbDailyLimitLogged)
+        {
+         g_stbDailyLimitLogged=true;
+         Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
             " startEquity=",DoubleToString(g_stbDailyStartEquity,2),
             " equity=",DoubleToString(equity,2),
             " lossPct=",DoubleToString(lossPct,2),
@@ -10662,6 +10667,7 @@ bool ValidateInputs()
       !MathIsValidNumber(InpAdaptiveTrailStepATR) ||
       !MathIsValidNumber(InpRiskPercent) ||
       !MathIsValidNumber(InpMaxRiskVolume) ||
+      !MathIsValidNumber(InpMaxDailyLossPercent) ||
       !MathIsValidNumber(InpBaseLots) ||
       !MathIsValidNumber(InpTrendLotMultiplier) ||
       !MathIsValidNumber(InpUniversalLotMultiplier)
@@ -11178,6 +11184,31 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
+// Cancel this EA's pending orders when the daily equity guard trips.
+// Existing open positions are NOT force-closed by this guard; their SL/TP
+// and protection logic remain responsible for position management.
+void STB_EnforceDailyRiskGuard()
+  {
+   if(!STB_DailyLossLimitHit())
+      return;
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if((long)OrderGetInteger(ORDER_MAGIC)!=(long)InpMagic)
+         continue;
+      if(!IsManagedOrder(ticket))
+         continue;
+
+      string symbol=OrderGetString(ORDER_SYMBOL);
+      if(STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"DailyLossGuard"))
+         Print("STB DAILY GUARD cancelled pending order=",ticket,
+               " symbol=",symbol);
+     }
+  }
+
 //==================================================================
 // SINGLE MANAGEMENT CYCLE (MASTER BLUEPRINT 31/32/33)
 //==================================================================
@@ -11207,6 +11238,7 @@ void STB_RunManagementCycle()
 
 void OnTick()
   {
+   STB_EnforceDailyRiskGuard();
    bool m15Bar=NewM15Bar();
    if(m15Bar)
       STB_ReconcileTradeRegistry();
@@ -11231,6 +11263,7 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+   STB_EnforceDailyRiskGuard();
    // Recover terminal-visible positions/orders before the manager pass so a
    // missed or delayed transaction handoff can be protected in this timer cycle.
    STB_ReconcileTradeRegistry();
