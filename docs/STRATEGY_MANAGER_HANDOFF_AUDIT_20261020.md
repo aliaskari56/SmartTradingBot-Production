@@ -408,3 +408,6 @@ This is the same source path as STR-AUD-21 and is retained here only to preserve
 **Change:** Added static regression assertions for these ordering and handoff invariants, plus the final pre-submit gate ordering. This is test coverage hardening; it does not claim a newly discovered runtime defect or prove transaction ordering under a live terminal.
 
 **Verification status:** Audit script update commit `ecd3016bcef2b70a45c9dcef62fdd9acb1994e92`. The updated script and its CI run must be fetched/checked before reporting the audit as passed. The EA source remains unchanged at blob `3d0d67850fa9444f06da27dea7aa7e62c78cfa80`; the earlier MetaEditor compile and safety-default results apply to that unchanged EA source. Transaction-event permutations, exposure allocation fault injection, pending-to-position handoff, and broker behavior remain **NOT RUN**. Release status remains **NOT VERIFIED**.
+
+
+**Audit follow-up:** The first run of the newly extended static audit exposed an incorrect test-region boundary (the assertion searched an empty source region), not a source-code failure. The region boundary was corrected in audit-script commit `c29e5cf754fe940529e9c58b0e0f0f5c2fb837f9`. The corrected run is pending; do not mark the updated audit passed until its workflow conclusion is confirmed.
