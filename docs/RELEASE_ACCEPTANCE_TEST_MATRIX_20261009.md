@@ -11,8 +11,8 @@ Do not label the build production-ready until the exact source revision has a re
 
 | ID | Scenario | Procedure / evidence required | Expected result | Status |
 |---|---|---|---|---|
-| BLD-01 | Exact-source compile | Compile the current source Git blob `6bca33bc8e0c961f317b0828e46faf7a6b9929b4` (Git blob ID, not raw-file SHA-256) using the supported MetaEditor build; archive full log and compiler version | 0 errors; all warnings reviewed and dispositioned | NOT RUN |
-| BLD-02 | Artifact provenance | Record SHA-256 of source, includes, compiler log and produced EX5; record build environment | Reproducible manifest maps EX5 to exact source and dependency set | NOT RUN |
+| BLD-01 | Exact-source compile | Compile the exact source commit `5d3ca220e205a36d8b37796c5cdae24a686457f7` using MetaEditor 5.0.0.6274; retain compiler log and provenance artifact | 0 errors, 0 warnings; confirmed by workflow run `39533709506` | PASS — CI COMPILE |
+| BLD-02 | Artifact provenance | Retain workflow artifact `metaeditor-build-5d3ca220e205a36d8b37796c5cdae24a686457f7` (artifact ID `12316507072`) containing compiler log, EX5 and `provenance.json`; independently inspect manifest hashes before release | Manifest maps EX5 to exact source commit and records MetaEditor build; final package/dependency provenance review remains separate | ARTIFACT GENERATED — RELEASE REVIEW PENDING |
 | BLD-03 | Include closure | Resolve every `#include` transitively; inventory source, origin, version and license for shipped dependencies | Every shipped dependency has traceable origin and compatible license | NOT VERIFIED |
 | BLD-04 | Package audit | Extract and inspect release ZIP; compare contents to manifest; remove stale binaries/backups if not intended for release | Package contains only reviewed release artifacts and complete notices | NOT RUN |
 
@@ -91,16 +91,16 @@ Do not label the build production-ready until the exact source revision has a re
 - [ ] Dependency/include inventory and license/attribution review
 - [ ] Independent review sign-off and explicit release decision
 
-## Current evidence summary
+## Current evidence summary — refreshed 2026-10-21
 
-- Current source blob: `6bca33bc8e0c961f317b0828e46faf7a6b9929b4` (Git blob identifier, not raw-file SHA-256).
-- Verified static CI run `37950552410`: **SUCCESS**, 26 static checks passed, including the partial-exit lock-state lifecycle guard. The run checks source structure only.
-- The cycle-scoped candidate queue and per-ticket flush are present, with shared tick snapshot validation, deterministic tie-break, allocation-failure handling, producer write boundaries, and confirmation of a nonzero live SL.
-- The resolver now enforces the active profit-lock floor, uses a deterministic no-SL fail-safe fallback where appropriate, and the flush only credits saved lock state after the actual SL meets the normalized lock target.
-- Functional tests for SL-01 through SL-12 remain **NOT RUN**; static checks do not execute the MQL resolver or prove runtime behavior.
+- Current validated source commit: `5d3ca220e205a36d8b37796c5cdae24a686457f7`; working branch: `fix/structure-first-fvg-trailing-20261020`.
+- MetaEditor workflow run `39533709506`: **SUCCESS**, MetaEditor 5.0.0.6274, **0 errors and 0 warnings**. The run compiled `MQL5/Experts/SmartTradingBot_FINAL.mq5` and its included dependencies from that exact commit.
+- Static audit run `39533709512`: **SUCCESS**. Trading safety defaults run `39533709682`: **SUCCESS**. These are source/CI checks, not functional trading tests.
+- Build artifact `metaeditor-build-5d3ca220e205a36d8b37796c5cdae24a686457f7` (artifact ID `12316507072`) contains the compiler log, EX5, and provenance manifest. The workflow records source and EX5 SHA-256 values in the artifact; independent package-level inspection remains pending.
+- Pending-trail retry, partial-fill handoff, registry reconciliation, scanner quote validation, and final scanner-to-manager checks have static assertions. Their runtime behavior remains unproven.
+- Functional tests for SL-01 through SL-12, EVT-01 through EVT-07, SCN/TRL/PTRL cases, Strategy Tester regression, demo lifecycle, include/license review, and package inspection remain **NOT RUN or NOT VERIFIED** as indicated by their individual rows.
 - The position-modify recheck narrows the stale-TP window but is not an atomic compare-and-swap.
-- MetaEditor compile, Strategy Tester, demo tests, exact-source EX5 provenance, and package/license review remain unverified.
-- Release decision: **BLOCKED / NOT VERIFIED**.
+- Release decision: **BLOCKED / NOT VERIFIED**. Do not merge to `main` or treat the compiled artifact as production-approved.
 
 
 ## H. Structure-first strategy upgrade — added 2026-10-20
