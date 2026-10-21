@@ -162,7 +162,7 @@ def main() -> int:
     place_setup = source_region(
         source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
     on_trade_transaction = source_region(
-        source, "void OnTradeTransaction(", "// EXPOSURE MANAGEMENT")
+        source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge")
     trade_intake = source_region(
         source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
     management_cycle = source_region(
