@@ -4558,6 +4558,11 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      Print("STB HEDGE REJECTED: tester-only safety gate.");
+      return false;
+     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB HEDGE REJECTED: daily equity loss limit active.");
@@ -8901,6 +8906,11 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
+      return false;
+     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9023,6 +9033,11 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
+      return false;
+     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
