@@ -610,6 +610,24 @@ class JournalV2ReferenceStateTests(unittest.TestCase):
 
 
 
+class JournalV2OperationStateTests(unittest.TestCase):
+    def test_interleaved_prepared_operations_rejected(self):
+        first = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        second = v2_reference_record(2, "PREPARED", "op-2", "digest-1", "digest-2")
+        with self.assertRaisesRegex(JournalContractError, "interleaved PREPARED"):
+            validate_v2_reference_history([first, second])
+
+    def test_operation_id_cannot_be_reused_after_commit(self):
+        prepared = v2_reference_record(1, "PREPARED", "op-1", "GENESIS", "digest-1")
+        committed = v2_reference_record(
+            2, "COMMITTED", "op-1", "digest-1", "digest-2",
+            prepared_seq=1, prepared_digest="digest-1",
+        )
+        reused = v2_reference_record(3, "PREPARED", "op-1", "digest-2", "digest-3")
+        with self.assertRaisesRegex(JournalContractError, "operation ID reused"):
+            validate_v2_reference_history([prepared, committed, reused])
+
+
 class JournalV2ReferenceTypeSafetyTests(unittest.TestCase):
     def test_each_history_item_must_be_a_mapping(self):
         for invalid in (None, 123, "not-a-record", ["not", "a", "mapping"]):
