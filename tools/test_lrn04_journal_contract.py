@@ -268,6 +268,20 @@ class JournalContractTests(unittest.TestCase):
         self.assertLess(names.index("rsum_scaled"), names.index("rcount"))
         self.assertEqual(names[-1], "checksum")
 
+    def test_v2_digest_and_numeric_contracts_remain_explicit_release_gates(self):
+        """Do not let the proposal's unresolved platform details disappear."""
+        root = Path(__file__).resolve().parents[1]
+        proposal = (
+            root / "docs" / "LRN04_SCHEMA_V2_PROPOSAL_20261021.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Exact digest algorithm", proposal)
+        self.assertIn("CRC32 alone is not a collision-resistant identity", proposal)
+        self.assertIn("Currency minor-unit conversion, rounding mode", proposal)
+        self.assertIn("Reserved sentinels and semantic consistency rules", proposal)
+        self.assertIn("File append/read/flush/close semantics", proposal)
+        self.assertIn("Do not wire this protocol into `OnTradeTransaction()`", proposal)
+        self.assertIn("not approved for runtime use", proposal)
+
 
 def validate_v2_reference_history(records: list[dict[str, str]]) -> None:
     """Validate proposed V2 state transitions in memory; not an MQL5 journal."""
