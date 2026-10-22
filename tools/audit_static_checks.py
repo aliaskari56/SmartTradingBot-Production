@@ -200,14 +200,22 @@ def main() -> int:
         source, "bool STB_ResolvePositionSL(",
         "bool STB_SubmitPositionSL(")
     checks: list[tuple[str, bool]] = [
-        ("live automatic trading remains opt-in by default",
-         "input bool    InpAutoTrading            = false;" in source),
-        ("risk-based sizing remains opt-in by default",
-         "input bool    InpUseRiskSizing         = false;" in source),
-        ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
+        ("automatic trading is enabled by default with a fresh versioned AUTO state key",
+         "input bool    InpAutoTrading            = true;" in source and
+         'g_autoStateName=ScopedStateName("AUTO_V2");' in on_init),
+        ("risk-based sizing is enabled by default with conservative bounded risk inputs",
+         "input bool    InpUseRiskSizing         = true;" in source and
+         "InpRiskPercent           = 0.25;" in source and
+         "InpRiskPercent>1.0" in source),
+        ("tester force-AUTO override remains confined to tester initialization; input-off remains authoritative",
          "MQL_TESTER" in on_init and
          "g_autoTrading=(InpAutoTrading ||" in on_init and
          "if(!InpAutoTrading)" in on_init),
+        ("live/demo chart, scanner entries, hedge, manual STOP and manual LIMIT have no tester-only rejection gates",
+         "STB SAFETY BLOCK" not in source and
+         "SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER" not in source and
+         "tester-only safety gate" not in source and
+         "if(!MQLInfoInteger(MQL_TESTER))" not in place_setup),
         ("BUY STOP/SELL STOP initial SL anchors to closed M5 structure and validates broker geometry",
          "if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)" in initial_pending_sl and
          "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
