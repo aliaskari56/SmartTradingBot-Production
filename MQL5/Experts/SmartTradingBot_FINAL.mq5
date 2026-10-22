@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.133"
+#property version   "1.134"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -4038,6 +4038,42 @@ double TakeAccumulatedPositionPnl(const ulong positionId)
       GlobalVariableDel(PositionPnlName(positionId));
 
    return value;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool STB_SumClosedLifecyclePnlFromHistory(const ulong positionId,
+                                          double &totalPnl)
+  {
+   totalPnl=0.0;
+   if(positionId==0 || !HistorySelectByPosition(positionId))
+      return false;
+
+   bool foundClose=false;
+   int deals=HistoryDealsTotal();
+   for(int i=0;i<deals;i++)
+     {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0)
+         continue;
+
+      long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY)
+         continue;
+
+      double pnl=HistoryDealGetDouble(deal,DEAL_PROFIT)+
+                 HistoryDealGetDouble(deal,DEAL_SWAP)+
+                 HistoryDealGetDouble(deal,DEAL_COMMISSION)+
+                 HistoryDealGetDouble(deal,DEAL_FEE);
+      if(!MathIsValidNumber(pnl))
+         return false;
+
+      totalPnl+=pnl;
+      foundClose=true;
+     }
+
+   return foundClose && MathIsValidNumber(totalPnl);
   }
 
 //+------------------------------------------------------------------+
@@ -11966,6 +12002,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       return;
 
    cumulative=TakeAccumulatedPositionPnl(positionId);
+
+   // Terminal-global accumulation can be absent after a restart or a delayed
+   // event. When broker history is available, rebuild the closed lifecycle
+   // PnL from its OUT/OUT_BY deals rather than trusting volatile aggregation.
+   double historyLifecyclePnl=0.0;
+   if(STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl))
+      cumulative=historyLifecyclePnl;
 
    if(positionId>0 && HistorySelectByPosition(positionId))
      {
