@@ -165,3 +165,21 @@ These are grouped from repeated per-cycle log events. Unique-symbol counts can o
 4. **Other quality/regime gates:** low occurrence in the supplied interval, so do not prioritize changing volatility/activity thresholds without additional evidence.
 
 The next implementation-quality improvement should be observability only: log per-symbol quote age, current session state, relative spread percent, ATR, and rejection reason in a rate-limited way, plus per-cycle unique-symbol counts. Keep signal gates unchanged until the same dataset has been replayed and the downstream strategy rejection distribution is known.
+
+
+## Symbol-level results from the next operator sample
+
+The user supplied the following top-symbol scan results (13:20–14:08 server-log interval):
+- Repeated stale quote names include US corporate shares such as Hilton, Oneok, Novartis, NortonLife, Nordstrom, Nikola, NextEra, Mosaic, MGM, and McKesson. Each appeared about 290 times, matching repeated scan cycles rather than 290 independent failures. Their classification as outside-session is plausible but must be confirmed with the broker's session metadata/time basis, not guessed from company name alone.
+- Repeated data-unavailable names include deferred/dated broker instruments such as `DE40Z6+`, `HK50X6+`, `NGX6+`, `NGZ6+`, `UT100Z6+`, `USOILZ6+`, `US500Z6+`, `US30Z6+`, `FRA40X6+`, and `ESP35X6+`. They repeated about 292 times each. The current EA folds several causes into `REJECT_DATA_UNAVAILABLE` (symbol not synchronized, tick unavailable, insufficient M15 bars, or insufficient H4 bars), so the current log alone cannot identify which cause applies to any of these symbols.
+- The `REJECT_RELATIVE_SPREAD` table was empty because the PowerShell extractor used `$Matches` again to parse `spreadPips`, overwriting the prior match groups for stage/symbol/reason. This is a **PowerShell diagnostic bug**, not evidence that no symbols were rejected for relative spread.
+
+## Read-only diagnostic script added
+
+A standalone script was added at `MQL5/Scripts/STB_ScannerUniverseDiagnostics.mq5` on this branch. It:
+- enumerates selected symbols (default) without changing selection;
+- reads symbol synchronization, published trade session, M15/H4 bars, last tick and quote age, bid/ask, point/spread and computed M15 ATR/relative spread;
+- writes a CSV under terminal `MQL5/Files` and concise `STB_DIAG` lines to the Experts log;
+- submits no orders and does not change or attach the EA.
+
+This script is new and has **not been compiled or executed on the user's terminal yet**. Its role is observability only. The next step is to compile it locally, run it once from MT5 Navigator on any chart, and inspect the generated CSV. Check the `session_open`, `quote_age_seconds`, `m15_bars`, `h4_bars`, and `relative_spread_pct` fields together before assigning blame to a particular gate.
