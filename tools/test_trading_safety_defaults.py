@@ -345,6 +345,13 @@ def main() -> int:
          "if(volume+1e-9<minLot)" in volume_normalizer and
          "return 0.0;" in volume_normalizer and
          "volume=MathFloor(volume/step+1e-9)*step;" in volume_normalizer),
+        ("volume precision follows arbitrary broker step and validates the final step grid",
+         bool(volume_normalizer) and
+         "double scaledStep=step*MathPow(10.0,d);" in volume_normalizer and
+         "MathAbs(scaledStep-MathRound(scaledStep))<=1e-8" in volume_normalizer and
+         "double stepUnits=normalized/step;" in volume_normalizer and
+         "MathAbs(stepUnits-MathRound(stepUnits))>1e-7" in volume_normalizer and
+         "int digits=2;" not in volume_normalizer),
         ("build provenance manifest matches actual AUTO and risk-sizing defaults",
          input_default("InpAutoTrading", source_code) == "false"
          and input_default("InpUseRiskSizing", source_code) == "true"
