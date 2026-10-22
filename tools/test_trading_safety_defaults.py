@@ -370,6 +370,11 @@ def main() -> int:
          and "if(!pendingOrderCheckOK)" in pending_modify_code
          and "check.retcode!=0" in pending_modify_code
          and "pendingOrderCheckLastError=GetLastError();" in pending_modify_code),
+        ("stop-limit child price snapshot is revalidated after OrderCheck",
+         bool(pending_modify_code)
+         and "double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
+         and "double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
+         and "MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance" in pending_modify_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
