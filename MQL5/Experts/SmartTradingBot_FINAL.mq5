@@ -145,6 +145,10 @@ input double  InpTrailStepPips             = 5.0;   // minimum SL improvement be
 
 bool g_modifyWasNoChanges=false;
 
+// Non-tester chart instances may load the visual panel, but no broker-facing
+// action or account-management cycle is permitted outside Strategy Tester.
+bool g_stbChartVisualOnly=false;
+
 // Daily equity guard state. This build remains Strategy-Tester-only.
 // Terminal globals preserve the baseline across EA reinitialization. The key is
 // scoped to account, magic number and chart instance to reduce cross-test bleed.
@@ -1815,8 +1819,20 @@ bool IsDirectionTradable(const string symbol,const int direction)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_BrokerWritesAllowed()
+  {
+   return (MQLInfoInteger(MQL_TESTER)!=0 && !g_stbChartVisualOnly);
+  }
+
+// Central fail-closed writer permission shared by every broker-facing path.
 bool STB_TradeEnvironmentAllowed()
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB TRADE ENV REJECT reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
+
    bool terminalAllowed=(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)!=0);
    bool programAllowed=(MQLInfoInteger(MQL_TRADE_ALLOWED)!=0);
    bool accountAllowed=(AccountInfoInteger(ACCOUNT_TRADE_EXPERT)!=0);
@@ -2066,6 +2082,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const double newTP,
                                     const bool isUserAction=false)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB PENDING MODIFY BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    if(ticket==0 || !OrderSelect(ticket))
      {
       Print("STB PENDING MODIFY REJECT ticket=",ticket,
@@ -4733,6 +4754,11 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB ORDER PLACEMENT BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    if(!MQLInfoInteger(MQL_TESTER))
      {
       Print("STB HEDGE REJECTED: tester-only safety gate.");
@@ -5847,6 +5873,11 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
                                       const string failureKey,
                                       const string operation)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB POSITION MODIFY BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    g_modifyWasNoChanges=false;
    if(ticket==0 || !PositionSelectByTicket(ticket) ||
       !STB_IsProtectionPosition(ticket))
@@ -8422,6 +8453,11 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB ORDER PLACEMENT BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    // Defense-in-depth: never submit pending orders outside Strategy Tester.
    if(!MQLInfoInteger(MQL_TESTER))
       return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
@@ -9081,6 +9117,11 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB ORDER PLACEMENT BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    if(!MQLInfoInteger(MQL_TESTER))
      {
       Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
@@ -9227,6 +9268,11 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB ORDER PLACEMENT BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    if(!MQLInfoInteger(MQL_TESTER))
      {
       Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
@@ -10619,10 +10665,13 @@ void STB_DrawTradingLevels()
 
 void UpdatePanel()
   {
-// Large dashboard intentionally disabled.
-// Dashboard objects are removed, while the bottom controls
-// continue to operate independently.
+// Large dashboard intentionally disabled. Normal chart instances show a
+// persistent, explicit view-only notice and never run trade-management logic.
    STB_DashDeleteAll();
+   if(g_stbChartVisualOnly)
+      Comment("SmartTradingBot | VIEW ONLY | Trading and order management are disabled outside Strategy Tester.");
+   else
+      Comment("");
    STB_DrawTradingLevels();
   }
 
@@ -10774,6 +10823,33 @@ void UpdateButtons()
    ObjectSetString(0,hedgeName,OBJPROP_TEXT,"HEDGE");
    ObjectSetInteger(0,hedgeName,OBJPROP_BGCOLOR,clrDarkOrange);
    ObjectSetInteger(0,hedgeName,OBJPROP_COLOR,clrWhite);
+
+   if(g_stbChartVisualOnly)
+     {
+      string viewOnlyNames[8];
+      viewOnlyNames[0]=saveName;
+      viewOnlyNames[1]=sellName;
+      viewOnlyNames[2]=buyName;
+      viewOnlyNames[3]=trailName;
+      viewOnlyNames[4]=hedgeName;
+      viewOnlyNames[5]=g_prefix+"SELL_LIMIT";
+      viewOnlyNames[6]=g_prefix+"BUY_LIMIT";
+      viewOnlyNames[7]=autoName;
+      for(int i=0;i<ArraySize(viewOnlyNames);i++)
+        {
+         string name=viewOnlyNames[i];
+         if(ObjectFind(0,name)<0)
+            continue;
+         ObjectSetString(0,name,OBJPROP_TEXT,(i==7 ? "VIEW ONLY":"TESTER ONLY"));
+         ObjectSetString(0,name,OBJPROP_TOOLTIP,
+                         "Read-only chart mode. Trade actions are disabled outside Strategy Tester.");
+         ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrDimGray);
+         ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
+         ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,name,OBJPROP_STATE,false);
+        }
+      return;
+     }
 
    ObjectSetString(0,trailName,OBJPROP_TEXT,
                    "PEND TRAIL "+
@@ -11069,13 +11145,11 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // SAFETY GATE: this build is restricted to Strategy Tester.
-   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
-      return INIT_FAILED;
-     }
+   // Normal charts can initialize the visual panel only. All trade and
+   // management writes remain explicitly Strategy-Tester-only.
+   g_stbChartVisualOnly=!MQLInfoInteger(MQL_TESTER);
+   if(g_stbChartVisualOnly)
+      Print("STB VIEW-ONLY MODE: chart attached; broker-facing actions and account-management cycles are disabled outside Strategy Tester.");
 
    g_autoStateName=ScopedStateName("AUTO");
 
@@ -11085,8 +11159,8 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
      }
 
-   // Establish the initial daily equity baseline; it rolls over on server-date changes.
-   if(STB_DailyLossLimitHit())
+   // Only initialize account-level risk state inside Strategy Tester.
+   if(!g_stbChartVisualOnly && STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
 // Keep AUTO TRADING state across chart timeframe/symbol reinitialization,
@@ -11103,22 +11177,24 @@ int OnInit()
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
       STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
      }
+   else if(!InpAutoTrading)
+     {
+      // Input=false forces AUTO OFF at initialization.
+      g_autoTrading=false;
+      GlobalVariableSet(g_autoStateName,0.0);
+     }
+   else if(g_stbChartVisualOnly)
+     {
+      // Never restore persisted AUTO state on a normal chart.
+      g_autoTrading=false;
+     }
+   else if(GlobalVariableCheck(g_autoStateName))
+      g_autoTrading=(GlobalVariableGet(g_autoStateName)>0.5);
    else
-      if(!InpAutoTrading)
-        {
-         // Input=false forces AUTO OFF at initialization. The chart's
-         // explicit AUTO button remains a deliberate runtime override.
-         g_autoTrading=false;
-         GlobalVariableSet(g_autoStateName,0.0);
-        }
-      else
-         if(GlobalVariableCheck(g_autoStateName))
-            g_autoTrading=(GlobalVariableGet(g_autoStateName)>0.5);
-         else
-           {
-            g_autoTrading=true;
-            GlobalVariableSet(g_autoStateName,1.0);
-           }
+     {
+      g_autoTrading=true;
+      GlobalVariableSet(g_autoStateName,1.0);
+     }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -11197,27 +11273,22 @@ int OnInit()
 
 
 
-// P9 restart/reinitialize recovery: rebuild pending-trail state for EVERY
-// managed pending type before the first management cycle. This prevents the
-// first cycle from registering/trailing recovered orders before a clean rebuild.
-   STB_PendingTrailRebuildFromTerminal();
-
-// Seed the per-ticket geometry/override registry before any write is attempted.
-// This closes the attach/restart window in which a manual SL/TP edit could be
-// mistaken for an unknown baseline because the first timer reconciliation had
-// not yet run.
-   STB_ReconcileTradeRegistry();
-
-// Harden restart/reattach protection: do not wait for the first Tick/Timer.
-// Every currently open position is checked immediately through the one cycle.
-   STB_RunManagementCycle(); // Protection takes priority during startup/recovery.
-
-   // Scanner discovery is independent of account-wide exposure. Execution
-   // still checks managed exposure for the candidate's own symbol.
-   STB_ScannerRun();
-   g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+   if(!g_stbChartVisualOnly)
+     {
+      // Tester startup rebuilds recovered pending state before management.
+      STB_PendingTrailRebuildFromTerminal();
+      STB_ReconcileTradeRegistry();
+      STB_RunManagementCycle();
+      STB_ScannerRun();
+      g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
+     }
+   else
+     {
+      g_dashboardLastAction="VIEW ONLY - STRATEGY TESTER REQUIRED";
+     }
 
    UpdatePanel();
+   UpdateButtons();
    return INIT_SUCCEEDED;
   }
 
@@ -11382,6 +11453,11 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
                             const ENUM_STB_DELETE_REASON reason,
                             const string source)
   {
+   if(!STB_BrokerWritesAllowed())
+     {
+      Print("STB DELETE BLOCKED reason=STRATEGY_TESTER_ONLY");
+      return false;
+     }
    if(ticket==0 || !OrderSelect(ticket))
       return false;
 
@@ -11628,6 +11704,11 @@ void STB_RunManagementCycle()
 
 void OnTick()
   {
+   if(g_stbChartVisualOnly)
+     {
+      UpdatePanel();
+      return;
+     }
    STB_EnforceDailyRiskGuard();
    bool m15Bar=NewM15Bar();
    if(m15Bar)
@@ -11653,6 +11734,12 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+   if(g_stbChartVisualOnly)
+     {
+      UpdatePanel();
+      UpdateButtons();
+      return;
+     }
    STB_EnforceDailyRiskGuard();
    // Recover terminal-visible positions/orders before the manager pass so a
    // missed or delayed transaction handoff can be protected in this timer cycle.
@@ -11680,6 +11767,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
+   if(g_stbChartVisualOnly)
+      return;
 // Trade transaction intake is the single transaction-level protection owner.
    STB_TradeIntakeFromTransaction(trans);
 
@@ -11934,6 +12023,11 @@ void OnChartEvent(const int id,
          return;
         }
      }
+
+   // The keyboard dashboard toggle above is visual-only; every button action
+   // below is blocked when attached outside Strategy Tester.
+   if(g_stbChartVisualOnly)
+      return;
 
    if(id==CHARTEVENT_CHART_CHANGE) return; // P6 STB-CLEANUP: no rebuild/redraw on chart change
 
