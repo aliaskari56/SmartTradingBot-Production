@@ -10247,13 +10247,17 @@ void STB_ScannerRun()
       // Use the same bar-based age contract during final watchlist ranking.
       c.setupAgeBars=(int)MathMax(0,setupBarShift-1);
 
-      if(InpMaxSetupAgeBars>0 &&
-         c.setupAgeBars>InpMaxSetupAgeBars)
+      // Use the same effective age limit as discovery and final handoff.
+      // Adaptive profiles may override InpMaxSetupAgeBars; using the raw input
+      // here could reject a valid candidate early or admit one only to reject
+      // it again during final revalidation.
+      int watchlistMaxAge=STB_EffectiveMaxSetupAgeBars();
+      if(watchlistMaxAge>0 && c.setupAgeBars>watchlistMaxAge)
         {
          Print("STB SCANNER REJECT stage=WATCHLIST_AGE symbol=",c.symbol,
                " direction=",(c.direction>0 ? "BUY":"SELL"),
                " ageBars=",IntegerToString(c.setupAgeBars),
-               " maxAgeBars=",IntegerToString(InpMaxSetupAgeBars));
+               " maxAgeBars=",IntegerToString(watchlistMaxAge));
          continue;
         }
 
