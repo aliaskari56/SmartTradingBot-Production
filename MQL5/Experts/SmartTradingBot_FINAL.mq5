@@ -1876,10 +1876,11 @@ bool TradeRetcodePlacementSucceeded()
   {
    uint ret=trade.ResultRetcode();
 
+   // NO_CHANGES describes an unchanged existing object, not proof that a
+   // new pending order was accepted. Do not classify it as placement success.
    return ret==TRADE_RETCODE_DONE ||
           ret==TRADE_RETCODE_DONE_PARTIAL ||
-          ret==TRADE_RETCODE_PLACED ||
-          ret==TRADE_RETCODE_NO_CHANGES;
+          ret==TRADE_RETCODE_PLACED;
   }
 
 // Minimum distance required by the broker for pending price, SL and TP.
