@@ -586,6 +586,7 @@ def main() -> int:
         ("unresolved pending submission quarantines retries and expires safely",
          "void STB_MarkPendingSubmitUnknown(" in source
          and "TimeLocal()+90" in source
+         and "GlobalVariableSet(key" in source
          and "prior request unresolved" in source
          and "GlobalVariableDel(unknownKey)" in source),
         ("restart recovery rebuilds pending trail state from active managed orders",
