@@ -262,12 +262,15 @@ def main() -> int:
              "BUY_SL_INSIDE_BROKER_ZONE", "SELL_SL_INSIDE_BROKER_ZONE",
              "r.valid=true;", "r.reason=\"OK\";")) and
          "STB_ResolvePendingDistance(" in trail_source),
-        ("pending trail does not classify partial execution as successful modification",
+        ("pending trail never uses stale CTrade retcodes to classify a false writer outcome",
          "int STB_PendingClassifyResult(const bool ok)" in trail_source and
-         "case TRADE_RETCODE_DONE_PARTIAL:" not in source_region(
+         "if(ok)\n      return STB_PEND_RES_SUCCESS;" in source_region(
              trail_source, "int STB_PendingClassifyResult(const bool ok)",
              "//--- Register a real terminal pending order") and
-         "case TRADE_RETCODE_DONE:" in source_region(
+         "return STB_PEND_RES_OTHER_FAILURE;" in source_region(
+             trail_source, "int STB_PendingClassifyResult(const bool ok)",
+             "//--- Register a real terminal pending order") and
+         "trade.ResultRetcode()" not in source_region(
              trail_source, "int STB_PendingClassifyResult(const bool ok)",
              "//--- Register a real terminal pending order")),
         ("pending trail retires disappeared orders before exposure-allocation checks",
