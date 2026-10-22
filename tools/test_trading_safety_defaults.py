@@ -381,7 +381,7 @@ def main() -> int:
          and "nextRetryTime>TimeCurrent()" in pending_trail_code
          and "lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC" in pending_trail_code
          and pending_trail_code.index("if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())")
-             < pending_trail_code.index("datetime closedBar=iTime(symbol,PERIOD_M5,1)"))),
+             < pending_trail_code.index("datetime closedBar=iTime(symbol,PERIOD_M5,1)")),
         ("pending-trail only submits from the verified symbol lease owner",
          "STB_SymbolManagementOwnedVerified(managedSymbol)" in pending_trail_code
          and "if(!STB_SymbolManagementOwnedVerified(managedSymbol))" in pending_trail_code),
