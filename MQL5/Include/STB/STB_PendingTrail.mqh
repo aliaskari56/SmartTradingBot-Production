@@ -733,7 +733,8 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                  g_stbPendingTrail[idx].entryBufferPips,
                                  res,
                                  g_stbPendingTrail[idx].slBufferPips,
-                                 candleStop ? OrderGetDouble(ORDER_PRICE_OPEN):0.0);
+                                 STB_PendingIsStopKind((ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType)
+                                 ? OrderGetDouble(ORDER_PRICE_OPEN):0.0);
 
    // Do not fabricate a synthetic candle extreme merely to push a pending
    // STOP beyond the current market. If the true candle-derived geometry is

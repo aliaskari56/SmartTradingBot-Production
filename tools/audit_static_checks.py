@@ -143,6 +143,9 @@ def main() -> int:
     trail_path = pathlib.Path("MQL5/Include/STB/STB_PendingTrail.mqh")
     trail_source = (trail_path.read_text(encoding="utf-8")
                     if trail_path.is_file() else "")
+    resolver_path = pathlib.Path("MQL5/Include/STB/STB_PendingDistanceResolver.mqh")
+    resolver_source = (resolver_path.read_text(encoding="utf-8")
+                       if resolver_path.is_file() else "")
     on_init = source_region(source, "int OnInit()", "// DEINIT")
     on_tick = source_region(source, "void OnTick()", "// TIMER")
     on_timer = source_region(source, "void OnTimer()", "// CHART EVENTS")
@@ -227,6 +230,33 @@ def main() -> int:
           "M5_BAR_NOT_BULLISH" not in trail_source and
           "if(committed)" in trail_source and
           "g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;" in trail_source),
+        ("pending STOP resolver measures from actual anchor to current broker boundary using tick size",
+         bool(resolver_source) and all(token in resolver_source for token in (
+             "double priceStep=MathMax(bl.point",
+             "tick.ask+bl.minDistance+priceStep",
+             "tick.bid-bl.minDistance-priceStep",
+             "minimumBuyEntry-extreme",
+             "extreme-maximumSellEntry"))),
+        ("pending STOP resolver refuses non-favorable geometry instead of issuing an invalid move",
+         bool(resolver_source) and all(token in resolver_source for token in (
+             "if(currentEntry>0.0 && rawEntry>=currentEntry-entryTolerance)",
+             "BUY_STOP_NO_FAVORABLE_VALID_ENTRY",
+             "if(currentEntry>0.0 && rawEntry<=currentEntry+entryTolerance)",
+             "SELL_STOP_NO_FAVORABLE_VALID_ENTRY"))),
+        ("pending STOP-LIMIT resolver also receives current entry for monotonic validation",
+         "STB_PendingIsStopKind((ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType)" in trail_source and
+         "OrderGetDouble(ORDER_PRICE_OPEN):0.0" in trail_source),
+        ("pending trail rebuild keeps anchor consistent with stored entry offset",
+         "Keep the anchor reconstructed from the CURRENT order geometry" in trail_source and
+         "double m5Low=iLow(symbol,PERIOD_M5,1);" not in
+           source_region(trail_source,
+                         "bool STB_PendingTrailRegister(",
+                         "//--- Rate-limited NO_NEW_EXTREME log")),
+        ("missing pending-order diagnostics consult history for terminal order state",
+         "HistoryOrderSelect(ticket)" in trail_source and
+         "ORDER_FILLED" in trail_source and
+         "ORDER_CANCELED" in trail_source and
+         "ORDER_EXPIRED" in trail_source),
         ("pending trail retires disappeared orders before exposure-allocation checks",
          (lambda body: bool(body) and
           "if(!OrderSelect(g_stbPendingTrail[idx].ticket))" in body and
