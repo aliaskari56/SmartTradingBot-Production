@@ -8830,9 +8830,13 @@ void STB_ExecuteTopCandidate()
       }
     if(g_scannerConfidence!="CLEAR")
       {
-       double topScore=g_scannerTop10[0].opportunityScore;
-       double secondScore=(g_scannerTop10Count>1 ?
-                           g_scannerTop10[1].opportunityScore:0.0);
+       double topScore=g_scannerWatchlistCount>0 ?
+                       g_scannerWatchlist[0].opportunityScore :
+                       g_scannerTop10[0].opportunityScore;
+       // Confidence is computed from the full revalidated watchlist, so
+       // diagnostics must report the same runner-up even when TopN=1.
+       double secondScore=(g_scannerWatchlistCount>1 ?
+                           g_scannerWatchlist[1].opportunityScore:0.0);
        Print("STB EXECUTION SKIP reason=CONFIDENCE_NOT_CLEAR",
              " confidence=",g_scannerConfidence,
              " top=",g_scannerTop10[0].symbol,
@@ -8924,6 +8928,11 @@ void STB_ExecuteTopCandidate()
       double entryLockToken=0.0;
       if(!STB_EntryLockAcquire(symbol,entryLockToken))
         {
+         Print("STB CANDIDATE REJECT stage=ENTRY_LOCK",
+               " symbol=",symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " reason=LOCK_BUSY_OR_UNAVAILABLE",
+               " rank=",IntegerToString(c.currentRank));
          if(!wasSelected && !STB_HasSymbolExposureForManagement(symbol))
             SymbolSelect(symbol,false);
          continue;
