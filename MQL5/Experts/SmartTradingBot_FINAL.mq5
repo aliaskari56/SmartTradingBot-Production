@@ -11222,36 +11222,15 @@ int OnInit()
    if(STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
-// Keep AUTO TRADING state across chart timeframe/symbol reinitialization,
-// but isolate it by account + EA magic to avoid terminal-wide collisions.
-// In Strategy Tester, the input must be authoritative so a previous
-// emulated terminal-global state cannot silently disable trading.
-   if(MQLInfoInteger(MQL_TESTER))
-     {
-      // Tester runs must never depend on stale terminal GlobalVariables or
-      // on a missing/malformed .set toggle. The explicit tester override is
-      // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading ||
-                     InpTesterForceAutoTrading);
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
-     }
-   else
-      if(!InpAutoTrading)
-        {
-         // Input=false forces AUTO OFF at initialization. The chart's
-         // explicit AUTO button remains a deliberate runtime override.
-         g_autoTrading=false;
-         GlobalVariableSet(g_autoStateName,0.0);
-        }
-      else
-         if(GlobalVariableCheck(g_autoStateName))
-            g_autoTrading=(GlobalVariableGet(g_autoStateName)>0.5);
-         else
-           {
-            g_autoTrading=true;
-            GlobalVariableSet(g_autoStateName,1.0);
-           }
+// The input determines startup AUTO state in both tester and terminal runtime.
+// The chart button may override it while the EA is running; a later reinit
+// restores the configured input instead of inheriting a stale OFF terminal flag.
+   g_autoTrading=(InpAutoTrading ||
+                  (MQLInfoInteger(MQL_TESTER) && InpTesterForceAutoTrading));
+   if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0)
+      Print("STB INIT WARNING: unable to persist AUTO state err=",GetLastError());
+   if(MQLInfoInteger(MQL_TESTER) && g_autoTrading)
+      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: tester AUTO reset only
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -11701,54 +11680,58 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
 void STB_EnforceDailyRiskGuard()
   {
    bool riskBlocked=STB_DailyLossLimitHit();
-   // A corrupt/unavailable baseline fails closed for new entries, but must not
-   // liquidate positions. Liquidation/cancellation is reserved for a verified
-   // breach of the configured daily equity-loss threshold.
+   // Missing/corrupt risk state blocks new entries, but only a verified loss
+   // threshold breach triggers risk enforcement actions.
    if(!riskBlocked || !g_stbDailyLossThresholdReached)
       return;
 
-   // Daily-risk hardening in terminal runtime and tester: block further entries,
-   // cancel eligible EA-owned pending orders, and attempt to flatten only
-   // positions opened by this EA. This is not a guaranteed loss ceiling:
-   // gaps, slippage, and rejected closes can exceed the configured percentage.
-   for(int i=PositionsTotal()-1;i>=0;i--)
+   // Preserve the historical tester behavior. In terminal/demo/live runtime,
+   // do not forcibly close already-open positions: the daily guard blocks new
+   // entries and cancels eligible EA pending orders; normal position protection
+   // continues. This matches InpMaxDailyLossPercent's user-facing purpose.
+   if(MQLInfoInteger(MQL_TESTER))
      {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !PositionSelectByTicket(ticket))
-         continue;
-      if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
-         continue;
-
-      string symbol=PositionGetString(POSITION_SYMBOL);
-      if(!STB_SymbolManagementOwnedVerified(symbol))
-         continue;
-
-      trade.SetExpertMagicNumber(InpMagic);
-      trade.SetAsyncMode(false);
-      ResetLastError();
-      bool closeOK=trade.PositionClose(ticket);
-      uint closeRetcode=trade.ResultRetcode();
-
-      if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
+      for(int i=PositionsTotal()-1;i>=0;i--)
         {
-         Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
-               " symbol=",symbol,
-               " requestOK=",closeOK ? "YES":"NO",
-               " retcode=",IntegerToString((int)closeRetcode),
-               " description=",trade.ResultRetcodeDescription(),
-               " error=",GetLastError());
-         continue;
-        }
+         ulong ticket=PositionGetTicket(i);
+         if(ticket==0 || !PositionSelectByTicket(ticket))
+            continue;
+         if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
+            continue;
 
-      if(PositionSelectByTicket(ticket))
-         Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
-               " symbol=",symbol,
-               " retcode=",IntegerToString((int)closeRetcode));
-      else
-         Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
-               " symbol=",symbol);
+         string symbol=PositionGetString(POSITION_SYMBOL);
+         if(!STB_SymbolManagementOwnedVerified(symbol))
+            continue;
+
+         trade.SetExpertMagicNumber(InpMagic);
+         trade.SetAsyncMode(false);
+         ResetLastError();
+         bool closeOK=trade.PositionClose(ticket);
+         uint closeRetcode=trade.ResultRetcode();
+
+         if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
+           {
+            Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
+                  " symbol=",symbol,
+                  " requestOK=",closeOK ? "YES":"NO",
+                  " retcode=",IntegerToString((int)closeRetcode),
+                  " description=",trade.ResultRetcodeDescription(),
+                  " error=",GetLastError());
+            continue;
+           }
+
+         if(PositionSelectByTicket(ticket))
+            Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
+                  " symbol=",symbol,
+                  " retcode=",IntegerToString((int)closeRetcode));
+         else
+            Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
+                  " symbol=",symbol);
+        }
      }
 
+   // In both modes, prevent managed EA pending entries from triggering after
+   // the daily risk threshold is reached.
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
       ulong ticket=OrderGetTicket(i);
