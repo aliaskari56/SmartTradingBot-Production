@@ -72,9 +72,10 @@ For HEAD `9a9fc92c2931cca80406c67ecb631ea363983646`:
 - MQL5 static audit: **passed** — run [39733392895](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392895)
 - Trading safety defaults: **passed** — run [39733393008](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733393008)
 - LRN-04 journal contract tests: **passed** — run [39733392930](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392930)
-- MetaEditor compile: **in progress at checkpoint time** — run [39733392922](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392922)
+- MetaEditor compile for the then-current source: **passed, 0 errors / 0 warnings** — run [39733518351](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733518351), commit `569e8ee031cd7c0b7508b4fef00965a4182e1ae8`.
+- The isolated LRN-04 SHA-256 golden-vector script also compiled with **0 errors / 0 warnings** in the same workflow.
 
-A green static test suite is not a substitute for compiler success, Strategy Tester behavior, restart/fault injection, or broker-specific validation. Re-check the current workflow state before treating the source as compile-verified.
+A successful compile is confirmed for commit `569e8ee031cd7c0b7508b4fef00965a4182e1ae8`. A later documentation-only commit does not change MQL5 source. A green compile/static test suite is not a substitute for Strategy Tester behavior, restart/fault injection, or broker-specific validation.
 
 ## Remaining release blockers and test gaps
 
