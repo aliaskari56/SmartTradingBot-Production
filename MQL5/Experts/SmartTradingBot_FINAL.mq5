@@ -9647,7 +9647,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
    long age=(long)qualityClock-(long)tick.time;
    if(age<0)
       age=0; // The shared validator already rejected future skew beyond two seconds.
-   if(age>(long)MathMax(30,InpScannerMaxQuoteAgeSec))
+   if(age>(long)InpScannerMaxQuoteAgeSec)
      {
       q.reason="REJECT_STALE_DATA";
       return false;
@@ -9655,7 +9655,7 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
 
    q.freshnessScore=100.0-
                     MathMin(100.0,
-                            (double)age/(double)MathMax(30,InpScannerMaxQuoteAgeSec)*100.0);
+                            (double)age/(double)InpScannerMaxQuoteAgeSec*100.0);
 
    if(!MathIsValidNumber(q.spreadPips) ||
       !MathIsValidNumber(q.relativeSpread) ||
