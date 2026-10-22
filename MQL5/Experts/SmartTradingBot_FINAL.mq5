@@ -22,7 +22,7 @@ input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
-input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
+input string  InpScannerSymbols         = "";   // scanner universe only; management always covers all account symbols (except tester isolation)
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 45.0;
@@ -4415,37 +4415,14 @@ bool STB_IsSymbolAllowed(const string s)
    if(s=="")
       return false;
 
-   // Strategy Tester isolation is a hard scope boundary when enabled.
+   // Management scope is deliberately independent from scanner scope:
+   // every live/demo position and pending order is eligible regardless of
+   // symbol, origin, magic number, or whether it was placed from mobile/manual/EA.
+   // Strategy Tester can retain its explicit chart-symbol-only isolation.
    if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
       return s==_Symbol;
 
-   // The chart symbol remains manageable even when the scanner is configured
-   // to explore a different explicit symbol universe (manual controls operate
-   // on _Symbol). Additional symbols follow the configured universe.
-   if(s==_Symbol)
-      return true;
-
-   // Universal management scope: an empty list means every symbol that has
-   // an account position or pending order, not only selected Market Watch symbols.
-   if(StringLen(InpScannerSymbols)==0)
-      return true;
-
-   string parts[];
-   string cfg=InpScannerSymbols;
-   StringReplace(cfg,";",",");
-   ushort sep=StringGetCharacter(",",0);
-   int n=StringSplit(cfg,sep,parts);
-
-   for(int i=0;i<n;i++)
-     {
-      string it=parts[i];
-      StringTrimLeft(it);
-      StringTrimRight(it);
-      if(it!="" && it==s)
-         return true;
-     }
-
-   return false;
+   return true;
   } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket))
