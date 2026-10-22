@@ -465,6 +465,28 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP,manual);
    int cls=STB_PendingClassifyResult(ok);
 
+   // The order can fill/cancel/expire between ManageOne's initial selection
+   // and the central writer's final re-selection. Do not turn that lifecycle
+   // race into a broker-modification failure or consume the retry budget.
+   if(!ok && !OrderSelect(ticket))
+   {
+      string missingReason=STB_PendingTrailMissingOrderReason(ticket);
+      if(missingReason=="ORDER_FILLED" ||
+         missingReason=="ORDER_CANCELED" ||
+         missingReason=="ORDER_EXPIRED" ||
+         missingReason=="ORDER_REJECTED")
+      {
+         int goneIdx=STB_PendingTrailFind(ticket);
+         if(goneIdx>=0)
+            g_stbPendingTrail[goneIdx].active=false;
+
+         Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+               " reason=",missingReason,
+               " stage=POST_SUBMIT_RECHECK");
+         return false;
+      }
+   }
+
    if(ok)
    {
       if(manual)
