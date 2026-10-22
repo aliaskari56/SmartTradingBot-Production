@@ -18,7 +18,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = false;
+input bool    InpAutoTrading            = true;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -53,7 +53,7 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; this build is Strategy-Tester-only
+input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; requires valid SL geometry
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
@@ -145,18 +145,18 @@ input double  InpTrailStepPips             = 5.0;   // minimum SL improvement be
 
 bool g_modifyWasNoChanges=false;
 
-// Daily equity guard state. This build remains Strategy-Tester-only.
-// Terminal globals preserve the baseline across EA reinitialization. The key is
-// scoped to account, magic number and chart instance to reduce cross-test bleed.
+// Daily equity guard state. Tester runs use an isolated run token; terminal
+// runtime uses a stable account+magic namespace so daily baseline survives
+// chart reinitialization and is shared by instances using the same magic.
 double g_stbDailyStartEquity=0.0;
 int    g_stbDailyKey=0;
 bool   g_stbDailyLimitLogged=false;
+bool   g_stbDailyLossThresholdReached=false;
 string g_stbRunNamespace="";
 
-// A compact token separates tester runs. Keep it in a terminal global so
-// ordinary EA reinitialization within the same test preserves the daily-loss
-// baseline and adaptive state; OnDeinit clears the token when the test instance
-// is finally unloaded, so the next run receives a new namespace.
+// Tester runs use a persisted per-run token. Live/demo runtime uses a stable
+// account+magic namespace for the daily-risk baseline; this avoids resetting
+// the guard when the EA is detached/reattached or MT5 is restarted.
 string STB_RunNamespaceKey()
   {
    return "STB_RUN_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
@@ -166,7 +166,17 @@ string STB_RunNamespaceKey()
 bool STB_InitRunNamespace()
   {
    if(!MQLInfoInteger(MQL_TESTER))
-      return false;
+     {
+      long login=(long)AccountInfoInteger(ACCOUNT_LOGIN);
+      if(login<=0)
+        {
+         Print("STB INIT FAILED: valid account login unavailable for live risk namespace.");
+         return false;
+        }
+
+      g_stbRunNamespace="LIVE_"+(string)login+"_"+(string)InpMagic;
+      return (StringLen(g_stbRunNamespace)>0);
+     }
 
    string runKey=STB_RunNamespaceKey();
    if(GlobalVariableCheck(runKey))
@@ -227,10 +237,12 @@ void STB_DailyRiskClearState()
    g_stbDailyKey=0;
    g_stbDailyStartEquity=0.0;
    g_stbDailyLimitLogged=false;
+   g_stbDailyLossThresholdReached=false;
   }
 
 bool STB_DailyLossLimitHit()
   {
+   g_stbDailyLossThresholdReached=false;
    MqlDateTime nowParts;
    datetime now=TimeCurrent();
    if(now<=0 || !TimeToStruct(now,nowParts))
@@ -316,6 +328,7 @@ bool STB_DailyLossLimitHit()
    double lossPct=(g_stbDailyStartEquity-equity)/g_stbDailyStartEquity*100.0;
    if(lossPct+1e-9>=InpMaxDailyLossPercent)
      {
+      g_stbDailyLossThresholdReached=true;
       if(!g_stbDailyLimitLogged)
         {
          g_stbDailyLimitLogged=true;
@@ -4780,11 +4793,6 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB HEDGE REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB HEDGE REJECTED: daily equity loss limit active.");
@@ -8503,10 +8511,6 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
-   // Defense-in-depth: never submit pending orders outside Strategy Tester.
-   if(!MQLInfoInteger(MQL_TESTER))
-      return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
-
    if(!s.valid)
       return false;
 
@@ -9180,11 +9184,6 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9331,11 +9330,6 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
@@ -11210,17 +11204,9 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // SAFETY GATE: this build is restricted to Strategy Tester.
-   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
-      return INIT_FAILED;
-     }
-
    if(!STB_InitRunNamespace())
      {
-      Print("STB INIT FAILED: tester run namespace unavailable; refusing initialization.");
+      Print("STB INIT FAILED: risk namespace unavailable; refusing initialization.");
       return INIT_FAILED;
      }
 
@@ -11236,36 +11222,15 @@ int OnInit()
    if(STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
-// Keep AUTO TRADING state across chart timeframe/symbol reinitialization,
-// but isolate it by account + EA magic to avoid terminal-wide collisions.
-// In Strategy Tester, the input must be authoritative so a previous
-// emulated terminal-global state cannot silently disable trading.
-   if(MQLInfoInteger(MQL_TESTER))
-     {
-      // Tester runs must never depend on stale terminal GlobalVariables or
-      // on a missing/malformed .set toggle. The explicit tester override is
-      // deterministic and applies only inside Strategy Tester.
-      g_autoTrading=(InpAutoTrading ||
-                     InpTesterForceAutoTrading);
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
-      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: AUTO re-enables auto management
-     }
-   else
-      if(!InpAutoTrading)
-        {
-         // Input=false forces AUTO OFF at initialization. The chart's
-         // explicit AUTO button remains a deliberate runtime override.
-         g_autoTrading=false;
-         GlobalVariableSet(g_autoStateName,0.0);
-        }
-      else
-         if(GlobalVariableCheck(g_autoStateName))
-            g_autoTrading=(GlobalVariableGet(g_autoStateName)>0.5);
-         else
-           {
-            g_autoTrading=true;
-            GlobalVariableSet(g_autoStateName,1.0);
-           }
+// The input determines startup AUTO state in both tester and terminal runtime.
+// The chart button may override it while the EA is running; a later reinit
+// restores the configured input instead of inheriting a stale OFF terminal flag.
+   g_autoTrading=(InpAutoTrading ||
+                  (MQLInfoInteger(MQL_TESTER) && InpTesterForceAutoTrading));
+   if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0)
+      Print("STB INIT WARNING: unable to persist AUTO state err=",GetLastError());
+   if(MQLInfoInteger(MQL_TESTER) && g_autoTrading)
+      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: tester AUTO reset only
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -11708,57 +11673,64 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
-// Enforce the daily equity guard by attempting to close positions opened
-// with this EA's magic and cancel eligible EA-owned pending orders.
-// Broker rejection, gaps, slippage, or a failed close can exceed the configured
-// percentage; this is a guardrail, not a guaranteed maximum-loss boundary.
+// Enforce the daily equity guard. Tester mode retains forced closing for EA-owned
+// positions; terminal/demo/live mode blocks new entries and cancels eligible EA
+// pending orders while normal position protection continues. Broker rejection,
+// gaps, and slippage mean this guard is not a guaranteed maximum-loss boundary.
 void STB_EnforceDailyRiskGuard()
   {
-   if(!STB_DailyLossLimitHit())
+   bool riskBlocked=STB_DailyLossLimitHit();
+   // Missing/corrupt risk state blocks new entries and cancels pending entries,
+   // but it must never be treated as a verified loss breach for liquidation.
+   if(!riskBlocked)
       return;
 
-   // Tester-only hardening: block further entries, cancel eligible EA-owned
-   // pending orders, and attempt to flatten only positions opened by this EA.
-   // This is not a guaranteed loss ceiling: gaps, slippage, and rejected closes
-   // can still cause the realized loss to exceed the configured percentage.
-   for(int i=PositionsTotal()-1;i>=0;i--)
+   // Preserve historical tester liquidation only for a verified threshold breach.
+   // In terminal/demo/live runtime, existing positions remain under normal
+   // protection; managed EA pending entries are canceled to avoid new exposure.
+   if(MQLInfoInteger(MQL_TESTER) && g_stbDailyLossThresholdReached)
      {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || !PositionSelectByTicket(ticket))
-         continue;
-      if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
-         continue;
-
-      string symbol=PositionGetString(POSITION_SYMBOL);
-      if(!STB_SymbolManagementOwnedVerified(symbol))
-         continue;
-
-      trade.SetExpertMagicNumber(InpMagic);
-      trade.SetAsyncMode(false);
-      ResetLastError();
-      bool closeOK=trade.PositionClose(ticket);
-      uint closeRetcode=trade.ResultRetcode();
-
-      if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
+      for(int i=PositionsTotal()-1;i>=0;i--)
         {
-         Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
-               " symbol=",symbol,
-               " requestOK=",closeOK ? "YES":"NO",
-               " retcode=",IntegerToString((int)closeRetcode),
-               " description=",trade.ResultRetcodeDescription(),
-               " error=",GetLastError());
-         continue;
-        }
+         ulong ticket=PositionGetTicket(i);
+         if(ticket==0 || !PositionSelectByTicket(ticket))
+            continue;
+         if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
+            continue;
 
-      if(PositionSelectByTicket(ticket))
-         Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
-               " symbol=",symbol,
-               " retcode=",IntegerToString((int)closeRetcode));
-      else
-         Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
-               " symbol=",symbol);
+         string symbol=PositionGetString(POSITION_SYMBOL);
+         if(!STB_SymbolManagementOwnedVerified(symbol))
+            continue;
+
+         trade.SetExpertMagicNumber(InpMagic);
+         trade.SetAsyncMode(false);
+         ResetLastError();
+         bool closeOK=trade.PositionClose(ticket);
+         uint closeRetcode=trade.ResultRetcode();
+
+         if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
+           {
+            Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
+                  " symbol=",symbol,
+                  " requestOK=",closeOK ? "YES":"NO",
+                  " retcode=",IntegerToString((int)closeRetcode),
+                  " description=",trade.ResultRetcodeDescription(),
+                  " error=",GetLastError());
+            continue;
+           }
+
+         if(PositionSelectByTicket(ticket))
+            Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
+                  " symbol=",symbol,
+                  " retcode=",IntegerToString((int)closeRetcode));
+         else
+            Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
+                  " symbol=",symbol);
+        }
      }
 
+   // In both modes, prevent managed EA pending entries from triggering after
+   // the daily risk threshold is reached.
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
       ulong ticket=OrderGetTicket(i);
