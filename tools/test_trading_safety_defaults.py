@@ -366,8 +366,10 @@ def main() -> int:
          and "request.type_filling=ORDER_FILLING_RETURN;" in pending_check_code),
         ("pending-order modification preflight is scoped to geometry writer",
          bool(pending_modify_code)
-         and "if(!OrderCheck(req,check))" in pending_modify_code
-         and "check.retcode!=0" in pending_modify_code),
+         and "bool pendingOrderCheckOK=OrderCheck(req,check);" in pending_modify_code
+         and "if(!pendingOrderCheckOK)" in pending_modify_code
+         and "check.retcode!=0" in pending_modify_code
+         and "pendingOrderCheckLastError=GetLastError();" in pending_modify_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
