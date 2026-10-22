@@ -382,7 +382,7 @@ def main() -> int:
          and "MathAbs(newEntry-MathRound(newEntry/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
          and "MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
          and "MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
-         and "reason=PRICE_OFF_TRADE_TICK_GRID" in pending_modify_code),
+         and "pendingPricesOnTickGrid" in pending_modify_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
