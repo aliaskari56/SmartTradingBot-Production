@@ -80,6 +80,28 @@ double STB_TickAlignPrice(const string symbol,const double price)
    return NormalizePrice(symbol,aligned);
 }
 
+//--- Directional tick alignment for broker-bound prices -------------
+// Entry prices are rounded AWAY from the market-facing invalid boundary:
+// BUY_STOP/BUY_STOP_LIMIT and SELL_LIMIT round up; SELL_STOP/SELL_STOP_LIMIT
+// and BUY_LIMIT round down. SL rounds down for BUY risk and up for SELL risk.
+// Nearest-tick rounding can still put a price inside the broker stop/freeze zone.
+double STB_TickAlignPriceDirectional(const string symbol,
+                                     const double price,
+                                     const bool roundUp)
+{
+   if(price<=0.0)
+      return 0.0;
+
+   STBBrokerLimits bl;
+   if(!STB_ReadBrokerLimits(symbol,bl) || bl.tickSize<=0.0)
+      return NormalizePrice(symbol,price);
+
+   double units=price/bl.tickSize;
+   double alignedUnits=(roundUp ? MathCeil(units-1e-10)
+                                : MathFloor(units+1e-10));
+   return NormalizePrice(symbol,alignedUnits*bl.tickSize);
+}
+
 //--- Pending classification (single source of truth) ---------------
 bool STB_PendingIsBuySide(const ENUM_ORDER_TYPE orderType)
 {
@@ -244,12 +266,6 @@ bool STB_ResolvePendingDistance(const string symbol,
          rawEntry=minimumBuyEntry;
          effectiveOffset=rawEntry-extreme;
         }
-
-      if(currentEntry>0.0 && rawEntry>=currentEntry-entryTolerance)
-        {
-         r.reason="BUY_STOP_NO_FAVORABLE_VALID_ENTRY";
-         return false;
-        }
      }
    else if(orderType==ORDER_TYPE_SELL_STOP ||
            orderType==ORDER_TYPE_SELL_STOP_LIMIT)
@@ -260,27 +276,52 @@ bool STB_ResolvePendingDistance(const string symbol,
          rawEntry=maximumSellEntry;
          effectiveOffset=extreme-rawEntry;
         }
-
-      if(currentEntry>0.0 && rawEntry<=currentEntry+entryTolerance)
-        {
-         r.reason="SELL_STOP_NO_FAVORABLE_VALID_ENTRY";
-         return false;
-        }
      }
 
-   // Pending SL distance is measured from the pending Entry itself and the SL
-   // sits on the risk side of the order direction (BUY below, SELL above).
-   double rawSL=(isBuy ? rawEntry-slBufferPips*pip
-                       : rawEntry+slBufferPips*pip);
+   // Round each entry away from the invalid market boundary.
+   bool entryRoundUp=
+      (orderType==ORDER_TYPE_BUY_STOP ||
+       orderType==ORDER_TYPE_BUY_STOP_LIMIT ||
+       orderType==ORDER_TYPE_SELL_LIMIT);
 
-   double entry=STB_TickAlignPrice(symbol,rawEntry);
-   double sl   =STB_TickAlignPrice(symbol,rawSL);
-
-   if(entry<=0.0 || sl<=0.0)
-   {
+   double entry=STB_TickAlignPriceDirectional(symbol,rawEntry,entryRoundUp);
+   if(entry<=0.0)
+     {
       r.reason="PRICE_INVALID";
       return false;
-   }
+     }
+
+   // Test the FINAL aligned price, not rawEntry: alignment can erase a small
+   // improvement or round the entry back into an invalid direction.
+   if((orderType==ORDER_TYPE_BUY_STOP ||
+       orderType==ORDER_TYPE_BUY_STOP_LIMIT) &&
+      currentEntry>0.0 && entry>=currentEntry-entryTolerance)
+     {
+      r.reason="BUY_STOP_NO_FAVORABLE_VALID_ENTRY";
+      return false;
+     }
+
+   if((orderType==ORDER_TYPE_SELL_STOP ||
+       orderType==ORDER_TYPE_SELL_STOP_LIMIT) &&
+      currentEntry>0.0 && entry<=currentEntry+entryTolerance)
+     {
+      r.reason="SELL_STOP_NO_FAVORABLE_VALID_ENTRY";
+      return false;
+     }
+
+   // SL distance is measured from the FINAL aligned Entry. Align away from
+   // risk: down for BUY, up for SELL.
+   double rawSL=(isBuy ? entry-slBufferPips*pip
+                       : entry+slBufferPips*pip);
+   double sl=STB_TickAlignPriceDirectional(symbol,rawSL,isSell);
+
+   if(sl<=0.0)
+     {
+      r.reason="PRICE_INVALID";
+      return false;
+     }
+
+   effectiveOffset=MathAbs(entry-extreme);
 
    // Broker validation, per pending geometry:
    //   BUY  STOP      : sl < bid < ask < entry          (breakout above)
