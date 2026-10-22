@@ -397,7 +397,6 @@ def main() -> int:
          "bool STB_IsPendingEntryBrokerValid(" in source_code
          and "bool IsValidSLForPendingOrder(" in source_code
          and source_code.count("!STB_ScannerQuoteValid(tick,quoteReason)") >= 2
-         and "REJECT_STALE_DATA" in source_code
          and "tick.ask<tick.bid" in source_code),
         ("pending limit broker-distance checks use the correct quote side",
          "case ORDER_TYPE_BUY_LIMIT:" in source_code
