@@ -2312,9 +2312,18 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // issue a second geometry write for this ticket in the same cycle.
    STB_CycleMarkWritten(ticket);
 
+   // Capture a clean terminal error code and the trade result immediately
+   // at the broker-call boundary. OrderSelect/geometry-cache operations below
+   // may overwrite the terminal's last-error state.
+   ResetLastError();
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
      {
+      int modifyLastError=GetLastError();
+      uint modifyRetcode=trade.ResultRetcode();
+      string modifyRetcodeDescription=trade.ResultRetcodeDescription();
+      string modifyComment=trade.ResultComment();
+
       failureReason="BROKER_ORDERMODIFY_RETURNED_FALSE";
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
@@ -2323,10 +2332,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                        OrderGetDouble(ORDER_TP));
       Print("STB PENDING MODIFY BROKER CALL FAILED ticket=",ticket,
             " symbol=",symbol,
-            " lastError=",GetLastError(),
-            " retcode=",trade.ResultRetcode(),
-            " retcodeDescription=",trade.ResultRetcodeDescription(),
-            " comment=",trade.ResultComment());
+            " lastError=",modifyLastError,
+            " retcode=",modifyRetcode,
+            " retcodeDescription=",modifyRetcodeDescription,
+            " comment=",modifyComment);
       return false;
      }
 
