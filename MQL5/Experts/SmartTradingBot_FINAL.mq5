@@ -11753,13 +11753,24 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
         }
      }
 
-   if(magic!=(long)InpMagic)
-      return;
-
 // Hedges use the same magic but are not strategy-profile observations.
    bool isHedge=STB_AdaptiveIsHedgeComment(comment);
+   bool isLifecycleClose=(entryType==DEAL_ENTRY_OUT ||
+                          entryType==DEAL_ENTRY_OUT_BY ||
+                          entryType==DEAL_ENTRY_INOUT);
+   bool hasTrackedAdaptiveLifecycle=(positionId>0 &&
+                                     STB_AdaptiveReadPositionProfile(positionId)>=0);
 
-   if(entryType==DEAL_ENTRY_IN && !isHedge && positionId>0)
+   // A manual/foreign-magic partial close still realizes PnL on an existing
+   // managed netting lifecycle. Include it only when the position already has
+   // an EA adaptive profile; never adopt unrelated foreign trades.
+   if(isHedge)
+      return;
+   if(magic!=(long)InpMagic &&
+      !(isLifecycleClose && hasTrackedAdaptiveLifecycle))
+      return;
+
+   if(entryType==DEAL_ENTRY_IN && positionId>0)
      {
       long dealType=HistoryDealGetInteger(trans.deal,DEAL_TYPE);
       int direction=(dealType==DEAL_TYPE_BUY ? 1 :
@@ -11819,9 +11830,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          STB_AdaptiveDeleteOrderState(trans.order);
         }
      }
-
-   if(isHedge)
-      return;
 
    if(entryType!=DEAL_ENTRY_OUT &&
       entryType!=DEAL_ENTRY_OUT_BY &&
