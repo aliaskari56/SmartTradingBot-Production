@@ -393,6 +393,11 @@ def main() -> int:
          and "case ORDER_TYPE_SELL_LIMIT:" in source_code
          and "STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)" in pending_modify_code
          and pending_modify_code.count("STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)") >= 2),
+        ("pending limit broker-distance checks use the correct quote side",
+         "case ORDER_TYPE_BUY_LIMIT:" in source_code
+         and "return entry<tick.ask-minDist;" in source_code
+         and "case ORDER_TYPE_SELL_LIMIT:" in source_code
+         and "return entry>tick.bid+minDist;" in source_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
