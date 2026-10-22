@@ -556,7 +556,9 @@ def main() -> int:
          "bool STB_HasDuplicatePendingType(" in source
          and "OrderGetString(ORDER_SYMBOL)!=symbol" in source
          and "OrderGetInteger(ORDER_TYPE)!=orderType" in source
-         and "OrderGetInteger(ORDER_MAGIC)!=magic" in source),
+         and "OrderGetInteger(ORDER_MAGIC)!=magic" in source
+         and "StringFind(existingComment,\"STB|M|\")!=0" in source
+         and "StringFind(existingComment,\"STB|\")!=0" in source),
         ("automatic pending path blocks duplicate same-type order before final OrderCheck",
          "STB_HasDuplicatePendingType(s.symbol,finalPendingType" in auto_placement_code
          and auto_placement_code.index("STB_HasDuplicatePendingType(")
