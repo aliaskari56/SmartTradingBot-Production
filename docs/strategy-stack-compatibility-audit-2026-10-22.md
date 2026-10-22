@@ -206,3 +206,25 @@ Examples of relative spread among session-open symbols include AUDCAD+ 46.875%, 
 The diagnostic script's first 25 rejected rows show session-open FX pairs and equities/crypto with materially different spreads and volatility; that reinforces that the single symbol universe is heterogeneous. Do not globally raise the cap or disable it to increase scanner counts. The next useful extraction is a compact distribution of `relative_spread_pct` for all 127 rejected symbols and all 17 `OK` symbols, with actual spread price, points, ATR, and a comparison grouped by instrument class where recognizable. A controlled offline Strategy Tester comparison must then measure net results after spread/commission and use separate out-of-sample data before any parameter can be described as preferable.
 
 Current conclusion: the diagnostic and EA are not yet proven mismatched on the ATR formula. The evidence supports three independent classes of skips—outside-session symbols, stale/missing history/quotes, and a hard relative-spread cap—plus the earlier observed H4 hard gate. No live trading thresholds have been changed based on this one snapshot.
+
+
+## Relative-spread distribution from the diagnostic CSV
+
+The user supplied the following percentile output for the 127 symbols classified as `RELATIVE_SPREAD_OVER_CAP` in the single-run diagnostic:
+
+| Percentile | Relative spread as % of M15 ATR |
+|---:|---:|
+| 50th | 46.510% |
+| 75th | 121.820% |
+| 90th | 199.140% |
+| 95th | 258.820% |
+
+The 15 rejected instruments nearest the 10% cap ranged from 11.242% (Unilever) to 17.854% (UK100+), while the ten largest values ranged from 235.912% (DOGUSD+) to 457.143% (XLMUSD+). Some examples are consistent with very low recent ATR relative to current spread; do not automatically interpret the extreme values as a unit bug, because both spread price and ATR are in price units and the diagnostic was written to reproduce the EA's `LocalATR` method. Check `spread_price`, `point`, `spread_points`, `m15_atr14`, current session and recent bars for any specific symbol under investigation.
+
+The 17 initially accepted examples had relative-spread values from 3.322% (XAUUSD+) through 9.446% (Micron), with all 17 below the 10% cap. This is consistent with the cap acting as designed in this snapshot. The accepted list is still only a preflight data/spread list: it is not a set of signals or a finding about profitability.
+
+The median rejected ratio of 46.51% means a simple small increase in the global cap would not admit the bulk of rejected symbols; admitting them would require allowing transaction spread to consume a substantial fraction of recent M15 range. This is especially unsuitable as a blanket change for a heterogeneous universe containing FX, indices, energy, crypto and cash-equity symbols. Keep the global gate unchanged pending asset-class-specific analysis and out-of-sample testing. More useful next steps are:
+1. emit a symbol property report with `SYMBOL_TRADE_TICK_SIZE`, `SYMBOL_POINT`, `SYMBOL_DIGITS`, exact `ask-bid`, ATR, and ratio;
+2. assess the ratio distribution separately within symbol classes and across several active sessions, not one snapshot;
+3. in an offline tester, quantify net expectancy after realistic spread/commission on the subset with valid data and a stable session;
+4. separately diagnose the H4 gate and downstream structural/pattern gates for this subset, since passing the spread preflight is not equivalent to passing the strategy.
