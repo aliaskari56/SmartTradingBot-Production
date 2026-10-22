@@ -10191,7 +10191,12 @@ void STB_ScannerRun()
 
       Setup validated;
       if(!STB_FinalCandidateRevalidation(c,validated))
+        {
+         Print("STB SCANNER REJECT stage=FINAL_REVALIDATION symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " reason=",(c.rejectReason=="" ? "UNSPECIFIED":c.rejectReason));
          continue;
+        }
 
       c.setup=validated;
 
@@ -10235,7 +10240,13 @@ void STB_ScannerRun()
 
       if(InpMaxSetupAgeBars>0 &&
          c.setupAgeBars>InpMaxSetupAgeBars)
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_AGE symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " ageBars=",IntegerToString(c.setupAgeBars),
+               " maxAgeBars=",IntegerToString(InpMaxSetupAgeBars));
          continue;
+        }
 
       // Recompute stability from the refreshed watchlist inputs. The
       // stability component compares the current preliminary score with the
@@ -10267,7 +10278,13 @@ void STB_ScannerRun()
          MathMax(0.0,MathMin(100.0,c.opportunityScore));
 
       if(c.opportunityScore+1e-9<InpScannerMinScore)
+        {
+         Print("STB SCANNER REJECT stage=WATCHLIST_SCORE symbol=",c.symbol,
+               " direction=",(c.direction>0 ? "BUY":"SELL"),
+               " score=",DoubleToString(c.opportunityScore,1),
+               " minScore=",DoubleToString(InpScannerMinScore,1));
          continue;
+        }
 
       g_scannerWatchlist[validWatch]=c;
       validWatch++;
