@@ -657,6 +657,12 @@ def main() -> int:
          'q.reason="REJECT_RELATIVE_SPREAD";' in source and
          "q.relativeSpread>InpMaxRelativeSpreadPct" in source and
          "!MathIsValidNumber(InpMaxRelativeSpreadPct)" in source),
+        ("scanner logs final revalidation, age and score rejection reasons instead of silently dropping candidates",
+         bool(scanner_run) and
+         'stage=FINAL_REVALIDATION symbol=' in scanner_run and
+         'stage=WATCHLIST_AGE symbol=' in scanner_run and
+         'stage=WATCHLIST_SCORE symbol=' in scanner_run and
+         'c.rejectReason' in scanner_run),
         ("selected structural SL can attach a missing structural TP in the same verified broker request",
          "double tpForRequest=-1.0" in source and
          "if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL" in source and
