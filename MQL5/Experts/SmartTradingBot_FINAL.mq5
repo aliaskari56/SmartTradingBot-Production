@@ -5053,14 +5053,26 @@ bool OneClickHedge()
                                      comment,"ONE_CLICK_HEDGE"))
        return false;
 
-    bool ok=(hedgeType==POSITION_TYPE_BUY)
-           ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(hedgeType==POSITION_TYPE_BUY)
+                  ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong hedgeOrder=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      hedgeOrder==0 || !OrderSelect(hedgeOrder))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(symbol,hedgeOrderType,(ulong)InpMagic,
+                                    volume,entry,sl,0.0,comment,reconciledTicket))
+         hedgeOrder=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(symbol,(ulong)InpMagic,hedgeOrderType,
+                                      "OneClickHedge",submitRetcode);
+         return false;
+        }
+     }
    if(hedgeOrder==0 || !VerifyPendingInitialSL(hedgeOrder))
      {
       Print("STB HEDGE REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
@@ -8892,39 +8904,32 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
                                     (ulong)InpMagic,comment,"SCANNER_FINAL_SUBMIT"))
       return STB_LogPlaceReject(s,"FINAL_ORDERCHECK_REJECT");
 
-    bool ok=false;
-
+   bool requestOK=false;
    if(s.direction>0)
-      ok=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
+      requestOK=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
    else
-      ok=trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
+      requestOK=trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
 
-   if(!ok)
-     {
-      Print("STB order request failed symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " lots=",DoubleToString(volume,3),
-            " entry=",DoubleToString(s.entry,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-     }
-
-   if(!TradeRetcodePlacementSucceeded())
-     {
-      Print("STB order server rejected symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " order=",IntegerToString((int)trade.ResultOrder()),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-     }
-
+   uint submitRetcode=trade.ResultRetcode();
    ulong placedOrder=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      placedOrder==0 || !OrderSelect(placedOrder))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(s.symbol,finalPendingType,(ulong)InpMagic,
+                                    volume,s.entry,s.sl,s.tp,comment,reconciledTicket))
+         placedOrder=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(s.symbol,(ulong)InpMagic,finalPendingType,
+                                      "PlaceSetup",submitRetcode);
+         Print("STB order submission unresolved; retry quarantined symbol=",s.symbol,
+               " ret=",IntegerToString((int)submitRetcode),
+               " description=",trade.ResultRetcodeDescription());
+         return false;
+        }
+     }
 
    if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))
      {
@@ -9526,14 +9531,26 @@ bool PlaceManualPendingDirection(const int direction)
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
        return false;
 
-    bool ok=(direction>0)
-           ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(direction>0)
+                  ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong ticket=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      ticket==0 || !OrderSelect(ticket))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(_Symbol,manualStopType,0,volume,entry,sl,0.0,
+                                    comment,reconciledTicket))
+         ticket=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(_Symbol,0,manualStopType,
+                                      "PlaceManualPendingDirection",submitRetcode);
+         return false;
+        }
+     }
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
      {
       Print("STB MANUAL PENDING REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
@@ -9685,14 +9702,26 @@ bool PlaceManualLimitDirection(const int direction)
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
        return false;
 
-    bool ok=(direction>0)
-           ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(direction>0)
+                  ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong ticket=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      ticket==0 || !OrderSelect(ticket))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(_Symbol,manualLimitType,0,volume,entry,sl,0.0,
+                                    comment,reconciledTicket))
+         ticket=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(_Symbol,0,manualLimitType,
+                                      "PlaceManualLimitDirection",submitRetcode);
+         return false;
+        }
+     }
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
      {
       Print("STB MANUAL LIMIT REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
