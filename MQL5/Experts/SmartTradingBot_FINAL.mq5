@@ -18,7 +18,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = false;
+input bool    InpAutoTrading            = true;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -53,7 +53,7 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = false; // explicit opt-in; conservative equity-risk sizing must be enabled in tester inputs
+input bool    InpUseRiskSizing         = true;  // enabled by default; conservative equity-risk sizing, hard-capped by input validation
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
@@ -145,7 +145,7 @@ input double  InpTrailStepPips             = 5.0;   // minimum SL improvement be
 
 bool g_modifyWasNoChanges=false;
 
-// Daily equity guard state. This build remains Strategy-Tester-only.
+// Daily equity guard state is active on live/demo charts and in Strategy Tester.
 // Terminal globals preserve the baseline across EA reinitialization. The key is
 // scoped to account, magic number and chart instance to reduce cross-test bleed.
 double g_stbDailyStartEquity=0.0;
@@ -4591,11 +4591,6 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB HEDGE REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB HEDGE REJECTED: daily equity loss limit active.");
@@ -8280,10 +8275,6 @@ bool STB_LogPlaceReject(const Setup &s,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceSetup(Setup &s,const double entryLockToken)
   {
-   // Defense-in-depth: never submit pending orders outside Strategy Tester.
-   if(!MQLInfoInteger(MQL_TESTER))
-      return STB_LogPlaceReject(s,"SAFETY_BLOCK_NOT_IN_STRATEGY_TESTER");
-
    if(!s.valid)
       return false;
 
@@ -8939,11 +8930,6 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL PENDING REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9085,11 +9071,6 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB MANUAL LIMIT REJECTED: tester-only safety gate.");
-      return false;
-     }
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
@@ -10887,15 +10868,10 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // SAFETY GATE: this build is restricted to Strategy Tester.
-   // Do not initialize the EA on a live/demo chart or enable broker-facing actions.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      Print("STB SAFETY BLOCK: SmartTradingBot_FINAL is tester-only in this revision; live chart initialization denied.");
-      return INIT_FAILED;
-     }
-
-   g_autoStateName=ScopedStateName("AUTO");
+   // Live/demo and Strategy Tester initialization are supported.
+   // Broker-facing operations remain subject to terminal/account permissions,
+   // quote validation, daily loss guard, volume limits, SL verification and writer leases.
+   g_autoStateName=ScopedStateName("AUTO_V2");
 
    if(!ValidateInputs())
      {
