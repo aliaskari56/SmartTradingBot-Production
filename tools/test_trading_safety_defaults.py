@@ -383,6 +383,16 @@ def main() -> int:
          and "MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
          and "MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
          and "pendingPricesOnTickGrid" in pending_modify_code),
+        ("pending modification rechecks type-specific entry distance against live quotes",
+         "bool STB_IsPendingEntryBrokerValid(" in source_code
+         and "case ORDER_TYPE_BUY_STOP:" in source_code
+         and "case ORDER_TYPE_BUY_STOP_LIMIT:" in source_code
+         and "case ORDER_TYPE_SELL_STOP:" in source_code
+         and "case ORDER_TYPE_SELL_STOP_LIMIT:" in source_code
+         and "case ORDER_TYPE_BUY_LIMIT:" in source_code
+         and "case ORDER_TYPE_SELL_LIMIT:" in source_code
+         and "STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)" in pending_modify_code
+         and pending_modify_code.count("STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)") >= 2),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
