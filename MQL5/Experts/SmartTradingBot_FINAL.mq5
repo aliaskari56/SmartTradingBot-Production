@@ -2793,6 +2793,7 @@ int CollectSwingsDetailed(const string symbol,
          int n=ArraySize(highs);
          if(ArrayResize(highs,n+1)!=n+1)
            {
+            diagnostic="SWING_HIGH_ALLOCATION_FAILED";
             Print("STB swing-high allocation failed symbol=",symbol,
                   " timeframe=",EnumToString(tf));
             ArrayFree(highs);
@@ -2811,6 +2812,7 @@ int CollectSwingsDetailed(const string symbol,
          int n=ArraySize(lows);
          if(ArrayResize(lows,n+1)!=n+1)
            {
+            diagnostic="SWING_LOW_ALLOCATION_FAILED";
             Print("STB swing-low allocation failed symbol=",symbol,
                   " timeframe=",EnumToString(tf));
             ArrayFree(highs);
@@ -2898,9 +2900,11 @@ TrendInfo GetH4Trend(const string symbol)
          result.reason=(historyState=="H4_SERIES_READY" ?
                         "H4_COPYRATES_INCOMPLETE":historyState);
         }
-      else if(swingDiagnostic=="SWING_BUFFER_ALLOCATION_FAILED" ||
+      else if(StringFind(swingDiagnostic,"ALLOCATION_FAILED")>=0 ||
               swingDiagnostic=="LOOKBACK_TOO_SHORT_FOR_SWING_CONFIRMATION")
          result.reason="H4_"+swingDiagnostic;
+      else if(swingDiagnostic=="NO_CONFIRMED_SWINGS")
+         result.reason="H4_NO_CONFIRMED_SWINGS";
       else
          result.reason="H4_INSUFFICIENT_CONFIRMED_SWINGS_H"+
                        IntegerToString(nh)+"_L"+IntegerToString(nl);
