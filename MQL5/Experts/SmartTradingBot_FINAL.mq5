@@ -4941,6 +4941,11 @@ bool OneClickHedge()
        return false;
       }
 
+   // Recheck aggregate directional exposure at the final broker-submit boundary;
+   // another actor may have added exposure since the earlier sizing check.
+   if(!STB_DirectionVolumeWithinLimit(symbol,hedgeDirection,volume,"OneClickHedgeFinal"))
+      return false;
+
     ENUM_ORDER_TYPE hedgeOrderType=(hedgeType==POSITION_TYPE_BUY)
                                       ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP;
     if(!STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0,
@@ -9344,6 +9349,10 @@ bool PlaceManualPendingDirection(const int direction)
              " reason=",(manualQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualQuoteReason));
        return false;
       }
+   // Recheck broker directional-volume capacity immediately before preflight/submit.
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirectionFinal"))
+      return false;
+
     ENUM_ORDER_TYPE manualStopType=(direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
     if(!STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
@@ -9496,6 +9505,10 @@ bool PlaceManualLimitDirection(const int direction)
              " reason=",(manualLimitQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualLimitQuoteReason));
        return false;
       }
+   // Recheck broker directional-volume capacity immediately before preflight/submit.
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirectionFinal"))
+      return false;
+
     ENUM_ORDER_TYPE manualLimitType=(direction>0 ? ORDER_TYPE_BUY_LIMIT:ORDER_TYPE_SELL_LIMIT);
     if(!STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
