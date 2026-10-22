@@ -2258,14 +2258,25 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // issue a second geometry write for this ticket in the same cycle.
    STB_CycleMarkWritten(ticket);
 
-   if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
-                         typeTime,expiration,stopLimit))
+   ResetLastError();
+   bool pendingModifyRequestOK=trade.OrderModify(ticket,newEntry,newSL,newTP,
+                                                 typeTime,expiration,stopLimit);
+   uint pendingModifyRetcode=trade.ResultRetcode();
+   int pendingModifyLastError=GetLastError();
+
+   if(!pendingModifyRequestOK)
      {
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
                        OrderGetDouble(ORDER_TP));
+      Print("STB PENDING MODIFY REQUEST FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " requestOK=",pendingModifyRequestOK,
+            " retcode=",IntegerToString((int)pendingModifyRetcode),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",IntegerToString(pendingModifyLastError));
       return false;
      }
 
