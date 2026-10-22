@@ -889,10 +889,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                " currentEntry=",DoubleToString(currentEntry,digits),
                " currentSL=",DoubleToString(currentSL,digits),
                " failureCount=",failures,
-               " retryAt=",(string)retryAt,
-               " lastError=",GetLastError(),
-               " tradeRetcode=",(string)trade.ResultRetcode(),
-               " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+               " retryAt=",(string)retryAt);
+      // Do not print GetLastError()/trade.ResultRetcode() here: this caller
+      // cannot know whether a broker request was made, and these values may
+      // be stale. The central writer logs broker codes at the request boundary.
      }
 
    if(committed)
