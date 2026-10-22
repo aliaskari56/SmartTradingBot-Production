@@ -5,7 +5,8 @@
 //+------------------------------------------------------------------+
 #property strict
 #property version   "1.134"
-#property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
+#property description "SIMULATION ONLY: original EA file with click diagnostics; trading event handlers are compile-excluded."
+#define STB_SIM_ONLY_BUTTON_DIAGNOSTIC 1
 #include <Trade/Trade.mqh>
 
 CTrade trade;
@@ -11204,6 +11205,42 @@ bool ValidateInputs()
 
 int OnInit()
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+
+   Print("STB SIM-ONLY: initialized; trade-capable event handler bodies are excluded at compile time.");
+
+   CreateButton(g_prefix+"BUY_STOP",  "SIM BUY STOP",  7, 28, 112, 22, clrSeaGreen);
+   CreateButton(g_prefix+"SELL_STOP", "SIM SELL STOP", 7, 52, 112, 22, clrTomato);
+   CreateButton(g_prefix+"BUY_LIMIT", "SIM BUY LIMIT", 7, 76, 112, 22, clrSeaGreen);
+   CreateButton(g_prefix+"SELL_LIMIT","SIM SELL LIMIT",7,100,112, 22, clrTomato);
+
+   string simNames[4] =
+     {
+      g_prefix+"BUY_STOP",
+      g_prefix+"SELL_STOP",
+      g_prefix+"BUY_LIMIT",
+      g_prefix+"SELL_LIMIT"
+     };
+   bool buttonsOK = true;
+   for(int i=0; i<ArraySize(simNames); i++)
+     {
+      if(ObjectFind(0,simNames[i])<0)
+        {
+         buttonsOK=false;
+         Print("STB SIM-ONLY: button creation failed object=",simNames[i],
+               " err=",GetLastError());
+         continue;
+        }
+      ObjectSetInteger(0,simNames[i],OBJPROP_STATE,false);
+     }
+   Comment("SIMULATION ONLY - NO ORDERS CAN BE SENT\n",
+           "Click a button and check Experts for the captured UI event.");
+   ChartRedraw(0);
+   if(!buttonsOK)
+      return INIT_FAILED;
+   return INIT_SUCCEEDED;
+#else
+
    if(!STB_InitRunNamespace())
      {
       Print("STB INIT FAILED: risk namespace unavailable; refusing initialization.");
@@ -11326,6 +11363,8 @@ int OnInit()
 
    UpdatePanel();
    return INIT_SUCCEEDED;
+  
+#endif
   }
 
 //==================================================================
@@ -11398,6 +11437,18 @@ double OnTester()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+
+   EventKillTimer();
+   ObjectDelete(0,g_prefix+"BUY_STOP");
+   ObjectDelete(0,g_prefix+"SELL_STOP");
+   ObjectDelete(0,g_prefix+"BUY_LIMIT");
+   ObjectDelete(0,g_prefix+"SELL_LIMIT");
+   Comment("");
+   ChartRedraw(0);
+   return;
+#else
+
    EventKillTimer();
 
    // Keep the daily baseline through ordinary EA reinitializations, but clear
@@ -11435,6 +11486,8 @@ void OnDeinit(const int reason)
    ReleaseIndicatorHandles();
 
    Comment("");
+  
+#endif
   }
 
 //==================================================================
@@ -11784,6 +11837,11 @@ void STB_RunManagementCycle()
 
 void OnTick()
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+   // Simulation-only build: no strategy or order-management code executes.
+   return;
+#else
+
    STB_EnforceDailyRiskGuard();
    bool m15Bar=NewM15Bar();
    if(m15Bar)
@@ -11798,6 +11856,8 @@ void OnTick()
       g_lastSignalScanBar=iTime(_Symbol,PERIOD_M15,1);
       UpdatePanel();
      }
+  
+#endif
   }
 
 //==================================================================
@@ -11809,6 +11869,11 @@ void OnTick()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+   // Simulation-only build: no timer-driven strategy or order-management code executes.
+   return;
+#else
+
    STB_EnforceDailyRiskGuard();
    // Recover terminal-visible positions/orders before the manager pass so a
    // missed or delayed transaction handoff can be protected in this timer cycle.
@@ -11823,6 +11888,8 @@ void OnTimer()
      }
    UpdatePanel();
    UpdateButtons();
+  
+#endif
   }
 
 //==================================================================
@@ -11836,6 +11903,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+   // Simulation-only build: ignore trade transaction events; no trade-side effects.
+   return;
+#else
+
 // Trade transaction intake is the single transaction-level protection owner.
    STB_TradeIntakeFromTransaction(trans);
 
@@ -12142,6 +12214,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    STB_AdaptiveDeletePositionProfile(positionId);
    STB_AdaptiveDeletePositionRisk(positionId);
+  
+#endif
   }
 
 //+------------------------------------------------------------------+
@@ -12173,6 +12247,33 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
   {
+#if STB_SIM_ONLY_BUTTON_DIAGNOSTIC
+
+   if(id!=CHARTEVENT_OBJECT_CLICK)
+      return;
+
+   string buyName=g_prefix+"BUY_STOP";
+   string sellName=g_prefix+"SELL_STOP";
+   string buyLimitName=g_prefix+"BUY_LIMIT";
+   string sellLimitName=g_prefix+"SELL_LIMIT";
+
+   if(sparam!=buyName && sparam!=sellName &&
+      sparam!=buyLimitName && sparam!=sellLimitName)
+      return;
+
+   // OBJ_BUTTON is toggle-style; reset it so repeat clicks are received cleanly.
+   ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+   ChartRedraw(0);
+
+   Print("STB SIM-ONLY CLICK captured | object=",sparam,
+         " | event=CHARTEVENT_OBJECT_CLICK",
+         " | action=UI_DIAGNOSTIC_ONLY",
+         " | trade_request_sent=NO");
+   Comment("SIMULATION ONLY - last click captured:\n",sparam,
+           "\nNo trade request was sent.");
+   return;
+#else
+
    if(id==CHARTEVENT_KEYDOWN)
      {
       if(lparam==68 || lparam==100)
@@ -12301,5 +12402,7 @@ void OnChartEvent(const int id,
       ChartRedraw(0);
       return;
      }
+  
+#endif
   }
 //+------------------------------------------------------------------+
