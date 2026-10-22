@@ -303,7 +303,7 @@ def main() -> int:
         ("daily and adaptive tester state are isolated by a fresh run namespace",
          "bool STB_InitRunNamespace()" in source_code
          and "g_stbRunNamespace" in source_code
-         and '"|TESTER|RUN|"+g_stbRunNamespace' in source_code
+         and '"|TESTER|RUN|"+g_stbRunNamespace' in source
          and "if(!STB_InitRunNamespace())" in source_code),
         ("daily loss guard attempts to close only EA-owned positions and verifies retcode",
          "PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic" in source_code
