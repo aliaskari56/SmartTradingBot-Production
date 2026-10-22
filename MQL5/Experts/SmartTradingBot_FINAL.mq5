@@ -2287,6 +2287,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
                        OrderGetDouble(ORDER_TP));
+      Print("STB PENDING MODIFY RETCODE FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " requestOK=",pendingModifyRequestOK,
+            " retcode=",IntegerToString((int)pendingModifyRetcode),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",IntegerToString(pendingModifyLastError));
       return false;
      }
 
