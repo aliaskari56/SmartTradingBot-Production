@@ -8462,6 +8462,15 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
           "QUOTE_INVALID_OR_STALE_BEFORE_SUBMIT:"+
           (submitQuoteReason=="" ? "QUOTE_UNAVAILABLE":submitQuoteReason));
 
+   // Last broker-side preflight uses the exact metadata to be submitted.
+   // The earlier discovery check may be stale after the remaining gates.
+   ENUM_ORDER_TYPE finalPendingType=(s.direction>0 ? ORDER_TYPE_BUY_STOP
+                                                   : ORDER_TYPE_SELL_STOP);
+   if(!STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,
+                                    s.entry,s.sl,s.tp,typeTime,expiration,
+                                    (ulong)InpMagic,comment,"SCANNER_FINAL_SUBMIT"))
+      return STB_LogPlaceReject(s,"FINAL_ORDERCHECK_REJECT");
+
     bool ok=false;
 
    if(s.direction>0)
