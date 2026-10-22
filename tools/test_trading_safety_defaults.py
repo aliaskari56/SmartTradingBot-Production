@@ -298,8 +298,17 @@ def main() -> int:
          region_fails_closed_when_boundary_missing),
         ("live auto-trading is opt-in by default",
          input_default("InpAutoTrading", source_code) == "false"),
-        ("risk-based sizing is opt-in by default",
-         input_default("InpUseRiskSizing", source_code) == "false"),
+        ("bounded equity-risk sizing is enabled by default",
+         input_default("InpUseRiskSizing", source_code) == "true"),
+        ("daily and adaptive tester state are isolated by a fresh run namespace",
+         "bool STB_InitRunNamespace()" in source_code
+         and "g_stbRunNamespace" in source_code
+         and '"|TESTER|RUN|"+g_stbRunNamespace' in source_code
+         and "if(!STB_InitRunNamespace())" in source_code),
+        ("daily loss guard attempts to close only EA-owned positions and verifies retcode",
+         "PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic" in source_code
+         and "trade.PositionClose(ticket)" in source_code
+         and "closeRetcode!=TRADE_RETCODE_DONE" in source_code),
         ("live initialization forces AUTO off when input is false",
          "if(!InpAutoTrading){g_autoTrading=false;GlobalVariableSet(g_autoStateName,0.0);}"
          in live_auto_branch_compact),
