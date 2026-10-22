@@ -1876,10 +1876,10 @@ bool TradeRetcodePlacementSucceeded()
   {
    uint ret=trade.ResultRetcode();
 
-   // NO_CHANGES describes an unchanged existing object, not proof that a
-   // new pending order was accepted. Do not classify it as placement success.
+   // Pending-order placement is accepted only when the server confirms
+   // completion or placement. PARTIAL is a deal/execution result, not proof
+   // that a pending order was placed; NO_CHANGES applies to existing objects.
    return ret==TRADE_RETCODE_DONE ||
-          ret==TRADE_RETCODE_DONE_PARTIAL ||
           ret==TRADE_RETCODE_PLACED;
   }
 
