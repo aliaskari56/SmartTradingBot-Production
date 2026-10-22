@@ -167,7 +167,7 @@ def main() -> int:
     )
     auto_gate = region(source, "bool STB_FinalAutoGate(", "//+------------------------------------------------------------------+")
     pending_check = region(
-        source, "bool CheckPendingOrder(", "bool GetPendingLifetime("
+        source, "bool STB_CheckPendingOrderRequest(", "bool CheckPendingOrder("
     )
     pending_modify = region(
         source, "bool STB_ModifyPendingOrderGeometry(", "bool PreparePendingSetup("
@@ -318,9 +318,12 @@ def main() -> int:
          bool(auto_gate_code) and all(token in auto_gate_code for token in (
              "!g_autoTrading", "!STB_TradeEnvironmentAllowed()",
              "!STB_ExposureAllowsExecution(s,reason)"))),
-        ("pending-order preflight checks OrderCheck boolean and retcode",
+        ("shared pending-order preflight checks OrderCheck boolean and retcode for explicit order geometry",
          bool(pending_check_code) and "if(!OrderCheck(request,check))" in pending_check_code
-         and "check.retcode!=0" in pending_check_code),
+         and "check.retcode!=0" in pending_check_code
+         and "request.type=orderType;" in pending_check_code
+         and "request.magic=magic;" in pending_check_code
+         and "request.type_filling=ORDER_FILLING_RETURN;" in pending_check_code),
         ("pending-order modification preflight is scoped to geometry writer",
          bool(pending_modify_code)
          and "if(!OrderCheck(req,check))" in pending_modify_code
@@ -377,6 +380,11 @@ def main() -> int:
         ("directional symbol permissions are checked before auto placement",
          bool(auto_placement_code)
          and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement_code),
+        ("one-click hedge preflights its pending request before broker submission",
+         bool(hedge_placement_code)
+         and "STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0" in hedge_placement_code
+         and hedge_placement_code.index("STB_CheckPendingOrderRequest(") <
+             hedge_placement_code.index("trade.BuyStop(")),
         ("one-click hedge validates server result and initial SL with rollback",
          bool(hedge_placement_code)
          and "trade.BuyStop(" in hedge_placement_code
@@ -384,6 +392,11 @@ def main() -> int:
          and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
          and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
          and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK," in hedge_placement_code),
+        ("manual stop placement preflights the exact pending type before broker submission",
+         bool(manual_stop_placement_code)
+         and "STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0" in manual_stop_placement_code
+         and manual_stop_placement_code.index("STB_CheckPendingOrderRequest(") <
+             manual_stop_placement_code.index("trade.BuyStop(")),
         ("manual stop placement validates server result and initial SL with rollback",
          bool(manual_stop_placement_code)
          and "trade.BuyStop(" in manual_stop_placement_code
@@ -391,6 +404,11 @@ def main() -> int:
          and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_stop_placement_code),
+        ("manual limit placement preflights the exact pending type before broker submission",
+         bool(manual_limit_placement_code)
+         and "STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0" in manual_limit_placement_code
+         and manual_limit_placement_code.index("STB_CheckPendingOrderRequest(") <
+             manual_limit_placement_code.index("trade.BuyLimit(")),
         ("manual limit placement validates server result and initial SL with rollback",
          bool(manual_limit_placement_code)
          and "trade.BuyLimit(" in manual_limit_placement_code
