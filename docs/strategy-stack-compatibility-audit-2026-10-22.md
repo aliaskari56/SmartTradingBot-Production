@@ -70,3 +70,33 @@ Do not loosen H4 or pattern filters merely to increase the number of candidates.
 - MetaQuotes, symbol properties including tick size, stops/freeze levels, volume limits and allowed order modes: https://www.mql5.com/en/docs/constants/environment_state/marketinfoconstants
 - MetaQuotes, `OrderCheck` and its limitations: https://www.mql5.com/en/docs/trading/ordercheck
 - MetaQuotes, optimization and out-of-sample/forward-validation workflow (Pardo method): https://www.mql5.com/en/articles/19520
+
+
+## Follow-up from the 13:34 terminal logs
+
+The operator later supplied five initialization records. The active M5 instance at 13:19 reports `universal=ON`, `requireFVG=ON`, `requireOB=ON`, `requireH4Align=ON`, and `requireHTFConfluence=ON`. Other chart instances were also initialized on D1, M1, and W1, so logs from a given date are not automatically attributable to one chart/instance unless the symbol, timeframe, initialization time, and instance are matched.
+
+For the interval selected from 13:20 onward, the operator's PowerShell extraction returned 30 `STB SETUP REJECT` messages:
+- 16 `H4_TREND_UNAVAILABLE_H4_BULLISH_LINE_INVALIDATED_BY_CLOSE`
+- 10 `H4_TREND_UNAVAILABLE_H4_STRUCTURE_NEUTRAL`
+- 2 `H4_DIRECTION_MISMATCH`
+- 2 `BOS_TOO_OLD`
+
+The last reported M5 summaries at 13:33:44, 13:33:54, and 13:34:04 showed 302-symbol universe, 147–148 eligible, 18–19 quality-passing, 17–18 regime-passing, zero buy/sell candidates, 14–16 direction-gate rejects, 18–20 setup-build rejects, zero setup-age rejects, and zero score rejects. That further confirms that the score floor is not the current first-order obstacle.
+
+Importantly, `BuildSetup` tests the hard H4 condition before `DetectStructure`, FVG/OB detection, HTF confluence, and pending-order geometry. Thus these 30 recent records are censored by an upstream gate: they do **not** establish that downstream checks would pass. The broader full-day count of `BROKER_STOP_NORMALIZATION_FAILED` is from a different interval and must not be interpreted as the active interval's dominant cause.
+
+## Next diagnostic split to make (tester only)
+
+Do not silently change production defaults based on rejection counts. Use a controlled Strategy Tester comparison with an otherwise identical parameter set:
+
+- **Baseline:** keep all current filters unchanged; save the report, exact inputs, log, build hash, date window, tick model, spread/commission and symbol.
+- **Single-gate diagnostic:** toggle only `InpRequireH4TrendAlignment` for that tester run to reveal the downstream CHoCH/BOS, FVG, OB, HTF and geometry rejection distribution. Treat the result as a diagnostic branch, not as a recommended or proven better strategy.
+- **Downstream audit:** determine which subsequent hard gates reject the newly visible setups. Keep counts separated by symbol/timeframe and by run; do not combine old terminal logs with the comparison interval.
+- **Do not infer quality from volume:** more candidates or trades alone does not mean higher expectancy or lower drawdown. Compare the complete tester report, and preserve a separate out-of-sample period that was not used to choose inputs.
+
+## Additional implementation observation
+
+`STB_CalcMarketQuality` defines relative spread as `(ask-bid)/M15_ATR * 100`, rejects values above `InpMaxRelativeSpreadPct`, and applies quality-score penalties for spread, volatility, activity, and quote freshness. The summary count `eligible` includes symbols before market-quality checks; the large difference between `eligible` (about 147) and `quality` (about 18–19) means the aggregate summary alone cannot say whether spread, activity, volatility, freshness, or missing data explains that drop. The next diagnostic should collect reason counts for `STB SCANNER REJECT stage=MARKET_QUALITY` and `stage=DATA_ELIGIBILITY` separately rather than loosening thresholds blindly.
+
+MetaQuotes documents that `CopyRates` may initially return fewer bars while data history is still downloading/building, so multi-symbol test repeatability depends on confirming series readiness and using consistent historical data. For the multi-symbol EA, a test on one symbol should not be treated as a complete reproduction of a 302-symbol live scan.
