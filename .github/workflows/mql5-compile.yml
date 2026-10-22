@@ -82,7 +82,7 @@ jobs:
             sourceCommit = '${{ github.sha }}'
             compiledUtc = [DateTime]::UtcNow.ToString('o')
             liveAutoTradingDefault = $false
-            riskSizingDefault = $false
+            riskSizingDefault = $true
           }
           $manifest | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR 'provenance.json') -Encoding utf8
           Copy-Item -Path $ex5 -Destination (Join-Path $env:ARTIFACT_DIR 'SmartTradingBot_FINAL.ex5') -Force
