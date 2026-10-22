@@ -161,11 +161,12 @@ bool STB_InitRunNamespace()
   {
    if(!MQLInfoInteger(MQL_TESTER))
       return false;
-   datetime localNow=TimeLocal();
-   uint tick=GetTickCount();
-   g_stbRunNamespace=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-                     (string)InpMagic+"_"+(string)ChartID()+"_"+
-                     (string)localNow+"_"+(string)tick;
+   // Keep the token compact: terminal GlobalVariable names are limited
+   // in length, and the daily-state key must remain well below that limit.
+   uint runToken=(uint)TimeLocal() ^ GetTickCount() ^
+                 (uint)AccountInfoInteger(ACCOUNT_LOGIN) ^
+                 (uint)InpMagic ^ (uint)ChartID();
+   g_stbRunNamespace=(string)runToken;
    return (StringLen(g_stbRunNamespace)>0);
   }
 
