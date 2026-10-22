@@ -486,6 +486,15 @@ def main() -> int:
          and "if(STB_DailyLossLimitHit())" in manual_stop_placement_code
          and "if(STB_DailyLossLimitHit())" in manual_limit_placement_code
          and "if(STB_DailyLossLimitHit())" in hedge_placement_code),
+        ("tracked adaptive lifecycles include manual/foreign-magic close PnL but reject unrelated foreign trades",
+         bool(trade_transaction)
+         and "bool isLifecycleClose=" in trade_transaction_code
+         and "bool hasTrackedAdaptiveLifecycle=" in trade_transaction_code
+         and "!(isLifecycleClose && hasTrackedAdaptiveLifecycle)" in trade_transaction_code
+         and trade_transaction_code.index("STB_AdaptiveReadPositionProfile(positionId)>=0")
+             < trade_transaction_code.index("if(magic!=(long)InpMagic")
+         and "if(entryType==DEAL_ENTRY_IN && positionId>0)" in trade_transaction_code
+         and "if(isHedge)" in trade_transaction_code),
         ("INOUT reversal closes old adaptive state before initializing a distinct active reverse lifecycle",
          bool(trade_transaction)
          and "if(entryType==DEAL_ENTRY_INOUT)" in trade_transaction_code
