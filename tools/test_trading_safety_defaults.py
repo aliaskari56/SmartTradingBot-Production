@@ -371,10 +371,10 @@ def main() -> int:
          and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK," in strip_strings(auto_placement)
          and strip_strings(auto_placement).find("VerifyPendingInitialSL(placedOrder)")
          < strip_strings(auto_placement).find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,")),
-        ("automatic placement repeats OrderCheck at final submit boundary using exact comment and order type",
+        ("automatic placement repeats OrderCheck at final submit boundary using exact order type and metadata",
          bool(auto_placement_code)
          and "STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume," in auto_placement_code
-         and "finalPendingType=(s.direction>0?ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);" in auto_placement_code
+         and "finalPendingType=(s.direction>0?ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);" in re.sub(r"\\s+", "", auto_placement_code)
          and auto_placement_code.index("STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,")
              < auto_placement_code.index("trade.BuyStop(")),
         ("pending placement success helper accepts DONE and PLACED only",
