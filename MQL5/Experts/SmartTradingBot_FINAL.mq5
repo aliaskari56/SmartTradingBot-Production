@@ -30,7 +30,7 @@ input double  InpScannerMinScore          = 55.0;
 input double  InpScannerMinTopGap         = 3.0;
 input int     InpScannerMaxWatchlist      = 50;
 input int     InpScannerTopN              = 10;
-input int     InpScannerMaxQuoteAgeSec    = 300;
+input int     InpScannerMaxQuoteAgeSec    = 60;   // reject stale scanner quotes after one minute
 input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
