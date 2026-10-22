@@ -741,6 +741,28 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                                  prop.tp,
                                                  manual);
 
+   if(!committed)
+   {
+      // Bounded, per-M15-bar diagnostic: the proposal was valid but the
+      // central writer did not confirm a server-side geometry change.
+      // The writer remains the only broker-facing path.
+      datetime failBar=iTime(symbol,PERIOD_M15,1);
+      if(failBar<=0)
+         failBar=TimeCurrent();
+      if(g_stbPendingTrail[idx].lastFailLogBar!=failBar)
+      {
+         g_stbPendingTrail[idx].lastFailLogBar=failBar;
+         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " stage=WRITE",
+               " reason=GEOMETRY_CHANGE_NOT_CONFIRMED",
+               " retcode=",IntegerToString((int)trade.ResultRetcode()),
+               " description=",trade.ResultRetcodeDescription(),
+               " lastError=",IntegerToString(GetLastError()));
+      }
+   }
+
    if(committed)
    {
       if(candleStop && actionableClosedBar>0)

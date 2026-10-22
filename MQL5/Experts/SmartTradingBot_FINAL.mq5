@@ -10667,7 +10667,14 @@ int CountManagedPendingOrders()
 int TrailAllPendingOrdersNow()
   {
    STB_BeginCycle(); // Blueprint 26: user PEND_TRAIL command gets its own decision cycle
-   return STB_PendingTrailProcess(true); // count only confirmed broker geometry changes
+   int before=CountManagedPendingOrders();
+   int moved=STB_PendingTrailProcess(true); // count only confirmed broker geometry changes
+   Print("STB PEND_TRAIL COMMAND complete managedPending=",before,
+         " confirmedMoved=",moved,
+         " remainingManagedPending=",CountManagedPendingOrders());
+   if(before>0 && moved==0)
+      Print("STB PEND_TRAIL DIAGNOSTIC: no broker-confirmed geometry change; inspect PENDING_TRAIL_* and STB PENDING MODIFY logs for the per-ticket rejection reason.");
+   return moved;
   }
 
 //+------------------------------------------------------------------+
