@@ -53,7 +53,7 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = false; // explicit opt-in; conservative equity-risk sizing must be enabled in tester inputs
+input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; this build is Strategy-Tester-only
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
@@ -151,13 +151,30 @@ bool g_modifyWasNoChanges=false;
 double g_stbDailyStartEquity=0.0;
 int    g_stbDailyKey=0;
 bool   g_stbDailyLimitLogged=false;
+string g_stbRunNamespace="";
+
+// A fresh namespace is created for each tester initialization so adaptive
+// statistics and daily-equity baselines from an earlier test cannot bleed
+// into a new run. The namespace is also used by the daily guard across all
+// callbacks within this initialized run.
+bool STB_InitRunNamespace()
+  {
+   if(!MQLInfoInteger(MQL_TESTER))
+      return false;
+   datetime localNow=TimeLocal();
+   uint tick=GetTickCount();
+   g_stbRunNamespace=(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+                     (string)InpMagic+"_"+(string)ChartID()+"_"+
+                     (string)localNow+"_"+(string)tick;
+   return (StringLen(g_stbRunNamespace)>0);
+  }
 
 string STB_DailyRiskStateName(const string suffix)
   {
    return "STB_DLY_"+suffix+"_"+
           (string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
           (string)InpMagic+"_"+
-          (string)ChartID();
+          (string)ChartID()+"_"+g_stbRunNamespace;
   }
 
 bool STB_DailyRiskPersist(const int dayKey,const double startEquity,
@@ -485,7 +502,7 @@ string STB_AP_Key(const string symbol,
 
    // Do not read or mutate live adaptive statistics from Strategy Tester.
    if(MQLInfoInteger(MQL_TESTER))
-      raw+="|TESTER";
+      raw+="|TESTER|RUN|"+g_stbRunNamespace;
 
    return "STB_AP3_"+(string)STB_AP_Hash(raw);
   }
@@ -11004,6 +11021,12 @@ int OnInit()
       return INIT_FAILED;
      }
 
+   if(!STB_InitRunNamespace())
+     {
+      Print("STB INIT FAILED: tester run namespace unavailable; refusing initialization.");
+      return INIT_FAILED;
+     }
+
    g_autoStateName=ScopedStateName("AUTO");
 
    if(!ValidateInputs())
@@ -11495,6 +11518,48 @@ void STB_EnforceDailyRiskGuard()
   {
    if(!STB_DailyLossLimitHit())
       return;
+
+   // Tester-only hardening: block further entries, cancel eligible EA-owned
+   // pending orders, and attempt to flatten only positions opened by this EA.
+   // This is not a guaranteed loss ceiling: gaps, slippage, and rejected closes
+   // can still cause the realized loss to exceed the configured percentage.
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
+         continue;
+
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      if(!STB_SymbolManagementOwnedVerified(symbol))
+         continue;
+
+      trade.SetExpertMagicNumber(InpMagic);
+      trade.SetAsyncMode(false);
+      ResetLastError();
+      bool closeOK=trade.PositionClose(ticket);
+      uint closeRetcode=trade.ResultRetcode();
+
+      if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
+        {
+         Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
+               " symbol=",symbol,
+               " requestOK=",closeOK ? "YES":"NO",
+               " retcode=",IntegerToString((int)closeRetcode),
+               " description=",trade.ResultRetcodeDescription(),
+               " error=",GetLastError());
+         continue;
+        }
+
+      if(PositionSelectByTicket(ticket))
+         Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
+               " symbol=",symbol,
+               " retcode=",IntegerToString((int)closeRetcode));
+      else
+         Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
+               " symbol=",symbol);
+     }
 
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
