@@ -347,6 +347,14 @@ def main() -> int:
           "STB management lease tracking allocation failed" in source and
           source.count("if(!STB_LeaseTrackSymbol(symbol))") == 3 and
           source.count("GlobalVariableSetOnCondition(ownerKey,0.0,me);") >= 4),
+        ("pending deletion requires full DONE retcode and rejects DONE_PARTIAL",
+         "bool STB_ExecuteOrderDelete(" in source and
+         "if(!requestOK || ret!=TRADE_RETCODE_DONE)" in source_region(
+             source, "bool STB_ExecuteOrderDelete(",
+             "// Single controlled entry used by every permitted pending delete.") and
+         "ret!=TRADE_RETCODE_DONE_PARTIAL" not in source_region(
+             source, "bool STB_ExecuteOrderDelete(",
+             "// Single controlled entry used by every permitted pending delete.")),
         ("pending placement accepts only DONE or PLACED, not partial execution or NO_CHANGES",
          "bool TradeRetcodePlacementSucceeded()" in source and
          "TRADE_RETCODE_NO_CHANGES" not in source_region(
