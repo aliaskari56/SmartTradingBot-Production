@@ -92,6 +92,18 @@ CI for the latest HEAD `93425dad9203179d493b78e58c76cb1a341b0fa7`:
 
 These checks verify compilation and source-level contracts, not the runtime semantics of a netting reversal. In particular, the branch still requires Strategy Tester coverage for broker event ordering, position-identifier behavior, missing order metadata, absent SL, and restart/reconciliation paths.
 
+## Follow-up source change — tracked partial-close accounting
+
+Commit `a5be2f774e433c78601aa761f3a209e71c41858d` updates `OnTradeTransaction()` so an OUT, OUT_BY, or INOUT deal with a foreign magic can contribute to an already tracked adaptive position lifecycle. The handler checks for an existing adaptive position profile before allowing the foreign-magic close through; unrelated foreign trades are still filtered, and hedge-comment deals remain excluded. Regression checks were updated to reflect the lifecycle-aware filter.
+
+The subsequent audit/test correction is at HEAD `5b823becf09bcc2f850b44d5f034260866ba37ae`. CI for this HEAD:
+- MetaEditor compile: **passed**, run [39740551793](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39740551793); the EA and the isolated LRN-04 SHA-256 test script both reported **0 errors, 0 warnings**.
+- Trading safety defaults: **passed**, run [39740551828](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39740551828).
+- MQL5 static audit: **passed**, run [39740551782](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39740551782).
+- LRN-04 journal contract tests: **passed**, run [39740551765](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39740551765).
+
+This change fixes the source-level magic-filter gap, but does not make the accumulated-PnL Global Variable state crash-consistent or idempotent. Duplicate/delayed deal processing and restart between accumulation and adaptive-stat update remain runtime test requirements.
+
 ## Remaining release blockers and test gaps
 
 ### A. LRN-04 durable journal is not integrated
