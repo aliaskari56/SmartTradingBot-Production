@@ -226,6 +226,16 @@ def main() -> int:
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(r"\s+", "", strip_strings(on_init))
+    daily_risk_guard = region(
+        source, "bool STB_DailyLossLimitHit()",
+        "// UNIVERSAL PROFIT LOCK POLICY"
+    )
+    daily_risk_guard_code = strip_strings(daily_risk_guard)
+    daily_risk_enforcer = region(
+        source, "void STB_EnforceDailyRiskGuard()",
+        "// PENDING ORDER MANAGEMENT"
+    )
+    daily_risk_enforcer_code = strip_strings(daily_risk_enforcer)
 
     # Exercise the stripper itself against comment markers inside strings,
     # both comment styles, and line preservation. Static source checks alone
@@ -449,6 +459,28 @@ def main() -> int:
          and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_limit_placement_code),
+        ("daily equity guard fails closed on invalid clock/equity and failed persistence",
+         bool(daily_risk_guard_code)
+         and "if(now<=0 || !TimeToStruct(now,nowParts))" in daily_risk_guard_code
+         and "if(!MathIsValidNumber(equity) || equity<=0.0)" in daily_risk_guard_code
+         and "if(!STB_DailyRiskPersist(dayKey,equity,false))" in daily_risk_guard_code
+         and "return true;" in daily_risk_guard_code),
+        ("daily equity guard blocks a damaged same-day baseline instead of resetting it",
+         bool(daily_risk_guard_code)
+         and "bool anyStatePresent=" in daily_risk_guard_code
+         and "if(!GlobalVariableCheck(dayName))" in daily_risk_guard_code
+         and "storedDay>=(double)dayKey" in daily_risk_guard_code
+         and "STB DAILY RISK STATE CORRUPT/DATE REGRESSION: entries blocked." in daily_risk_guard),
+        ("daily equity enforcement retains an explicit tester-only scope and fails closed",
+         bool(daily_risk_enforcer_code)
+         and "if(!STB_DailyLossLimitHit())" in daily_risk_enforcer_code
+         and "MQL_TESTER" in daily_risk_enforcer_code
+         and "STB DAILY RISK" in daily_risk_enforcer),
+        ("automatic and manual pending entry paths call the daily equity guard before submission",
+         "if(STB_DailyLossLimitHit())" in auto_placement_code
+         and "if(STB_DailyLossLimitHit())" in manual_stop_placement_code
+         and "if(STB_DailyLossLimitHit())" in manual_limit_placement_code
+         and "if(STB_DailyLossLimitHit())" in hedge_placement_code),
     )
 
     failed = False
