@@ -200,26 +200,13 @@ string STB_PendingTrailTypeName(const long orderType)
 //--- P4: classify the last modify outcome (policy only, no new logs) -
 int STB_PendingClassifyResult(const bool ok)
 {
+   // The central writer returns true only after it verifies the committed
+   // server geometry. A false return can occur before any CTrade request
+   // (ownership, OrderCheck, geometry, or cycle gate), so ResultRetcode()
+   // may belong to an older request. Never classify a false writer outcome
+   // from that mutable/stale CTrade state; let the bounded retry policy run.
    if(ok)
       return STB_PEND_RES_SUCCESS;
-
-   uint ret=(uint)trade.ResultRetcode();
-
-   switch(ret)
-   {
-      case TRADE_RETCODE_DONE:
-         return STB_PEND_RES_SUCCESS;
-      case TRADE_RETCODE_NO_CHANGES:
-         return STB_PEND_RES_NO_CHANGE;
-      case TRADE_RETCODE_INVALID_STOPS:
-         return STB_PEND_RES_INVALID_STOPS;
-      case TRADE_RETCODE_INVALID_PRICE:
-         return STB_PEND_RES_INVALID_PRICE;
-      case TRADE_RETCODE_TOO_MANY_REQUESTS:
-         return STB_PEND_RES_TOO_MANY_REQUESTS;
-      case TRADE_RETCODE_MARKET_CLOSED:
-         return STB_PEND_RES_TEMPORARY_FAILURE;
-   }
 
    return STB_PEND_RES_OTHER_FAILURE;
 }
