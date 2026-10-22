@@ -143,6 +143,177 @@ input double  InpTrailStartPips         = 150.0;  // used only when structural t
 input double  InpLiveTrailDistancePips   = 30.0;  // legacy live-distance trail when structural mode is disabled
 input double  InpTrailStepPips             = 5.0;   // minimum SL improvement before a new trailing modification
 
+//+------------------------------------------------------------------+
+//| Inline diagnostics-only helpers (A-C). No order behavior changes. |
+//+------------------------------------------------------------------+
+struct STBVolumeDiag
+  {
+   string stage;
+   string setupType;
+   bool   riskMode;
+   double equity;
+   double riskPct;
+   double riskBudget;
+   bool   calcProfitCall;
+   bool   calcProfitOk;
+   int    calcProfitErr;
+   double lossForOneLot;
+   double rawVolume;
+   double cappedVolume;
+   double minVolume;
+   double volumeStep;
+   bool   minVolumeReadOk;
+   bool   volumeStepReadOk;
+   bool   volumeMetadataValid;
+   double maxRiskVolume;
+   double finalVolume;
+   string rejectCause;
+  };
+STBVolumeDiag g_stbVolumeDiag;
+
+void STB_VolumeDiagReset(const string stage,const string setupType)
+  {
+   g_stbVolumeDiag.stage=stage;
+   g_stbVolumeDiag.setupType=setupType;
+   g_stbVolumeDiag.riskMode=false;
+   g_stbVolumeDiag.equity=0.0;
+   g_stbVolumeDiag.riskPct=0.0;
+   g_stbVolumeDiag.riskBudget=0.0;
+   g_stbVolumeDiag.calcProfitCall=false;
+   g_stbVolumeDiag.calcProfitOk=false;
+   g_stbVolumeDiag.calcProfitErr=0;
+   g_stbVolumeDiag.lossForOneLot=0.0;
+   g_stbVolumeDiag.rawVolume=0.0;
+   g_stbVolumeDiag.cappedVolume=0.0;
+   g_stbVolumeDiag.minVolume=0.0;
+   g_stbVolumeDiag.volumeStep=0.0;
+   g_stbVolumeDiag.minVolumeReadOk=false;
+   g_stbVolumeDiag.volumeStepReadOk=false;
+   g_stbVolumeDiag.volumeMetadataValid=false;
+   g_stbVolumeDiag.maxRiskVolume=0.0;
+   g_stbVolumeDiag.finalVolume=0.0;
+   g_stbVolumeDiag.rejectCause="UNSET";
+  }
+
+bool STB_VolumeDiagReadMetadata(const string symbol)
+  {
+   double minCheck=0.0,stepCheck=0.0;
+   g_stbVolumeDiag.minVolume=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN);
+   g_stbVolumeDiag.volumeStep=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
+   g_stbVolumeDiag.minVolumeReadOk=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN,minCheck);
+   g_stbVolumeDiag.volumeStepReadOk=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP,stepCheck);
+   g_stbVolumeDiag.volumeMetadataValid=
+      g_stbVolumeDiag.minVolumeReadOk &&
+      g_stbVolumeDiag.volumeStepReadOk &&
+      g_stbVolumeDiag.minVolume>0.0 &&
+      g_stbVolumeDiag.volumeStep>0.0 &&
+      MathIsValidNumber(g_stbVolumeDiag.minVolume) &&
+      MathIsValidNumber(g_stbVolumeDiag.volumeStep);
+   return g_stbVolumeDiag.volumeMetadataValid;
+  }
+
+string STB_VolumeDiagFormat(const string symbol,const int direction,
+                            const double entry,const double sl)
+  {
+   int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
+   return " stage="+g_stbVolumeDiag.stage+
+          " setupType="+g_stbVolumeDiag.setupType+
+          " symbol="+symbol+
+          " dir="+(direction>0 ? "BUY":"SELL")+
+          " sizing="+(g_stbVolumeDiag.riskMode ? "RISK":"FIXED")+
+          " equity="+DoubleToString(g_stbVolumeDiag.equity,2)+
+          " riskPct="+DoubleToString(g_stbVolumeDiag.riskPct,4)+
+          " riskBudget="+DoubleToString(g_stbVolumeDiag.riskBudget,4)+
+          " entry="+DoubleToString(entry,digits)+
+          " sl="+DoubleToString(sl,digits)+
+          " slDistance="+DoubleToString(MathAbs(entry-sl),digits)+
+          " calcProfitCalled="+(g_stbVolumeDiag.calcProfitCall ? "YES":"NO")+
+          " calcProfitOk="+(g_stbVolumeDiag.calcProfitOk ? "YES":"NO")+
+          " calcProfitErr="+IntegerToString(g_stbVolumeDiag.calcProfitErr)+
+          " lossForOneLot="+DoubleToString(g_stbVolumeDiag.lossForOneLot,4)+
+          " rawVolume="+DoubleToString(g_stbVolumeDiag.rawVolume,6)+
+          " cappedVolume="+DoubleToString(g_stbVolumeDiag.cappedVolume,6)+
+          " minVolume="+DoubleToString(g_stbVolumeDiag.minVolume,4)+
+          " volumeStep="+DoubleToString(g_stbVolumeDiag.volumeStep,4)+
+          " minVolumeReadOk="+(g_stbVolumeDiag.minVolumeReadOk ? "YES":"NO")+
+          " volumeStepReadOk="+(g_stbVolumeDiag.volumeStepReadOk ? "YES":"NO")+
+          " volumeMetadataValid="+(g_stbVolumeDiag.volumeMetadataValid ? "YES":"NO")+
+          " maxRiskVolume="+DoubleToString(g_stbVolumeDiag.maxRiskVolume,4)+
+          " finalVolume="+DoubleToString(g_stbVolumeDiag.finalVolume,4)+
+          " cause="+g_stbVolumeDiag.rejectCause;
+  }
+
+void STB_LogVolumeReject(const string symbol,const int direction,
+                         const double entry,const double sl)
+  {
+   Print("STB VOLUME REJECT",STB_VolumeDiagFormat(symbol,direction,entry,sl));
+  }
+
+void STB_LogFixedVolumeReject(const string stage,const string setupType,
+                              const string symbol,const int direction,
+                              const double entry,const double sl,
+                              const double requestedVolume)
+  {
+   STB_VolumeDiagReset(stage,setupType);
+   g_stbVolumeDiag.riskMode=false;
+   g_stbVolumeDiag.equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   g_stbVolumeDiag.riskPct=InpRiskPercent;
+   g_stbVolumeDiag.maxRiskVolume=InpMaxRiskVolume;
+   g_stbVolumeDiag.rawVolume=requestedVolume;
+   STB_VolumeDiagReadMetadata(symbol);
+   g_stbVolumeDiag.cappedVolume=0.0;
+   g_stbVolumeDiag.finalVolume=0.0;
+   g_stbVolumeDiag.rejectCause=(g_stbVolumeDiag.volumeMetadataValid ?
+                                "FIXED_LOT_NORMALIZE_FAILED" :
+                                "SYMBOL_VOLUME_METADATA_INVALID");
+   STB_LogVolumeReject(symbol,direction,entry,sl);
+  }
+
+void STB_LogSizingConfig()
+  {
+   Print("STB INIT SIZING",
+         " useRiskSizing=",(InpUseRiskSizing ? "ON":"OFF"),
+         " riskPercent=",DoubleToString(InpRiskPercent,4),
+         " baseLots=",DoubleToString(InpBaseLots,4),
+         " trendLotMultiplier=",DoubleToString(InpTrendLotMultiplier,4),
+         " universalLotMultiplier=",DoubleToString(InpUniversalLotMultiplier,4),
+         " maxRiskVolume=",DoubleToString(InpMaxRiskVolume,4),
+         " maxDailyLossPercent=",DoubleToString(InpMaxDailyLossPercent,4),
+         " chartMinVolume=",DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),4),
+         " chartVolumeStep=",DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP),4),
+         " equity=",DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2),
+         " accountCurrency=",AccountInfoString(ACCOUNT_CURRENCY));
+  }
+
+void STB_TallyAdd(string &tally,const string reason)
+  {
+   tally+="|"+(reason=="" ? "UNSPECIFIED":reason);
+  }
+
+string STB_TallyReport(const string tally)
+  {
+   if(tally=="")
+      return "none";
+   string parts[];
+   int n=StringSplit(tally,StringGetCharacter("|",0),parts);
+   string out="";
+   for(int i=0;i<n;i++)
+     {
+      if(parts[i]=="")
+         continue;
+      if(StringFind(out,parts[i]+"=")>=0)
+         continue;
+      int count=0;
+      for(int j=0;j<n;j++)
+         if(parts[j]==parts[i])
+            count++;
+      out+=(out=="" ? "" : ",")+parts[i]+"="+IntegerToString(count);
+     }
+   return (out=="" ? "none":out);
+  }
+
+// End inline diagnostics-only helpers.
+
 bool g_modifyWasNoChanges=false;
 
 // Daily equity guard state. Tester runs use an isolated run token; terminal
@@ -8441,50 +8612,91 @@ bool GetPendingLifetime(const string symbol,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-double CalculateOrderVolumeByRisk(const Setup &s)
+double CalculateOrderVolumeByRisk(const Setup &s,
+                                  const string diagStage="AUTO",
+                                  const string diagSetupType="AUTO")
   {
+   STB_VolumeDiagReset(diagStage,diagSetupType);
+   g_stbVolumeDiag.riskMode=InpUseRiskSizing;
    double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   g_stbVolumeDiag.equity=equity;
+   g_stbVolumeDiag.riskPct=InpRiskPercent;
+   g_stbVolumeDiag.maxRiskVolume=InpMaxRiskVolume;
+
    if(!InpUseRiskSizing || equity<=0.0 || InpRiskPercent<=0.0)
+     {
+      if(!InpUseRiskSizing)
+         g_stbVolumeDiag.rejectCause="RISK_SIZING_DISABLED";
+      else if(equity<=0.0)
+         g_stbVolumeDiag.rejectCause="EQUITY_NONPOSITIVE";
+      else
+         g_stbVolumeDiag.rejectCause="RISK_PERCENT_NONPOSITIVE";
       return 0.0;
+     }
 
-   ENUM_ORDER_TYPE orderType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    double riskMoney=equity*(InpRiskPercent/100.0);
-
+   g_stbVolumeDiag.riskBudget=riskMoney;
+   ENUM_ORDER_TYPE orderType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    double lossForOneLot=0.0;
    ResetLastError();
+   g_stbVolumeDiag.calcProfitCall=true;
+   bool pnlOk=OrderCalcProfit(orderType,s.symbol,1.0,s.entry,s.sl,lossForOneLot);
+   g_stbVolumeDiag.calcProfitOk=pnlOk;
+   g_stbVolumeDiag.calcProfitErr=(pnlOk ? 0:GetLastError());
 
-   if(!OrderCalcProfit(orderType,s.symbol,1.0,s.entry,s.sl,lossForOneLot))
+   if(!pnlOk)
      {
+      g_stbVolumeDiag.rejectCause="ORDER_CALC_PROFIT_FAILED";
       Print("STB risk sizing failed OrderCalcProfit symbol=",s.symbol,
-            " err=",GetLastError());
+            " err=",g_stbVolumeDiag.calcProfitErr);
       return 0.0;
      }
 
    lossForOneLot=MathAbs(lossForOneLot);
+   g_stbVolumeDiag.lossForOneLot=lossForOneLot;
    if(lossForOneLot<=0.0 || !MathIsValidNumber(lossForOneLot))
+     {
+      g_stbVolumeDiag.rejectCause="LOSS_FOR_ONE_LOT_INVALID";
       return 0.0;
+     }
 
    double raw=riskMoney/lossForOneLot;
+   g_stbVolumeDiag.rawVolume=raw;
    double minLot=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_MIN);
+   double volumeStep=SymbolInfoDouble(s.symbol,SYMBOL_VOLUME_STEP);
+   STB_VolumeDiagReadMetadata(s.symbol);
+   g_stbVolumeDiag.minVolume=minLot;
+   g_stbVolumeDiag.volumeStep=volumeStep;
 
    if(InpMaxRiskVolume>0.0)
       raw=MathMin(raw,InpMaxRiskVolume);
+   g_stbVolumeDiag.cappedVolume=raw;
 
    if(raw+1e-9<minLot)
      {
-      // The broker minimum OR the configured volume cap would exceed the
-      // requested risk/volume limit. Never clamp upward into an unsafe lot.
+      g_stbVolumeDiag.rejectCause="RAW_BELOW_MIN_VOLUME";
       return 0.0;
      }
 
    double volume=NormalizeVolume(s.symbol,raw);
-
+   g_stbVolumeDiag.finalVolume=volume;
    if(volume<=0.0 || !MathIsValidNumber(volume))
+     {
+      g_stbVolumeDiag.finalVolume=0.0;
+      g_stbVolumeDiag.rejectCause=(g_stbVolumeDiag.volumeMetadataValid ?
+                                   "NORMALIZED_VOLUME_INVALID" :
+                                   "SYMBOL_VOLUME_METADATA_INVALID");
       return 0.0;
+     }
 
    if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)
+     {
+      g_stbVolumeDiag.finalVolume=0.0;
+      g_stbVolumeDiag.rejectCause="EXCEEDS_MAX_RISK_VOLUME";
       return 0.0;
+     }
 
+   g_stbVolumeDiag.rejectCause="ACCEPTED";
    return volume;
   }
 
@@ -8560,20 +8772,26 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
 
    if(InpUseRiskSizing)
      {
-      volume=CalculateOrderVolumeByRisk(s);
+      volume=CalculateOrderVolumeByRisk(s,"PlaceSetup","AUTO");
 
       if(volume<=0.0)
         {
+         STB_LogVolumeReject(s.symbol,s.direction,s.entry,s.sl);
          return STB_LogPlaceReject(s,"RISK_VOLUME_INVALID");
         }
      }
    else
      {
       double multiplier=s.trendAligned ? InpTrendLotMultiplier : InpUniversalLotMultiplier;
-      volume=NormalizeVolume(s.symbol,InpBaseLots*multiplier);
+      double requestedFixedVolume=InpBaseLots*multiplier;
+      volume=NormalizeVolume(s.symbol,requestedFixedVolume);
 
       if(volume<=0.0)
+        {
+         STB_LogFixedVolumeReject("PlaceSetup","AUTO_FIXED",s.symbol,
+                                  s.direction,s.entry,s.sl,requestedFixedVolume);
          return STB_LogPlaceReject(s,"FIXED_VOLUME_INVALID");
+        }
      }
 
    if(!STB_DirectionVolumeWithinLimit(s.symbol,s.direction,volume,"PlaceSetup"))
@@ -9253,14 +9471,21 @@ bool PlaceManualPendingDirection(const int direction)
       manualRiskSetup.direction=direction;
       manualRiskSetup.entry=entry;
       manualRiskSetup.sl=sl;
-      volume=CalculateOrderVolumeByRisk(manualRiskSetup);
+      volume=CalculateOrderVolumeByRisk(manualRiskSetup,"PlaceManualPendingDirection","MANUAL_PENDING");
      }
    else
       volume=NormalizeVolume(_Symbol,InpBaseLots);
 
    if(volume<=0.0 || !MathIsValidNumber(volume))
      {
-      Print("STB MANUAL PENDING REJECTED: risk volume invalid symbol=",_Symbol);
+      if(InpUseRiskSizing)
+         STB_LogVolumeReject(_Symbol,direction,entry,sl);
+      else
+         STB_LogFixedVolumeReject("PlaceManualPendingDirection","MANUAL_PENDING_FIXED",
+                                  _Symbol,direction,entry,sl,InpBaseLots);
+      Print("STB MANUAL PENDING REJECTED: ",
+            InpUseRiskSizing ? "risk volume invalid" : "fixed volume invalid",
+            " symbol=",_Symbol);
       return false;
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
@@ -9399,14 +9624,21 @@ bool PlaceManualLimitDirection(const int direction)
       manualRiskSetup.direction=direction;
       manualRiskSetup.entry=entry;
       manualRiskSetup.sl=sl;
-      volume=CalculateOrderVolumeByRisk(manualRiskSetup);
+      volume=CalculateOrderVolumeByRisk(manualRiskSetup,"PlaceManualLimitDirection","MANUAL_LIMIT");
      }
    else
       volume=NormalizeVolume(_Symbol,InpBaseLots);
 
    if(volume<=0.0 || !MathIsValidNumber(volume))
      {
-      Print("STB MANUAL LIMIT REJECTED: risk volume invalid symbol=",_Symbol);
+      if(InpUseRiskSizing)
+         STB_LogVolumeReject(_Symbol,direction,entry,sl);
+      else
+         STB_LogFixedVolumeReject("PlaceManualLimitDirection","MANUAL_LIMIT_FIXED",
+                                  _Symbol,direction,entry,sl,InpBaseLots);
+      Print("STB MANUAL LIMIT REJECTED: ",
+            InpUseRiskSizing ? "risk volume invalid" : "fixed volume invalid",
+            " symbol=",_Symbol);
       return false;
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
@@ -10263,6 +10495,11 @@ void STB_ScannerRun()
 
    bool candidateAllocationFailed=false;
    // Per-cycle counters expose silent discovery-stage exits in the summary.
+   int scanDataRejects=0;
+   int scanQualityRejects=0;
+   int scanRegimeEvalRejects=0;
+   int scanUnstableRegimeRejects=0;
+   string scanQualityReasonTally="";
    int scanDirectionGateRejects=0;
    int scanBuildSetupRejects=0;
    int scanSetupAgeRejects=0;
@@ -10273,40 +10510,45 @@ void STB_ScannerRun()
       string symbol=symbols[i];
 
       string reason="";
-      if(!STB_ScannerDataEligible(symbol,reason))
-        {
-         Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
-               " reason=",(reason=="" ? "UNSPECIFIED":reason));
-         continue;
-        }
+       if(!STB_ScannerDataEligible(symbol,reason))
+         {
+          scanDataRejects++;
+          Print("STB SCANNER REJECT stage=DATA_ELIGIBILITY symbol=",symbol,
+                " reason=",(reason=="" ? "UNSPECIFIED":reason));
+          continue;
+         }
       g_scannerEligibleCount++;
       STBMarketQuality quality;
-      if(!STB_CalcMarketQuality(symbol,quality))
-        {
-         Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
-               " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
-               " score=",DoubleToString(quality.score,1),
-               " spreadPips=",DoubleToString(quality.spreadPips,2),
-               " activityRatio=",DoubleToString(quality.activityRatio,2),
-               " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
-         continue;
-        }
+       if(!STB_CalcMarketQuality(symbol,quality))
+         {
+          scanQualityRejects++;
+          STB_TallyAdd(scanQualityReasonTally,quality.reason);
+          Print("STB SCANNER REJECT stage=MARKET_QUALITY symbol=",symbol,
+                " reason=",(quality.reason=="" ? "UNSPECIFIED":quality.reason),
+                " score=",DoubleToString(quality.score,1),
+                " spreadPips=",DoubleToString(quality.spreadPips,2),
+                " activityRatio=",DoubleToString(quality.activityRatio,2),
+                " volatilityRatio=",DoubleToString(quality.volatilityRatio,2));
+          continue;
+         }
       g_scannerQualityCount++;
       STBRegimeState regime;
-      if(!STB_EvaluateRegime(symbol,regime))
-        {
-         Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
-               " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
-         continue;
-        }
-      if(regime.regime==STB_REGIME_UNSTABLE)
-        {
-         Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
-               " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
-               " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
-               " efficiency=",DoubleToString(regime.efficiency,2));
-         continue;
-        }
+       if(!STB_EvaluateRegime(symbol,regime))
+         {
+          scanRegimeEvalRejects++;
+          Print("STB SCANNER REJECT stage=REGIME_EVALUATION symbol=",symbol,
+                " reason=",(regime.reason=="" ? "UNSPECIFIED":regime.reason));
+          continue;
+         }
+       if(regime.regime==STB_REGIME_UNSTABLE)
+         {
+          scanUnstableRegimeRejects++;
+          Print("STB SCANNER REJECT stage=REGIME_FILTER symbol=",symbol,
+                " reason=",(regime.reason=="" ? "UNSTABLE_REGIME":regime.reason),
+                " volatilityRatio=",DoubleToString(regime.volatilityRatio,2),
+                " efficiency=",DoubleToString(regime.efficiency,2));
+          continue;
+         }
 
       g_scannerRegimeCount++;
 
@@ -10643,6 +10885,20 @@ void STB_ScannerRun()
          " top10=",IntegerToString(g_scannerTop10Count),
          " confidence=",g_scannerConfidence,
          " durationMs=",IntegerToString((int)elapsed));
+
+    Print("STB SCANNER DISCOVERY REJECT BREAKDOWN",
+          " dataRejects=",IntegerToString(scanDataRejects),
+          " qualityRejects=",IntegerToString(scanQualityRejects),
+          " qualityReasons=",STB_TallyReport(scanQualityReasonTally),
+          " regimeEvalRejects=",IntegerToString(scanRegimeEvalRejects),
+          " unstableRegimeRejects=",IntegerToString(scanUnstableRegimeRejects),
+          " directionGateRejects=",IntegerToString(scanDirectionGateRejects),
+          " buildSetupRejects=",IntegerToString(scanBuildSetupRejects),
+          " setupAgeRejects=",IntegerToString(scanSetupAgeRejects),
+          " scoreRejects=",IntegerToString(scanScoreRejects),
+          " check=discovery_stage_only; universe=dataRejects+eligible;",
+          " eligible=qualityRejects+quality; quality=regimeEval+unstable+regime",
+          " countsPerDirection=direction/build/age/score");
   }
 
 //+------------------------------------------------------------------+
@@ -11273,7 +11529,9 @@ int OnInit()
          " oscHardFilter=",InpOscillatorHardFilter ? "ON":"OFF",
          " adaptiveParams=",InpAdaptiveParameterLearning ? "ON":"OFF",
          " warmup=",IntegerToString(InpAdaptiveWarmupPerProfile),
-         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2)); Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
+         " UCB=",DoubleToString(InpAdaptiveUCBExploration,2));
+   STB_LogSizingConfig();
+   Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
 
 // Keep the six dedicated EA controls in the upper-right, away from
 // the native MT5 one-click panel. Button handlers only dispatch to
