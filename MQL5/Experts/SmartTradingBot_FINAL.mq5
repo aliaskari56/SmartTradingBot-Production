@@ -4817,9 +4817,14 @@ void STB_MarkPendingSubmitUnknown(const string symbol,
    string key=STB_PendingSubmitUnknownKey(symbol,magic,orderType);
    // A bounded quarantine prevents repeated submissions while a delayed server
    // order/transaction may still be propagating to the terminal's order pool.
-   if(!GlobalVariableCheck(key))
-      GlobalVariableTemp(key);
-   GlobalVariableSet(key,(double)(TimeLocal()+90));
+   // Use a persistent terminal global variable so a terminal restart does
+   // not erase the unresolved-submission guard before its bounded expiry.
+   if(GlobalVariableSet(key,(double)(TimeLocal()+90))==0)
+     {
+      Print("STB PENDING SUBMIT WARNING: quarantine persistence failed symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " err=",GetLastError());
+     }
    Print("STB PENDING SUBMIT UNKNOWN: quarantined symbol=",symbol,
          " type=",EnumToString(orderType),
          " magic=",IntegerToString((int)magic),
