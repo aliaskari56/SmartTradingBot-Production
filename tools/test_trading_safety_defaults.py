@@ -186,6 +186,9 @@ def main() -> int:
     controlled_delete = region(
         source, "bool STB_ExecuteOrderDelete(", "bool STB_RequestOrderDelete("
     )
+    broker_write_gate = region(
+        source, "bool STB_BrokerWritesAllowed()", "bool STB_TradeEnvironmentAllowed()"
+    )
     hedge_placement = region(
         source, "bool OneClickHedge()", "//==================================================================\n// STOP VALIDATION"
     )
@@ -211,6 +214,11 @@ def main() -> int:
     on_init = region(
         source, "int OnInit()", "//==================================================================\n// DEINIT"
     )
+    on_tick = region(source, "void OnTick()", "// TIMER")
+    on_timer = region(source, "void OnTimer()", "// CHART EVENTS")
+    on_trade_transaction = region(
+        source, "void OnTradeTransaction(", "if(trans.type!=TRADE_TRANSACTION_DEAL_ADD"
+    )
     tester_auto_branch = region(
         on_init, "if(MQLInfoInteger(MQL_TESTER))", "if(!InpAutoTrading)"
     )
@@ -224,6 +232,30 @@ def main() -> int:
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(r"\s+", "", strip_strings(on_init))
+    broker_write_gate_compact = re.sub(r"\s+", "", strip_strings(broker_write_gate))
+    on_tick_compact = re.sub(r"\s+", "", strip_strings(on_tick))
+    on_timer_compact = re.sub(r"\s+", "", strip_strings(on_timer))
+    on_trade_transaction_compact = re.sub(
+        r"\s+", "", strip_strings(on_trade_transaction)
+    )
+    broker_writer_names = (
+        "STB_TradeEnvironmentAllowed",
+        "STB_ModifyPendingOrderGeometry",
+        "STB_PositionModifyBrokerVerified",
+        "STB_ExecuteOrderDelete",
+        "OneClickHedge",
+        "PlaceSetup",
+        "PlaceManualPendingDirection",
+        "PlaceManualLimitDirection",
+    )
+    all_broker_writers_gated = all(
+        re.search(
+            rf"bool\s+{re.escape(name)}\s*\([\s\S]{{0,900}}?\{{\s*"
+            r"if\s*\(\s*!STB_BrokerWritesAllowed\s*\(\s*\)\s*\)",
+            source_code,
+        )
+        for name in broker_writer_names
+    )
 
     # Exercise the stripper itself against comment markers inside strings,
     # both comment styles, and line preservation. Static source checks alone
@@ -310,7 +342,20 @@ def main() -> int:
          and "}elseif(!InpAutoTrading){" in on_init_compact
          and bool(live_auto_branch)
          and "InpTesterForceAutoTrading" not in live_auto_branch_compact),
-        ("trade gate checks terminal, program, account-expert and account permissions",
+        ("normal charts load in explicit view-only mode instead of failing OnInit",
+          "g_stbChartVisualOnly=!MQLInfoInteger(MQL_TESTER);" in on_init_compact
+          and "STB VIEW-ONLY MODE" in on_init
+          and "live chart initialization denied" not in on_init),
+         ("broker write permission is tester-only and blocks view-only chart instances",
+          "MQLInfoInteger(MQL_TESTER)!=0" in broker_write_gate_compact
+          and "!g_stbChartVisualOnly" in broker_write_gate_compact
+          and all_broker_writers_gated),
+         ("view-only chart callbacks skip account-management and transaction handlers",
+          "if(g_stbChartVisualOnly){UpdatePanel();return;}" in on_tick_compact
+          and "if(g_stbChartVisualOnly){UpdatePanel();UpdateButtons();return;}" in on_timer_compact
+          and "if(g_stbChartVisualOnly)return;STB_TradeIntakeFromTransaction(trans);" in on_trade_transaction_compact
+          and "if(!g_stbChartVisualOnly){STB_PendingTrailRebuildFromTerminal();STB_ReconcileTradeRegistry();STB_RunManagementCycle();" in on_init_compact),
+         ("trade gate checks terminal, program, account-expert and account permissions",
          bool(permission_gate_code) and all(token in permission_gate_code for token in (
              "TERMINAL_TRADE_ALLOWED", "MQL_TRADE_ALLOWED",
              "ACCOUNT_TRADE_EXPERT", "ACCOUNT_TRADE_ALLOWED"))),
