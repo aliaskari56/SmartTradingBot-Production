@@ -502,7 +502,8 @@ def main() -> int:
          bool(auto_placement_code)
          and "trade.BuyStop(" in auto_placement_code
          and "trade.SellStop(" in auto_placement_code
-         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement_code
+         and "STB_ReconcilePendingSubmit(s.symbol,finalPendingType" in auto_placement_code
+         and "STB_MarkPendingSubmitUnknown(s.symbol,(ulong)InpMagic,finalPendingType" in auto_placement_code
          and "trade.ResultRetcode()" in auto_placement_code
          and "VerifyPendingInitialSL(" in auto_placement_code),
         ("automatic placement requests rollback if initial SL cannot be verified",
