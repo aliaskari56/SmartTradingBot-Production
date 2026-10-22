@@ -170,6 +170,8 @@ def main() -> int:
         source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
     on_trade_transaction = source_region(
         source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)")
+    on_trade_transaction_full = source_region(
+        source, "void OnTradeTransaction(", "void STB_ToggleDashboard()")
     trade_intake = source_region(
         source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
     management_cycle = source_region(
@@ -582,9 +584,9 @@ def main() -> int:
          "bool STB_SumClosedLifecyclePnlFromHistory(" in source
          and "HistorySelectByPosition(positionId)" in source
          and "entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY" in source
-         and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in source
-         and source.find("TakeAccumulatedPositionPnl(positionId)") <
-             source.find("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
+         and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in on_trade_transaction_full
+         and on_trade_transaction_full.find("TakeAccumulatedPositionPnl(positionId)") <
+             on_trade_transaction_full.find("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
         ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
              "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
