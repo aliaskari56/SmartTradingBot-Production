@@ -9200,6 +9200,7 @@ bool STB_ManualEntryReject(const string command,const string reason)
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
+   string command=(direction>0 ? "BUY_STOP":"SELL_STOP");
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
@@ -9346,6 +9347,7 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
+   string command=(direction>0 ? "BUY_LIMIT":"SELL_LIMIT");
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
