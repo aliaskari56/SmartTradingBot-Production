@@ -8367,8 +8367,14 @@ bool STB_HasDuplicatePendingType(const string symbol,
 bool ValidatePendingSetup(const Setup &s)
   {
    MqlTick tick;
-   if(!SymbolInfoTick(s.symbol,tick))
+   string quoteReason="";
+   if(!SymbolInfoTick(s.symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
+     {
+      Print("STB PENDING SETUP REJECT: invalid/stale quote symbol=",s.symbol,
+            " reason=",(quoteReason=="" ? "QUOTE_UNAVAILABLE":quoteReason));
       return false;
+     }
 
    double point=SymbolInfoDouble(s.symbol,SYMBOL_POINT);
    double minDist=TradeMinDistance(s.symbol);
