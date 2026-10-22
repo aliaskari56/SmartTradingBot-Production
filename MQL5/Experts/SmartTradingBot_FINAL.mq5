@@ -53,7 +53,7 @@ input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolu
 input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
 input int     InpSetupCooldownMinutes  = 15;
 input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
-input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; this build is Strategy-Tester-only
+input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; requires valid SL geometry
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
 input double  InpMaxDailyLossPercent   = 2.0;   // block new setups after daily equity drawdown reaches this %; 0 disables
@@ -11206,7 +11206,7 @@ int OnInit()
   {
    if(!STB_InitRunNamespace())
      {
-      Print("STB INIT FAILED: tester run namespace unavailable; refusing initialization.");
+      Print("STB INIT FAILED: risk namespace unavailable; refusing initialization.");
       return INIT_FAILED;
      }
 
@@ -11673,10 +11673,10 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
-// Enforce the daily equity guard by attempting to close positions opened
-// with this EA's magic and cancel eligible EA-owned pending orders.
-// Broker rejection, gaps, slippage, or a failed close can exceed the configured
-// percentage; this is a guardrail, not a guaranteed maximum-loss boundary.
+// Enforce the daily equity guard. Tester mode retains forced closing for EA-owned
+// positions; terminal/demo/live mode blocks new entries and cancels eligible EA
+// pending orders while normal position protection continues. Broker rejection,
+// gaps, and slippage mean this guard is not a guaranteed maximum-loss boundary.
 void STB_EnforceDailyRiskGuard()
   {
    bool riskBlocked=STB_DailyLossLimitHit();
