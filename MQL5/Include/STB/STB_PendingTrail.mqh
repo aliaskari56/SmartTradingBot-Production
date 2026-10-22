@@ -488,8 +488,11 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
       }
    }
 
-   // Forward to the ONE central pending geometry writer.
-   bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP,manual);
+   // Forward to the ONE central pending geometry writer and preserve its
+   // precise local/broker rejection reason for the caller's diagnostic log.
+   string writerFailureReason="";
+   bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP,
+                                          writerFailureReason,manual);
    int cls=STB_PendingClassifyResult(ok);
 
    if(ok)
@@ -527,7 +530,7 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
                                   : STB_PEND_BACKOFF_3_SEC));
 
    g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
-   gateReason="WRITER_REJECTED";
+   gateReason=(writerFailureReason=="" ? "WRITER_REJECTED":writerFailureReason);
 
    return false;
 }
@@ -886,10 +889,10 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                " currentEntry=",DoubleToString(currentEntry,digits),
                " currentSL=",DoubleToString(currentSL,digits),
                " failureCount=",failures,
-               " retryAt=",(string)retryAt,
-               " lastError=",GetLastError(),
-               " tradeRetcode=",(string)trade.ResultRetcode(),
-               " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+               " retryAt=",(string)retryAt);
+      // Do not print GetLastError()/trade.ResultRetcode() here: this caller
+      // cannot know whether a broker request was made, and these values may
+      // be stale. The central writer logs broker codes at the request boundary.
      }
 
    if(committed)
