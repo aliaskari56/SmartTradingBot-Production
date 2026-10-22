@@ -779,10 +779,10 @@ def main() -> int:
          place_setup.index("SetLastSetupTime(s.symbol,s.direction,s.setupTime)")),
         ("final volatile-state and ownership checks are directly before broker submission",
          place_setup.index("TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT") <
-         place_setup.index("bool ok=false;") <
+         place_setup.index("bool requestOK=false;") <
          place_setup.index("trade.BuyStop(volume,s.entry") and
          place_setup.index("MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT") <
-         place_setup.index("bool ok=false;")),
+         place_setup.index("bool requestOK=false;")),
         ("startup recovery rebuilds pending trails and reconciles exposure before management and scanner",
          all(token in on_init for token in (
              "STB_PendingTrailRebuildFromTerminal();",
