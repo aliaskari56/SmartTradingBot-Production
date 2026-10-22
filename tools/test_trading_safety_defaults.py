@@ -232,6 +232,12 @@ def main() -> int:
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(r"\s+", "", strip_strings(on_init))
+    risk_sizing = region(
+        source, "double CalculateOrderVolumeByRisk(", "bool STB_LogPlaceReject("
+    )
+    volume_normalizer = region(
+        source, "double NormalizeVolume(", "bool GetRates("
+    )
     daily_risk_guard = region(
         source, "bool STB_DailyLossLimitHit()",
         "// UNIVERSAL PROFIT LOCK POLICY"
@@ -322,6 +328,24 @@ def main() -> int:
          input_default("InpAutoTrading", source_code) == "false"),
         ("bounded equity-risk sizing is enabled by default",
          input_default("InpUseRiskSizing", source_code) == "true"),
+        ("risk sizing derives one-lot stop loss from OrderCalcProfit and fails closed on calculation errors",
+         bool(risk_sizing) and
+         "AccountInfoDouble(ACCOUNT_EQUITY)" in risk_sizing and
+         "equity*(InpRiskPercent/100.0)" in risk_sizing and
+         "OrderCalcProfit(orderType,s.symbol,1.0,s.entry,s.sl,lossForOneLot)" in risk_sizing and
+         "if(!OrderCalcProfit(" in risk_sizing and
+         "return 0.0;" in risk_sizing),
+        ("risk sizing rejects a broker minimum lot that exceeds the requested risk budget",
+         bool(risk_sizing) and
+         "if(raw+1e-9<minLot)" in risk_sizing and
+         "Never clamp upward into an unsafe lot" in risk_sizing and
+         "if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)" in risk_sizing),
+        ("volume normalization never upgrades zero or undersized requests to broker minimum",
+         bool(volume_normalizer) and
+         "volume<=0.0" in volume_normalizer and
+         "if(volume+1e-9<minLot)" in volume_normalizer and
+         "return 0.0;" in volume_normalizer and
+         "volume=MathFloor(volume/step+1e-9)*step;" in volume_normalizer),
         ("build provenance manifest matches actual AUTO and risk-sizing defaults",
          input_default("InpAutoTrading", source_code) == "false"
          and input_default("InpUseRiskSizing", source_code) == "true"
