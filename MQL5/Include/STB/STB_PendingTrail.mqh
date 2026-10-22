@@ -440,12 +440,17 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
                                     const double propEntry,
                                     const double propSL,
                                     const double propTP,
+                                    string &gateReason,
                                     const bool manual=false)
 {
+   gateReason="";
    int idx=STB_PendingTrailFind(ticket);
 
    if(idx<0 || !g_stbPendingTrail[idx].active)
+   {
+      gateReason="STATE_INACTIVE";
       return false;
+   }
 
    string symbol=g_stbPendingTrail[idx].symbol;
    double pip=PipSize(symbol);
@@ -454,11 +459,17 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    // Time throttle: at most one modification per cooldown window.
    if(g_stbPendingTrail[idx].nextRetryTime>0 &&
       now<g_stbPendingTrail[idx].nextRetryTime)
+   {
+      gateReason="BACKOFF_ACTIVE";
       return false;
+   }
 
    if(g_stbPendingTrail[idx].lastModifyTime>0 &&
       now<g_stbPendingTrail[idx].lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC)
+   {
+      gateReason="COOLDOWN_ACTIVE";
       return false;
+   }
 
    // Step gate: skip a proposal whose protection improvement is below the
    // configured meaningful step (existing input, no new input introduced).
@@ -471,7 +482,10 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
       if(step>0.0 &&
          MathAbs(propEntry-curEntry)<step &&
          MathAbs(propSL-curSL)<step)
+      {
+         gateReason="STEP_GATE";
          return false;
+      }
    }
 
    // Forward to the ONE central pending geometry writer.
@@ -480,6 +494,7 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
 
    if(ok)
    {
+      gateReason="MODIFY_CONFIRMED";
       if(manual)
          STB_ManualOverrideSet(ticket); // MANUAL_OVERRIDE: user PEND_TRAIL command is final
       // SUCCESS (or broker NO_CHANGE accepted): reset failure backoff.
@@ -499,6 +514,7 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    if(cls==STB_PEND_RES_ORDER_GONE)
    {
       g_stbPendingTrail[idx].active=false;
+      gateReason="ORDER_GONE";
       return false;
    }
 
@@ -511,6 +527,7 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
                                   : STB_PEND_BACKOFF_3_SEC));
 
    g_stbPendingTrail[idx].nextRetryTime=TimeCurrent()+backoffSec;
+   gateReason="WRITER_REJECTED";
 
    return false;
 }
@@ -826,10 +843,12 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // 4) Forward the proposal to the central submit gate. A failed broker
    //    write leaves the action bar unconsumed, so a later cycle can retry.
    ResetLastError();
+   string submitGateReason="";
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
                                                  prop.sl,
                                                  prop.tp,
+                                                 submitGateReason,
                                                  manual);
 
    if(!committed)
@@ -837,19 +856,40 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       int writerIdx=STB_PendingTrailFind(ticket);
       int failures=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
       datetime retryAt=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].nextRetryTime:0);
-      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
-            " symbol=",symbol,
-            " type=",STB_PendingTrailTypeName(orderType),
-            " stage=SUBMIT",
-            " proposedEntry=",DoubleToString(prop.entry,digits),
-            " proposedSL=",DoubleToString(prop.sl,digits),
-            " currentEntry=",DoubleToString(currentEntry,digits),
-            " currentSL=",DoubleToString(currentSL,digits),
-            " failureCount=",failures,
-            " retryAt=",(string)retryAt,
-            " lastError=",GetLastError(),
-            " tradeRetcode=",(string)trade.ResultRetcode(),
-            " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+
+      // A throttle/backoff/step rejection is an intentional local wait, not
+      // a broker modification failure. Do not report stale ResultRetcode=0
+      // or an unchanged failure counter as if a trade request had failed.
+      if(submitGateReason=="BACKOFF_ACTIVE" ||
+         submitGateReason=="COOLDOWN_ACTIVE" ||
+         submitGateReason=="STEP_GATE" ||
+         submitGateReason=="STATE_INACTIVE" ||
+         submitGateReason=="ORDER_GONE")
+         Print("PENDING_TRAIL_WAIT ticket=",ticket,
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=",submitGateReason,
+               " proposedEntry=",DoubleToString(prop.entry,digits),
+               " proposedSL=",DoubleToString(prop.sl,digits),
+               " currentEntry=",DoubleToString(currentEntry,digits),
+               " currentSL=",DoubleToString(currentSL,digits),
+               " failureCount=",failures,
+               " retryAt=",(string)retryAt);
+      else
+         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
+               " symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " stage=SUBMIT",
+               " reason=",submitGateReason,
+               " proposedEntry=",DoubleToString(prop.entry,digits),
+               " proposedSL=",DoubleToString(prop.sl,digits),
+               " currentEntry=",DoubleToString(currentEntry,digits),
+               " currentSL=",DoubleToString(currentSL,digits),
+               " failureCount=",failures,
+               " retryAt=",(string)retryAt,
+               " lastError=",GetLastError(),
+               " tradeRetcode=",(string)trade.ResultRetcode(),
+               " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
      }
 
    if(committed)
