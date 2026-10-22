@@ -554,9 +554,9 @@ def main() -> int:
          and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_limit_placement_code.find("STB_CheckPendingOrderRequest")),
         ("duplicate pending helper matches symbol, exact order type and owner magic",
          "bool STB_HasDuplicatePendingType(" in source
-         and "ORDER_SYMBOL)!=symbol" in source
-         and "ORDER_TYPE)!=orderType" in source
-         and "ORDER_MAGIC)!=(long)magic" in source),
+         and "OrderGetString(ORDER_SYMBOL)!=symbol" in source
+         and "OrderGetInteger(ORDER_TYPE)!=orderType" in source
+         and "OrderGetInteger(ORDER_MAGIC)!=magic" in source),
         ("automatic pending path blocks duplicate same-type order before final OrderCheck",
          "STB_HasDuplicatePendingType(s.symbol,finalPendingType" in auto_placement_code
          and auto_placement_code.index("STB_HasDuplicatePendingType(")
