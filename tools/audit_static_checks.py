@@ -262,12 +262,15 @@ def main() -> int:
              "BUY_SL_INSIDE_BROKER_ZONE", "SELL_SL_INSIDE_BROKER_ZONE",
              "r.valid=true;", "r.reason=\"OK\";")) and
          "STB_ResolvePendingDistance(" in trail_source),
-        ("pending trail does not classify partial execution as successful modification",
+        ("pending trail never uses stale CTrade retcodes to classify a false writer outcome",
          "int STB_PendingClassifyResult(const bool ok)" in trail_source and
-         "case TRADE_RETCODE_DONE_PARTIAL:" not in source_region(
+         "if(ok)\n      return STB_PEND_RES_SUCCESS;" in source_region(
              trail_source, "int STB_PendingClassifyResult(const bool ok)",
              "//--- Register a real terminal pending order") and
-         "case TRADE_RETCODE_DONE:" in source_region(
+         "return STB_PEND_RES_OTHER_FAILURE;" in source_region(
+             trail_source, "int STB_PendingClassifyResult(const bool ok)",
+             "//--- Register a real terminal pending order") and
+         "trade.ResultRetcode()" not in source_region(
              trail_source, "int STB_PendingClassifyResult(const bool ok)",
              "//--- Register a real terminal pending order")),
         ("pending trail retires disappeared orders before exposure-allocation checks",
@@ -303,7 +306,8 @@ def main() -> int:
         ("actionable M5 candle remains retryable after resolver/server failure and commits only after a confirmed write or deliberate skip",
          "actionableClosedBar=closedBar;" in trail_source and
          "Retry with the same bounded 5/15/60s policy." in trail_source and
-         "if(candleStop && step>0.0 &&" in trail_source and
+         "if(step>0.0 &&" in trail_source and
+         "if(candleStop && actionableClosedBar>0)" in trail_source and
          "if(committed)\n   {\n      if(candleStop && actionableClosedBar>0)" in trail_source),
         ("empty managed-symbol list means universal exposure management",
          "if(StringLen(InpScannerSymbols)==0)\n      return true;" in source),
@@ -435,7 +439,7 @@ def main() -> int:
               "SYMBOL_WRITER_LEASE_LOST",
               "MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT")) and
           place_setup.index("PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT") <
-          place_setup.index("bool ok=false;") <
+          place_setup.index("bool requestOK=false;") <
           place_setup.index("trade.BuyStop(volume,s.entry")),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
@@ -775,10 +779,10 @@ def main() -> int:
          place_setup.index("SetLastSetupTime(s.symbol,s.direction,s.setupTime)")),
         ("final volatile-state and ownership checks are directly before broker submission",
          place_setup.index("TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT") <
-         place_setup.index("bool ok=false;") <
+         place_setup.index("bool requestOK=false;") <
          place_setup.index("trade.BuyStop(volume,s.entry") and
          place_setup.index("MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT") <
-         place_setup.index("bool ok=false;")),
+         place_setup.index("bool requestOK=false;")),
         ("startup recovery rebuilds pending trails and reconciles exposure before management and scanner",
          all(token in on_init for token in (
              "STB_PendingTrailRebuildFromTerminal();",

@@ -200,26 +200,13 @@ string STB_PendingTrailTypeName(const long orderType)
 //--- P4: classify the last modify outcome (policy only, no new logs) -
 int STB_PendingClassifyResult(const bool ok)
 {
+   // The central writer returns true only after it verifies the committed
+   // server geometry. A false return can occur before any CTrade request
+   // (ownership, OrderCheck, geometry, or cycle gate), so ResultRetcode()
+   // may belong to an older request. Never classify a false writer outcome
+   // from that mutable/stale CTrade state; let the bounded retry policy run.
    if(ok)
       return STB_PEND_RES_SUCCESS;
-
-   uint ret=(uint)trade.ResultRetcode();
-
-   switch(ret)
-   {
-      case TRADE_RETCODE_DONE:
-         return STB_PEND_RES_SUCCESS;
-      case TRADE_RETCODE_NO_CHANGES:
-         return STB_PEND_RES_NO_CHANGE;
-      case TRADE_RETCODE_INVALID_STOPS:
-         return STB_PEND_RES_INVALID_STOPS;
-      case TRADE_RETCODE_INVALID_PRICE:
-         return STB_PEND_RES_INVALID_PRICE;
-      case TRADE_RETCODE_TOO_MANY_REQUESTS:
-         return STB_PEND_RES_TOO_MANY_REQUESTS;
-      case TRADE_RETCODE_MARKET_CLOSED:
-         return STB_PEND_RES_TEMPORARY_FAILURE;
-   }
 
    return STB_PEND_RES_OTHER_FAILURE;
 }
@@ -478,6 +465,28 @@ bool STB_SubmitPendingTrailGeometry(const ulong ticket,
    bool ok=STB_ModifyPendingOrderGeometry(ticket,propEntry,propSL,propTP,manual);
    int cls=STB_PendingClassifyResult(ok);
 
+   // The order can fill/cancel/expire between ManageOne's initial selection
+   // and the central writer's final re-selection. Do not turn that lifecycle
+   // race into a broker-modification failure or consume the retry budget.
+   if(!ok && !OrderSelect(ticket))
+   {
+      string missingReason=STB_PendingTrailMissingOrderReason(ticket);
+      if(missingReason=="ORDER_FILLED" ||
+         missingReason=="ORDER_CANCELED" ||
+         missingReason=="ORDER_EXPIRED" ||
+         missingReason=="ORDER_REJECTED")
+      {
+         int goneIdx=STB_PendingTrailFind(ticket);
+         if(goneIdx>=0)
+            g_stbPendingTrail[goneIdx].active=false;
+
+         Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
+               " reason=",missingReason,
+               " stage=POST_SUBMIT_RECHECK");
+         return false;
+      }
+   }
+
    if(ok)
    {
       if(manual)
@@ -560,9 +569,20 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return false;
    }
 
-   // After lifecycle/ownership checks, honor per-ticket backoff before
-   // rebuilding an actionable-bar proposal.
+   // Only the terminal-wide symbol lease owner may evaluate/submit this
+   // ticket. Other chart instances must defer silently rather than generate
+   // a false SUBMIT failure for a writer request they are not authorized to make.
+   string managedSymbol=OrderGetString(ORDER_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(managedSymbol))
+      return true;
+
+   // Honor retry backoff and the successful-write cooldown before rebuilding
+   // an actionable-bar proposal. These are normal no-op states, not failures.
    if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())
+      return true;
+   if(g_stbPendingTrail[idx].lastModifyTime>0 &&
+      TimeCurrent()<g_stbPendingTrail[idx].lastModifyTime+
+                   STB_PEND_TRAIL_COOLDOWN_SEC)
       return true;
 
    long orderType=OrderGetInteger(ORDER_TYPE);
@@ -804,27 +824,31 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
 
-   // Match the central step gate before submitting, so an insignificant
-   // proposal consumes its candle instead of being recalculated each tick.
+   // Apply the step gate before calling the submit wrapper for every
+   // pending type. A step/cooldown no-op is not a failed broker modification.
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double currentSL=OrderGetDouble(ORDER_SL);
    double step=MathMax(0.0,InpTrailStepPips)*pip;
-   if(candleStop && step>0.0 &&
+   if(step>0.0 &&
       MathAbs(prop.entry-currentEntry)<step &&
       MathAbs(prop.sl-currentSL)<step)
      {
-      g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
-      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
-            " type=",STB_PendingTrailTypeName(orderType),
-            " reason=STEP_GATE",
-            " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
-            " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
-            " stepPips=",DoubleToString(InpTrailStepPips,2));
+      if(candleStop && actionableClosedBar>0)
+        {
+         g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=STEP_GATE",
+               " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
+               " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
+               " stepPips=",DoubleToString(InpTrailStepPips,2));
+        }
       return true;
      }
 
    // 4) Forward the proposal to the central submit gate. A failed broker
    //    write leaves the action bar unconsumed, so a later cycle can retry.
+   int failuresBeforeSubmit=g_stbPendingTrail[idx].failureCount;
    ResetLastError();
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
@@ -832,11 +856,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                                  prop.tp,
                                                  manual);
 
-   if(!committed)
+   // The submit gate also returns false for expected no-op/defer paths
+   // (cooldown, step, lease change, or an order that disappeared). Log a
+   // MODIFY_FAILED event only when this attempt actually advanced the
+   // bounded failure counter; otherwise it would be a false broker failure.
+   int writerIdx=STB_PendingTrailFind(ticket);
+   int failuresAfterSubmit=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
+   if(!committed && writerIdx>=0 &&
+      failuresAfterSubmit>failuresBeforeSubmit)
      {
-      int writerIdx=STB_PendingTrailFind(ticket);
-      int failures=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
-      datetime retryAt=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].nextRetryTime:0);
+      datetime retryAt=g_stbPendingTrail[writerIdx].nextRetryTime;
       Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
             " symbol=",symbol,
             " type=",STB_PendingTrailTypeName(orderType),
@@ -845,11 +874,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
             " proposedSL=",DoubleToString(prop.sl,digits),
             " currentEntry=",DoubleToString(currentEntry,digits),
             " currentSL=",DoubleToString(currentSL,digits),
-            " failureCount=",failures,
+            " failureCount=",failuresAfterSubmit,
             " retryAt=",(string)retryAt,
-            " lastError=",GetLastError(),
-            " tradeRetcode=",(string)trade.ResultRetcode(),
-            " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+            " writerOutcome=FAILED_ATTEMPT");
      }
 
    if(committed)

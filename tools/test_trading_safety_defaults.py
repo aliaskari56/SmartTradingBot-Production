@@ -9,6 +9,7 @@ import re
 import sys
 
 SOURCE = Path("MQL5/Experts/SmartTradingBot_FINAL.mq5")
+PENDING_TRAIL_SOURCE = Path("MQL5/Include/STB/STB_PendingTrail.mqh")
 WORKFLOW = Path(".github/workflows/mql5-compile.yml")
 
 
@@ -162,6 +163,11 @@ def main() -> int:
         return 2
 
     source = SOURCE.read_text(encoding="utf-8")
+    if not PENDING_TRAIL_SOURCE.is_file():
+        print(f"FAIL: missing pending trail source: {PENDING_TRAIL_SOURCE}")
+        return 2
+    pending_trail_source = PENDING_TRAIL_SOURCE.read_text(encoding="utf-8")
+    pending_trail_code = strip_strings(strip_comments(pending_trail_source))
     workflow = WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.is_file() else ""
     source_code = strip_strings(strip_comments(source))
     permission_gate = region(
@@ -226,6 +232,12 @@ def main() -> int:
     tester_auto_branch_compact = re.sub(r"\s+", "", tester_auto_branch_code)
     live_auto_branch_compact = re.sub(r"\s+", "", live_auto_branch_code)
     on_init_compact = re.sub(r"\s+", "", strip_strings(on_init))
+    risk_sizing = region(
+        source, "double CalculateOrderVolumeByRisk(", "bool STB_LogPlaceReject("
+    )
+    volume_normalizer = region(
+        source, "double NormalizeVolume(", "bool GetRates("
+    )
     daily_risk_guard = region(
         source, "bool STB_DailyLossLimitHit()",
         "// UNIVERSAL PROFIT LOCK POLICY"
@@ -316,6 +328,30 @@ def main() -> int:
          input_default("InpAutoTrading", source_code) == "false"),
         ("bounded equity-risk sizing is enabled by default",
          input_default("InpUseRiskSizing", source_code) == "true"),
+        ("risk sizing derives one-lot stop loss from OrderCalcProfit and fails closed on calculation errors",
+         bool(risk_sizing) and
+         "AccountInfoDouble(ACCOUNT_EQUITY)" in risk_sizing and
+         "equity*(InpRiskPercent/100.0)" in risk_sizing and
+         "OrderCalcProfit(orderType,s.symbol,1.0,s.entry,s.sl,lossForOneLot)" in risk_sizing and
+         "if(!OrderCalcProfit(" in risk_sizing and
+         "return 0.0;" in risk_sizing),
+        ("risk sizing rejects a broker minimum lot that exceeds the requested risk budget",
+         bool(risk_sizing) and
+         "if(raw+1e-9<minLot)" in risk_sizing and
+         "if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)" in risk_sizing),
+        ("volume normalization never upgrades zero or undersized requests to broker minimum",
+         bool(volume_normalizer) and
+         "volume<=0.0" in volume_normalizer and
+         "if(volume+1e-9<minLot)" in volume_normalizer and
+         "return 0.0;" in volume_normalizer and
+         "volume=MathFloor(volume/step+1e-9)*step;" in volume_normalizer),
+        ("volume precision follows arbitrary broker step and validates the final step grid",
+         bool(volume_normalizer) and
+         "double scaledStep=step*MathPow(10.0,d);" in volume_normalizer and
+         "MathAbs(scaledStep-MathRound(scaledStep))<=1e-8" in volume_normalizer and
+         "double stepUnits=normalized/step;" in volume_normalizer and
+         "MathAbs(stepUnits-MathRound(stepUnits))>1e-7" in volume_normalizer and
+         "int digits=2;" not in volume_normalizer),
         ("build provenance manifest matches actual AUTO and risk-sizing defaults",
          input_default("InpAutoTrading", source_code) == "false"
          and input_default("InpUseRiskSizing", source_code) == "true"
@@ -366,8 +402,70 @@ def main() -> int:
          and "request.type_filling=ORDER_FILLING_RETURN;" in pending_check_code),
         ("pending-order modification preflight is scoped to geometry writer",
          bool(pending_modify_code)
-         and "if(!OrderCheck(req,check))" in pending_modify_code
-         and "check.retcode!=0" in pending_modify_code),
+         and "bool pendingOrderCheckOK=OrderCheck(req,check);" in pending_modify_code
+         and "if(!pendingOrderCheckOK)" in pending_modify_code
+         and "check.retcode!=0" in pending_modify_code
+         and "pendingOrderCheckLastError=GetLastError();" in pending_modify_code),
+        ("pending-trail backoff and cooldown gates precede candle consumption",
+         bool(pending_trail_code)
+         and "nextRetryTime>TimeCurrent()" in pending_trail_code
+         and "lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC" in pending_trail_code
+         and pending_trail_code.index("if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())")
+             < pending_trail_code.index("datetime closedBar=iTime(symbol,PERIOD_M5,1)")),
+        ("pending-trail only submits from the verified symbol lease owner",
+         "STB_SymbolManagementOwnedVerified(managedSymbol)" in pending_trail_code
+         and "if(!STB_SymbolManagementOwnedVerified(managedSymbol))" in pending_trail_code),
+        ("pending-trail retry delay is bounded and increases after consecutive failures",
+         all(token in pending_trail_code for token in (
+             "STB_PEND_BACKOFF_1_SEC", "STB_PEND_BACKOFF_2_SEC",
+             "STB_PEND_BACKOFF_3_SEC", "failureCount++",
+             "nextRetryTime=TimeCurrent()+backoffSec"))),
+        ("pending-trail classifies false writer outcomes without stale CTrade retcodes",
+         bool(re.search(
+             r"int STB_PendingClassifyResult\(const bool ok\)\s*\{[^}]*return STB_PEND_RES_OTHER_FAILURE;",
+             pending_trail_code, re.DOTALL))
+         and "trade.ResultRetcode()" not in region(
+             pending_trail_source, "int STB_PendingClassifyResult(",
+             "//--- Register a real terminal pending order")),
+        ("stop-limit child price snapshot is revalidated after OrderCheck",
+         bool(pending_modify_code)
+         and "double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
+         and "double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
+         and "MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance" in pending_modify_code),
+        ("pending modification revalidates expiration policy after OrderCheck",
+         bool(pending_modify_code)
+         and "ENUM_ORDER_TYPE_TIME typeTime=" in pending_modify_code
+         and "datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);" in pending_modify_code
+         and "(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME)!=typeTime" in pending_modify_code
+         and "(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION)!=expiration" in pending_modify_code),
+        ("pending modification rejects prices outside the tradable tick grid",
+         bool(pending_modify_code)
+         and "double pendingTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);" in pending_modify_code
+         and "if(pendingTickSize<=0.0)" in pending_modify_code
+         and "MathAbs(newEntry-MathRound(newEntry/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "pendingPricesOnTickGrid" in pending_modify_code),
+        ("pending modification rechecks type-specific entry distance against live quotes",
+         "bool STB_IsPendingEntryBrokerValid(" in source_code
+         and "case ORDER_TYPE_BUY_STOP:" in source_code
+         and "case ORDER_TYPE_BUY_STOP_LIMIT:" in source_code
+         and "case ORDER_TYPE_SELL_STOP:" in source_code
+         and "case ORDER_TYPE_SELL_STOP_LIMIT:" in source_code
+         and "case ORDER_TYPE_BUY_LIMIT:" in source_code
+         and "case ORDER_TYPE_SELL_LIMIT:" in source_code
+         and "STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)" in pending_modify_code
+         and pending_modify_code.count("STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)") >= 2),
+        ("pending modification broker guards reject stale or invalid quotes",
+         "bool STB_IsPendingEntryBrokerValid(" in source_code
+         and "bool IsValidSLForPendingOrder(" in source_code
+         and source_code.count("!STB_ScannerQuoteValid(tick,quoteReason)") >= 2
+         and "tick.ask<tick.bid" in source_code),
+        ("pending limit broker-distance checks use the correct quote side",
+         "case ORDER_TYPE_BUY_LIMIT:" in source_code
+         and "return entry<tick.ask-minDist;" in source_code
+         and "case ORDER_TYPE_SELL_LIMIT:" in source_code
+         and "return entry>tick.bid+minDist;" in source_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
@@ -404,7 +502,8 @@ def main() -> int:
          bool(auto_placement_code)
          and "trade.BuyStop(" in auto_placement_code
          and "trade.SellStop(" in auto_placement_code
-         and "if(!TradeRetcodePlacementSucceeded())" in auto_placement_code
+         and "STB_ReconcilePendingSubmit(s.symbol,finalPendingType" in auto_placement_code
+         and "STB_MarkPendingSubmitUnknown(s.symbol,(ulong)InpMagic,finalPendingType" in auto_placement_code
          and "trade.ResultRetcode()" in auto_placement_code
          and "VerifyPendingInitialSL(" in auto_placement_code),
         ("automatic placement requests rollback if initial SL cannot be verified",
@@ -436,9 +535,68 @@ def main() -> int:
          bool(hedge_placement_code)
          and "trade.BuyStop(" in hedge_placement_code
          and "trade.SellStop(" in hedge_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
+         and "STB_ReconcilePendingSubmit(symbol,hedgeOrderType" in hedge_placement_code
+         and "STB_MarkPendingSubmitUnknown(symbol,(ulong)InpMagic,hedgeOrderType" in hedge_placement_code
          and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
          and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK," in hedge_placement_code),
+        ("hedge rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(hedge_placement_code)
+         and hedge_placement_code.count("STB_DirectionVolumeWithinLimit") >= 2
+         and hedge_placement_code.rfind("STB_DirectionVolumeWithinLimit") > hedge_placement_code.find("STB_ScannerQuoteValid")
+         and hedge_placement_code.rfind("STB_DirectionVolumeWithinLimit") < hedge_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("manual stop rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(manual_stop_placement_code)
+         and manual_stop_placement_code.count("STB_DirectionVolumeWithinLimit") >= 2
+         and manual_stop_placement_code.rfind("STB_DirectionVolumeWithinLimit") > manual_stop_placement_code.find("STB_ScannerQuoteValid")
+         and manual_stop_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_stop_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("manual limit rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(manual_limit_placement_code)
+         and manual_limit_placement_code.count("STB_DirectionVolumeWithinLimit") >= 2
+         and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") > manual_limit_placement_code.find("STB_ScannerQuoteValid")
+         and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_limit_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("duplicate pending helper matches symbol, exact order type and owner magic",
+         "bool STB_HasDuplicatePendingType(" in source
+         and "OrderGetString(ORDER_SYMBOL)!=symbol" in source
+         and "OrderGetInteger(ORDER_TYPE)!=orderType" in source
+         and "OrderGetInteger(ORDER_MAGIC)!=magic" in source
+         and "StringFind(existingComment,\"STB|M|\")!=0" in source
+         and "StringFind(existingComment,\"STB|\")!=0" in source),
+        ("automatic pending path blocks duplicate same-type order before final OrderCheck",
+         "STB_HasDuplicatePendingType(s.symbol,finalPendingType" in auto_placement_code
+         and auto_placement_code.index("STB_HasDuplicatePendingType(")
+             < auto_placement_code.rfind("STB_CheckPendingOrderRequest(")),
+        ("manual stop path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(_Symbol,manualStopType,0)" in manual_stop_placement_code
+         and manual_stop_placement_code.index("STB_HasDuplicatePendingType(")
+             < manual_stop_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("manual limit path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(_Symbol,manualLimitType,0)" in manual_limit_placement_code
+         and manual_limit_placement_code.index("STB_HasDuplicatePendingType(")
+             < manual_limit_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("hedge path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(symbol,hedgeOrderType" in hedge_placement_code
+         and hedge_placement_code.index("STB_HasDuplicatePendingType(")
+             < hedge_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("ambiguous pending submissions reconcile exact active order signature",
+         "bool STB_ReconcilePendingSubmit(" in source
+         and "ORDER_COMMENT)!=comment" in source
+         and "ORDER_VOLUME_INITIAL)-volume" in source
+         and "ORDER_PRICE_OPEN)-entry" in source
+         and "matches==1" in source
+         and "matches>1" in source),
+        ("unresolved pending submission quarantines retries and expires safely",
+         "void STB_MarkPendingSubmitUnknown(" in source
+         and "TimeLocal()+90" in source
+         and "GlobalVariableSet(key" in source
+         and "prior request unresolved" in source
+         and "GlobalVariableDel(unknownKey)" in source),
+        ("restart recovery rebuilds pending trail state from active managed orders",
+         "STB_PendingTrailRebuildFromTerminal();" in source
+         and "int STB_PendingTrailRebuildFromTerminal()" in pending_trail_source
+         and "STB_PendingTrailRegister(ticket,\"RESTART_RECOVERY\")" in pending_trail_source),
+        ("pending setup validation rejects stale or invalid market quotes",
+         "STB_ScannerQuoteValid(tick,quoteReason)" in source
+         and "STB PENDING SETUP REJECT: invalid/stale quote" in source),
         ("manual stop placement preflights the exact pending type before broker submission",
          bool(manual_stop_placement_code)
          and "STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0" in manual_stop_placement_code
@@ -448,7 +606,8 @@ def main() -> int:
          bool(manual_stop_placement_code)
          and "trade.BuyStop(" in manual_stop_placement_code
          and "trade.SellStop(" in manual_stop_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code
+         and "STB_ReconcilePendingSubmit(_Symbol,manualStopType,0" in manual_stop_placement_code
+         and "STB_MarkPendingSubmitUnknown(_Symbol,0,manualStopType" in manual_stop_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_stop_placement_code),
         ("manual limit placement preflights the exact pending type before broker submission",
@@ -460,7 +619,8 @@ def main() -> int:
          bool(manual_limit_placement_code)
          and "trade.BuyLimit(" in manual_limit_placement_code
          and "trade.SellLimit(" in manual_limit_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code
+         and "STB_ReconcilePendingSubmit(_Symbol,manualLimitType,0" in manual_limit_placement_code
+         and "STB_MarkPendingSubmitUnknown(_Symbol,0,manualLimitType" in manual_limit_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_limit_placement_code),
         ("daily equity guard fails closed on invalid clock/equity and failed persistence",

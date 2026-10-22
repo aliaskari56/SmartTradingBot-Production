@@ -1767,14 +1767,30 @@ double NormalizeVolume(const string symbol,double volume)
    if(volume<minLot)
       volume=minLot;
 
-   int digits=2;
-   if(step<0.01)
-      digits=3;
-   if(step<0.001)
-      digits=4;
+   // Derive decimal precision from the broker's actual volume step.
+   // Fixed thresholds (0.01/0.001) break valid grids such as 0.125.
+   int digits=-1;
+   for(int d=0;d<=8;d++)
+     {
+      double scaledStep=step*MathPow(10.0,d);
+      if(MathAbs(scaledStep-MathRound(scaledStep))<=1e-8)
+        {
+         digits=d;
+         break;
+        }
+     }
+
+   if(digits<0)
+      return 0.0;
 
    double normalized=NormalizeDouble(volume,digits);
    if(normalized<minLot-1e-9 || normalized>maxLot+1e-9)
+      return 0.0;
+
+   // Fail closed if decimal normalization no longer lies on the broker grid.
+   double stepUnits=normalized/step;
+   if(!MathIsValidNumber(stepUnits) ||
+      MathAbs(stepUnits-MathRound(stepUnits))>1e-7)
       return 0.0;
 
    return normalized;
@@ -2143,7 +2159,8 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double stbCurTP=OrderGetDouble(ORDER_TP);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
-   if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+   if(!STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry) ||
+      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
       return false;
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
@@ -2159,7 +2176,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
    datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
-   double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   // Preserve the original child-price snapshot separately from the adjusted
+   // stop-limit price submitted below. OrderCheck can yield while another
+   // terminal action changes the live order geometry.
+   double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   double stopLimit=stbCurStopLimit;
 
    // Keep a Stop-Limit's trigger-to-limit offset when trailing its trigger.
    // Leaving stoplimit unchanged would detach the child limit price from the
@@ -2171,7 +2192,14 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
          return false;
 
       double stopLimitOffset=stopLimit-stbCurEntry;
-      stopLimit=NormalizePrice(symbol,newEntry+stopLimitOffset);
+      // Stop-limit child prices must obey the symbol's trade tick size too.
+      // Keep the child on the safe side of the trigger after moving it:
+      // BUY_STOP_LIMIT child limit below trigger -> round down;
+      // SELL_STOP_LIMIT child limit above trigger -> round up.
+      double rawStopLimit=newEntry+stopLimitOffset;
+      stopLimit=STB_TickAlignPriceDirectional(
+                   symbol,rawStopLimit,
+                   stbOt==ORDER_TYPE_SELL_STOP_LIMIT);
 
       bool offsetValid=(stopLimit>0.0 &&
                         ((stbOt==ORDER_TYPE_BUY_STOP_LIMIT && stopLimit<newEntry) ||
@@ -2186,6 +2214,40 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                " newStopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
          return false;
         }
+     }
+
+   // NormalizePrice() rounds to display digits, which is not necessarily the
+   // symbol's tradable tick grid (e.g. exchange-traded instruments). Reject
+   // off-grid geometry rather than silently shifting the risk contract.
+   double pendingTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double pendingPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   if(pendingTickSize<=0.0)
+      pendingTickSize=pendingPoint;
+   if(pendingTickSize<=0.0 || pendingPoint<=0.0)
+      return false;
+   double pendingGridTolerance=MathMax(pendingTickSize*1e-6,pendingPoint*1e-8);
+   bool pendingPricesOnTickGrid=
+      MathAbs(newEntry-MathRound(newEntry/pendingTickSize)*pendingTickSize)<=pendingGridTolerance &&
+      MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance &&
+      (newTP==0.0 ||
+       (newTP>0.0 &&
+        MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance));
+   if(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
+      stbOt==ORDER_TYPE_SELL_STOP_LIMIT)
+      pendingPricesOnTickGrid=pendingPricesOnTickGrid &&
+         stopLimit>0.0 &&
+         MathAbs(stopLimit-MathRound(stopLimit/pendingTickSize)*pendingTickSize)<=pendingGridTolerance;
+   if(!pendingPricesOnTickGrid)
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " reason=PRICE_OFF_TRADE_TICK_GRID",
+            " tickSize=",DoubleToString(pendingTickSize,10),
+            " entry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " sl=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " tp=",DoubleToString(newTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
      }
 
    // One broker geometry write per ticket per management cycle. This also
@@ -2208,9 +2270,18 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    req.stoplimit=stopLimit;
 
    ResetLastError();
+   bool pendingOrderCheckOK=OrderCheck(req,check);
+   int pendingOrderCheckLastError=GetLastError();
 
-   if(!OrderCheck(req,check))
+   if(!pendingOrderCheckOK)
+     {
+      Print("STB PENDING MODIFY ORDERCHECK API FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " ret=",IntegerToString((int)check.retcode),
+            " comment=",check.comment,
+            " lastError=",IntegerToString(pendingOrderCheckLastError));
       return false;
+     }
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
@@ -2229,21 +2300,32 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
+   // Preserve order lifetime policy as well as geometry. Another terminal
+   // action can change expiration while OrderCheck is running; submitting the
+   // old type_time/expiration snapshot would otherwise overwrite that change.
+   if((ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME)!=typeTime ||
+      (datetime)OrderGetInteger(ORDER_TIME_EXPIRATION)!=expiration)
+      return false;
    // Do not re-enable a manual-override pause after OrderCheck: every
    // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double latestSL=OrderGetDouble(ORDER_SL);
    double latestTP=OrderGetDouble(ORDER_TP);
+   double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
    double latestPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
    double latestTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double latestTolerance=MathMax(latestPoint*0.5,
                                   latestTickSize>0.0 ? latestTickSize*0.5:latestPoint*0.5);
    if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
       MathAbs(latestSL-stbCurSL)>latestTolerance ||
-      MathAbs(latestTP-stbCurTP)>latestTolerance)
+      MathAbs(latestTP-stbCurTP)>latestTolerance ||
+      MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance)
       return false;
 
+   // Recheck the broker entry boundary with a fresh quote after OrderCheck;
+   // quote movement during preflight must not make this request stale.
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      !STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
       !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
@@ -2258,14 +2340,25 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // issue a second geometry write for this ticket in the same cycle.
    STB_CycleMarkWritten(ticket);
 
-   if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
-                         typeTime,expiration,stopLimit))
+   ResetLastError();
+   bool pendingModifyRequestOK=trade.OrderModify(ticket,newEntry,newSL,newTP,
+                                                 typeTime,expiration,stopLimit);
+   uint pendingModifyRetcode=trade.ResultRetcode();
+   int pendingModifyLastError=GetLastError();
+
+   if(!pendingModifyRequestOK)
      {
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
                        OrderGetDouble(ORDER_TP));
+      Print("STB PENDING MODIFY REQUEST FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " requestOK=",pendingModifyRequestOK,
+            " retcode=",IntegerToString((int)pendingModifyRetcode),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",IntegerToString(pendingModifyLastError));
       return false;
      }
 
@@ -2276,6 +2369,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
                        OrderGetDouble(ORDER_TP));
+      Print("STB PENDING MODIFY RETCODE FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " requestOK=",pendingModifyRequestOK,
+            " retcode=",IntegerToString((int)pendingModifyRetcode),
+            " description=",trade.ResultRetcodeDescription(),
+            " lastError=",IntegerToString(pendingModifyLastError));
       return false;
      }
 
@@ -4697,6 +4796,105 @@ bool STB_ResolveManualPendingEntry(const string symbol,
    return false;
   }
 
+string STB_PendingSubmitUnknownKey(const string symbol,
+                                      const ulong magic,
+                                      const ENUM_ORDER_TYPE orderType)
+  {
+   string safeSymbol=StringSubstr(symbol,0,24);
+   StringReplace(safeSymbol,".","_");
+   StringReplace(safeSymbol,"#","_");
+   StringReplace(safeSymbol," ","_");
+   return "STB_U_"+IntegerToString((int)magic)+"_"+
+          IntegerToString((int)orderType)+"_"+safeSymbol;
+  }
+
+void STB_MarkPendingSubmitUnknown(const string symbol,
+                                  const ulong magic,
+                                  const ENUM_ORDER_TYPE orderType,
+                                  const string source,
+                                  const uint retcode)
+  {
+   string key=STB_PendingSubmitUnknownKey(symbol,magic,orderType);
+   // A bounded quarantine prevents repeated submissions while a delayed server
+   // order/transaction may still be propagating to the terminal's order pool.
+   // Use a persistent terminal global variable so a terminal restart does
+   // not erase the unresolved-submission guard before its bounded expiry.
+   if(GlobalVariableSet(key,(double)(TimeLocal()+90))==0)
+     {
+      Print("STB PENDING SUBMIT WARNING: quarantine persistence failed symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " err=",GetLastError());
+     }
+   Print("STB PENDING SUBMIT UNKNOWN: quarantined symbol=",symbol,
+         " type=",EnumToString(orderType),
+         " magic=",IntegerToString((int)magic),
+         " source=",source,
+         " retcode=",IntegerToString((int)retcode),
+         " quarantineSec=90");
+  }
+
+bool STB_ReconcilePendingSubmit(const string symbol,
+                                const ENUM_ORDER_TYPE orderType,
+                                const ulong magic,
+                                const double volume,
+                                const double entry,
+                                const double sl,
+                                const double tp,
+                                const string comment,
+                                ulong &matchedTicket)
+  {
+   matchedTicket=0;
+   double volStep=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
+   double priceStep=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(priceStep<=0.0)
+      priceStep=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   if(volStep<=0.0 || priceStep<=0.0)
+      return false;
+
+   int matches=0;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+         (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE)!=orderType ||
+         (ulong)OrderGetInteger(ORDER_MAGIC)!=magic ||
+         OrderGetString(ORDER_COMMENT)!=comment)
+         continue;
+
+      if(MathAbs(OrderGetDouble(ORDER_VOLUME_INITIAL)-volume)>volStep*0.25 ||
+         MathAbs(OrderGetDouble(ORDER_PRICE_OPEN)-entry)>priceStep*0.51 ||
+         MathAbs(OrderGetDouble(ORDER_SL)-sl)>priceStep*0.51 ||
+         MathAbs(OrderGetDouble(ORDER_TP)-tp)>priceStep*0.51)
+         continue;
+
+      matches++;
+      matchedTicket=ticket;
+     }
+
+   if(matches==1)
+     {
+      Print("STB PENDING SUBMIT RECONCILED symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " ticket=",IntegerToString((int)matchedTicket),
+            " result=ACTIVE_ORDER_MATCH");
+      return true;
+     }
+
+   if(matches>1)
+     {
+      matchedTicket=0;
+      Print("STB PENDING SUBMIT AMBIGUOUS: multiple matching orders symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " matches=",IntegerToString(matches));
+     }
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool OneClickHedge()
   {
    if(!MQLInfoInteger(MQL_TESTER))
@@ -4842,21 +5040,44 @@ bool OneClickHedge()
        return false;
       }
 
+   // Recheck aggregate directional exposure at the final broker-submit boundary;
+   // another actor may have added exposure since the earlier sizing check.
+   if(!STB_DirectionVolumeWithinLimit(symbol,hedgeDirection,volume,"OneClickHedgeFinal"))
+      return false;
+
     ENUM_ORDER_TYPE hedgeOrderType=(hedgeType==POSITION_TYPE_BUY)
                                       ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP;
+   if(STB_HasDuplicatePendingType(symbol,hedgeOrderType,(ulong)InpMagic))
+     {
+      Print("STB HEDGE REJECTED: duplicate same-type pending order symbol=",symbol);
+      return false;
+     }
+
     if(!STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0,
                                      typeTime,expiration,(ulong)InpMagic,
                                      comment,"ONE_CLICK_HEDGE"))
        return false;
 
-    bool ok=(hedgeType==POSITION_TYPE_BUY)
-           ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(hedgeType==POSITION_TYPE_BUY)
+                  ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong hedgeOrder=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      hedgeOrder==0 || !OrderSelect(hedgeOrder))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(symbol,hedgeOrderType,(ulong)InpMagic,
+                                    volume,entry,sl,0.0,comment,reconciledTicket))
+         hedgeOrder=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(symbol,(ulong)InpMagic,hedgeOrderType,
+                                      "OneClickHedge",submitRetcode);
+         return false;
+        }
+     }
    if(hedgeOrder==0 || !VerifyPendingInitialSL(hedgeOrder))
      {
       Print("STB HEDGE REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
@@ -7119,7 +7340,9 @@ bool IsValidSLForPendingOrder(const string symbol,
       return false;
 
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick))
+   string quoteReason="";
+   if(!SymbolInfoTick(symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
       return false;
 
    double minDist=TradeMinDistance(symbol);
@@ -7141,6 +7364,49 @@ bool IsValidSLForPendingOrder(const string symbol,
       return (sl>=entry+minDist && sl>=tick.ask+minDist);
 
    return false;
+  }
+
+// Validate pending entry placement against the current live quote and broker
+// stop/freeze distance. Directional monotonicity alone does not guarantee that
+// a previously valid order remains outside the broker's current rejection zone.
+bool STB_IsPendingEntryBrokerValid(const string symbol,
+                                   const ENUM_ORDER_TYPE orderType,
+                                   const double entry)
+  {
+   if(symbol=="" || entry<=0.0)
+      return false;
+
+   MqlTick tick;
+   string quoteReason="";
+   if(!SymbolInfoTick(symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
+      return false;
+
+   double minDist=TradeMinDistance(symbol);
+   if(minDist<=0.0)
+      return false;
+
+   switch(orderType)
+     {
+      case ORDER_TYPE_BUY_STOP:
+      case ORDER_TYPE_BUY_STOP_LIMIT:
+         return entry>tick.ask+minDist;
+
+      case ORDER_TYPE_SELL_STOP:
+      case ORDER_TYPE_SELL_STOP_LIMIT:
+         return entry<tick.bid-minDist;
+
+      // Limit orders are validated against the opposite quote side:
+      // BUY_LIMIT must be below Ask; SELL_LIMIT must be above Bid.
+      case ORDER_TYPE_BUY_LIMIT:
+         return entry<tick.ask-minDist;
+
+      case ORDER_TYPE_SELL_LIMIT:
+         return entry>tick.bid+minDist;
+
+      default:
+         return false;
+     }
   }
 
 bool CalculateInitialPendingProtectionSL(const string symbol,
@@ -8176,11 +8442,73 @@ double DirectionExposureVolume(const string symbol,const int direction)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_HasDuplicatePendingType(const string symbol,
+                                  const ENUM_ORDER_TYPE orderType,
+                                  const ulong magic)
+  {
+   if(symbol=="")
+      return true;
+
+   string unknownKey=STB_PendingSubmitUnknownKey(symbol,magic,orderType);
+   if(GlobalVariableCheck(unknownKey))
+     {
+      double quarantineUntil=GlobalVariableGet(unknownKey);
+      if(quarantineUntil>(double)TimeLocal())
+        {
+         Print("STB PENDING SUBMIT BLOCK: prior request unresolved symbol=",symbol,
+               " type=",EnumToString(orderType),
+               " quarantineUntil=",DoubleToString(quarantineUntil,0));
+         return true;
+        }
+      GlobalVariableDel(unknownKey);
+     }
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+
+      if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+         (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE)!=orderType ||
+         (ulong)OrderGetInteger(ORDER_MAGIC)!=magic)
+         continue;
+
+      string existingComment=OrderGetString(ORDER_COMMENT);
+      if(magic==0)
+        {
+         if(StringFind(existingComment,"STB|M|")!=0)
+            continue;
+        }
+      else if(StringFind(existingComment,"STB|")!=0)
+         continue;
+
+      // An existing same-symbol, same-direction/type pending order with the
+      // same owner is treated as a duplicate; do not stack a second request.
+      Print("STB DUPLICATE PENDING BLOCK symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " magic=",IntegerToString((int)magic),
+            " existingOrder=",IntegerToString((int)ticket));
+      return true;
+     }
+
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool ValidatePendingSetup(const Setup &s)
   {
    MqlTick tick;
-   if(!SymbolInfoTick(s.symbol,tick))
+   string quoteReason="";
+   if(!SymbolInfoTick(s.symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
+     {
+      Print("STB PENDING SETUP REJECT: invalid/stale quote symbol=",s.symbol,
+            " reason=",(quoteReason=="" ? "QUOTE_UNAVAILABLE":quoteReason));
       return false;
+     }
 
    double point=SymbolInfoDouble(s.symbol,SYMBOL_POINT);
    double minDist=TradeMinDistance(s.symbol);
@@ -8573,44 +8901,40 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    // The earlier discovery check may be stale after the remaining gates.
    ENUM_ORDER_TYPE finalPendingType=(s.direction>0 ? ORDER_TYPE_BUY_STOP
                                                    : ORDER_TYPE_SELL_STOP);
+   if(STB_HasDuplicatePendingType(s.symbol,finalPendingType,(ulong)InpMagic))
+      return STB_LogPlaceReject(s,"DUPLICATE_PENDING_ORDER");
+
    if(!STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,
                                     s.entry,s.sl,s.tp,typeTime,expiration,
                                     (ulong)InpMagic,comment,"SCANNER_FINAL_SUBMIT"))
       return STB_LogPlaceReject(s,"FINAL_ORDERCHECK_REJECT");
 
-    bool ok=false;
-
+   bool requestOK=false;
    if(s.direction>0)
-      ok=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
+      requestOK=trade.BuyStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
    else
-      ok=trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
+      requestOK=trade.SellStop(volume,s.entry,s.symbol,s.sl,s.tp,typeTime,expiration,comment);
 
-   if(!ok)
-     {
-      Print("STB order request failed symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " lots=",DoubleToString(volume,3),
-            " entry=",DoubleToString(s.entry,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-     }
-
-   if(!TradeRetcodePlacementSucceeded())
-     {
-      Print("STB order server rejected symbol=",s.symbol,
-            " magic=",IntegerToString((int)InpMagic),
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
-            " order=",IntegerToString((int)trade.ResultOrder()),
-            " ret=",trade.ResultRetcode()," ",
-            trade.ResultRetcodeDescription());
-      return false;
-     }
-
+   uint submitRetcode=trade.ResultRetcode();
    ulong placedOrder=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      placedOrder==0 || !OrderSelect(placedOrder))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(s.symbol,finalPendingType,(ulong)InpMagic,
+                                    volume,s.entry,s.sl,s.tp,comment,reconciledTicket))
+         placedOrder=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(s.symbol,(ulong)InpMagic,finalPendingType,
+                                      "PlaceSetup",submitRetcode);
+         Print("STB order submission unresolved; retry quarantined symbol=",s.symbol,
+               " ret=",IntegerToString((int)submitRetcode),
+               " description=",trade.ResultRetcodeDescription());
+         return false;
+        }
+     }
 
    if(placedOrder==0 || !VerifyPendingInitialSL(placedOrder))
      {
@@ -9200,19 +9524,38 @@ bool PlaceManualPendingDirection(const int direction)
              " reason=",(manualQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualQuoteReason));
        return false;
       }
+   // Recheck broker directional-volume capacity immediately before preflight/submit.
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirectionFinal"))
+      return false;
+
     ENUM_ORDER_TYPE manualStopType=(direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
+   if(STB_HasDuplicatePendingType(_Symbol,manualStopType,0))
+      return false;
+
     if(!STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
        return false;
 
-    bool ok=(direction>0)
-           ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(direction>0)
+                  ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong ticket=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      ticket==0 || !OrderSelect(ticket))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(_Symbol,manualStopType,0,volume,entry,sl,0.0,
+                                    comment,reconciledTicket))
+         ticket=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(_Symbol,0,manualStopType,
+                                      "PlaceManualPendingDirection",submitRetcode);
+         return false;
+        }
+     }
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
      {
       Print("STB MANUAL PENDING REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
@@ -9352,19 +9695,38 @@ bool PlaceManualLimitDirection(const int direction)
              " reason=",(manualLimitQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualLimitQuoteReason));
        return false;
       }
+   // Recheck broker directional-volume capacity immediately before preflight/submit.
+   if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirectionFinal"))
+      return false;
+
     ENUM_ORDER_TYPE manualLimitType=(direction>0 ? ORDER_TYPE_BUY_LIMIT:ORDER_TYPE_SELL_LIMIT);
+   if(STB_HasDuplicatePendingType(_Symbol,manualLimitType,0))
+      return false;
+
     if(!STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
        return false;
 
-    bool ok=(direction>0)
-           ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
-
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
-
+    bool requestOK=(direction>0)
+                  ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
+                  : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
+   uint submitRetcode=trade.ResultRetcode();
    ulong ticket=trade.ResultOrder();
+
+   if(!requestOK || !TradeRetcodePlacementSucceeded() ||
+      ticket==0 || !OrderSelect(ticket))
+     {
+      ulong reconciledTicket=0;
+      if(STB_ReconcilePendingSubmit(_Symbol,manualLimitType,0,volume,entry,sl,0.0,
+                                    comment,reconciledTicket))
+         ticket=reconciledTicket;
+      else
+        {
+         STB_MarkPendingSubmitUnknown(_Symbol,0,manualLimitType,
+                                      "PlaceManualLimitDirection",submitRetcode);
+         return false;
+        }
+     }
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
      {
       Print("STB MANUAL LIMIT REJECTED AFTER SERVER ACCEPT: initial SL not confirmed symbol=",
