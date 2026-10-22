@@ -233,7 +233,7 @@ def main() -> int:
     daily_risk_guard_code = strip_strings(daily_risk_guard)
     daily_risk_enforcer = region(
         source, "void STB_EnforceDailyRiskGuard()",
-        "// PENDING ORDER MANAGEMENT"
+        "void STB_RunManagementCycle()"
     )
     daily_risk_enforcer_code = strip_strings(daily_risk_enforcer)
 
@@ -471,11 +471,12 @@ def main() -> int:
          and "if(!GlobalVariableCheck(dayName))" in daily_risk_guard_code
          and "storedDay>=(double)dayKey" in daily_risk_guard_code
          and "STB DAILY RISK STATE CORRUPT/DATE REGRESSION: entries blocked." in daily_risk_guard),
-        ("daily equity enforcement retains an explicit tester-only scope and fails closed",
+        ("daily equity enforcement fails closed and scopes forced closes to this EA magic",
          bool(daily_risk_enforcer_code)
          and "if(!STB_DailyLossLimitHit())" in daily_risk_enforcer_code
-         and "MQL_TESTER" in daily_risk_enforcer_code
-         and "STB DAILY RISK" in daily_risk_enforcer),
+         and "POSITION_MAGIC)!=(long)InpMagic" in daily_risk_enforcer_code
+         and "orderMagic==(long)InpMagic" in daily_risk_enforcer_code
+         and "STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD" in daily_risk_enforcer_code),
         ("automatic and manual pending entry paths call the daily equity guard before submission",
          "if(STB_DailyLossLimitHit())" in auto_placement_code
          and "if(STB_DailyLossLimitHit())" in manual_stop_placement_code
