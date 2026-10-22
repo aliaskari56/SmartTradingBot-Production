@@ -172,10 +172,7 @@ bool STB_InitRunNamespace()
 
 string STB_DailyRiskStateName(const string suffix)
   {
-   return "STB_DLY_"+suffix+"_"+
-          (string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
-          (string)InpMagic+"_"+
-          (string)ChartID()+"_"+g_stbRunNamespace;
+   return "STB_DLY_"+suffix+"_"+g_stbRunNamespace;
   }
 
 bool STB_DailyRiskPersist(const int dayKey,const double startEquity,
