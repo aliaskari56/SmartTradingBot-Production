@@ -9,6 +9,7 @@ import re
 import sys
 
 SOURCE = Path("MQL5/Experts/SmartTradingBot_FINAL.mq5")
+WORKFLOW = Path(".github/workflows/mql5-compile.yml")
 
 
 def input_default(name: str, source: str) -> str | None:
@@ -161,6 +162,7 @@ def main() -> int:
         return 2
 
     source = SOURCE.read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.is_file() else ""
     source_code = strip_strings(strip_comments(source))
     permission_gate = region(
         source, "bool STB_TradeEnvironmentAllowed()", "bool IsSpreadAcceptable("
@@ -300,6 +302,12 @@ def main() -> int:
          input_default("InpAutoTrading", source_code) == "false"),
         ("bounded equity-risk sizing is enabled by default",
          input_default("InpUseRiskSizing", source_code) == "true"),
+        ("build provenance manifest matches actual AUTO and risk-sizing defaults",
+         input_default("InpAutoTrading", source_code) == "false"
+         and input_default("InpUseRiskSizing", source_code) == "true"
+         and "liveAutoTradingDefault = $false" in workflow
+         and "riskSizingDefault = $true" in workflow
+         and "riskSizingDefault = $false" not in workflow),
         ("scanner rejects stale quotes after one minute by default",
          input_default("InpScannerMaxQuoteAgeSec", source_code) == "60"),
         ("scanner quote age input is bounded and used consistently by eligibility and freshness scoring",
