@@ -345,11 +345,12 @@ def main() -> int:
          and "if(!OrderSelect(ticket))" in pending_modify_code
          and "MathAbs(ve-newEntry)>tolerance" in pending_modify_code
          and "STB_GeomStore(ticket,false,ve,vs,vt)" in pending_modify_code),
-        ("modify success helper restricts accepted server retcodes",
+        ("modify success helper excludes partial execution and restricts accepted server retcodes",
          bool(modify_retcode_code)
-         and all(token in modify_retcode_code for token in (
-             "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
-             "TRADE_RETCODE_NO_CHANGES", "TRADE_RETCODE_ORDER_CHANGED"))),
+         and "TRADE_RETCODE_DONE" in modify_retcode_code
+         and "TRADE_RETCODE_DONE_PARTIAL" not in modify_retcode_code
+         and "TRADE_RETCODE_NO_CHANGES" in modify_retcode_code
+         and "TRADE_RETCODE_ORDER_CHANGED" in modify_retcode_code),
         ("central pending delete requires authorization, server success and ticket disappearance",
          bool(controlled_delete_code)
          and "if(!authorized)" in controlled_delete_code
