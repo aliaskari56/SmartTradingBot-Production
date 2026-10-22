@@ -369,6 +369,16 @@ def main() -> int:
          "TRADE_RETCODE_PLACED" in source_region(
              source, "bool TradeRetcodePlacementSucceeded()",
              "double TradeMinDistance(")),
+        ("all pending-order placement paths preflight exact request geometry with OrderCheck",
+         bool(source_region(source, "bool STB_CheckPendingOrderRequest(",
+                            "bool CheckPendingOrder(")) and
+         "if(!OrderCheck(request,check))" in source_region(
+             source, "bool STB_CheckPendingOrderRequest(", "bool CheckPendingOrder(") and
+         "check.retcode!=0" in source_region(
+             source, "bool STB_CheckPendingOrderRequest(", "bool CheckPendingOrder(") and
+         "STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0" in source and
+         "STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0" in source and
+         "STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0" in source),
         ("order submission rechecks volatile market, geometry, volume, permissions, and ownership",
           all(token in place_setup for token in (
               "TRADE_PERMISSION_CHANGED_BEFORE_SUBMIT",
