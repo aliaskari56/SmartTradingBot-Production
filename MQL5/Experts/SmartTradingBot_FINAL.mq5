@@ -22,7 +22,7 @@ input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
-input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
+input string  InpScannerSymbols         = "";   // scanner universe only; management always covers all account symbols (except tester isolation)
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 45.0;
@@ -35,7 +35,6 @@ input double  InpManualPendingGapPips     = 5.0;
 
 input group "=== TESTER REPRODUCIBILITY ==="
 input bool    InpTesterForceAutoTrading  = true;  // tester only; prevents stale/missing .set state from disabling order placement
-input bool    InpTesterChartSymbolOnly   = true;  // tester only; isolates the test universe to _Symbol
 
 input group "=== RSI + CCI COMPOSITE ==="
 input bool    InpOscillatorConfirmation    = true;
@@ -4415,45 +4414,15 @@ bool STB_IsSymbolAllowed(const string s)
    if(s=="")
       return false;
 
-   // Strategy Tester isolation is a hard scope boundary when enabled.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return s==_Symbol;
-
-   // The chart symbol remains manageable even when the scanner is configured
-   // to explore a different explicit symbol universe (manual controls operate
-   // on _Symbol). Additional symbols follow the configured universe.
-   if(s==_Symbol)
-      return true;
-
-   // Universal management scope: an empty list means every symbol that has
-   // an account position or pending order, not only selected Market Watch symbols.
-   if(StringLen(InpScannerSymbols)==0)
-      return true;
-
-   string parts[];
-   string cfg=InpScannerSymbols;
-   StringReplace(cfg,";",",");
-   ushort sep=StringGetCharacter(",",0);
-   int n=StringSplit(cfg,sep,parts);
-
-   for(int i=0;i<n;i++)
-     {
-      string it=parts[i];
-      StringTrimLeft(it);
-      StringTrimRight(it);
-      if(it!="" && it==s)
-         return true;
-     }
-
-   return false;
+   // Management scope is independent from scanner scope in live/demo and tester:
+   // all account symbols and origins are eligible for existing management checks.
+   return true;
   } bool STB_IsManagedPendingType(const long t){ return t==(long)ORDER_TYPE_BUY_STOP||t==(long)ORDER_TYPE_SELL_STOP||t==(long)ORDER_TYPE_BUY_LIMIT||t==(long)ORDER_TYPE_SELL_LIMIT||t==(long)ORDER_TYPE_BUY_STOP_LIMIT||t==(long)ORDER_TYPE_SELL_STOP_LIMIT; } bool STB_IsProtectionPosition(const ulong ticket)
   {
    if(ticket==0 || !PositionSelectByTicket(ticket))
       return false;
-   // Live protection covers all account positions regardless of origin/symbol.
-   // Respect the explicit chart-only isolation setting in Strategy Tester.
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-      return PositionGetString(POSITION_SYMBOL)==_Symbol;
+   // Protect every selected position regardless of symbol or origin,
+   // including when running a multi-symbol Strategy Tester configuration.
    return true;
   }
 
@@ -10088,16 +10057,7 @@ void STB_ScannerRun()
    ArrayResize(symbols,0);
    bool universeAllocationFailed=false;
 
-   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
-     {
-      if(ArrayResize(symbols,1)!=1)
-        {
-         STB_ScannerAllocationAbort("TESTER_UNIVERSE",symbols,wasSelected);
-         return;
-        }
-      symbols[0]=_Symbol;
-     }
-   else if(StringLen(InpScannerSymbols)>0)
+   if(StringLen(InpScannerSymbols)>0)
      {
       // Parse only configured symbols instead of iterating the broker's full
       // symbol catalog. This keeps explicit-universe scans bounded and fast.
@@ -11203,7 +11163,6 @@ int OnInit()
          " auto=",g_autoTrading ? "ON":"OFF",
          " autoInput=",InpAutoTrading ? "ON":"OFF",
          " testerForceAuto=",InpTesterForceAutoTrading ? "ON":"OFF",
-         " testerSymbolOnly=",InpTesterChartSymbolOnly ? "ON":"OFF",
          " universal=",InpAllowUniversal ? "ON":"OFF",
          " strictFVGOB=",InpStrictPatternFilters ? "ON":"OFF",
          " requireFVG=",InpRequireFVG ? "ON":"OFF",
