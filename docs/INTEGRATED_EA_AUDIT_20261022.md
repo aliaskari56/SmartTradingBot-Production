@@ -1,0 +1,110 @@
+# Integrated EA Audit Checkpoint — 2026-10-22
+
+## Status
+
+**Audit checkpoint only — NOT a production release approval.** The EA remains deliberately restricted to MetaTrader Strategy Tester by the `OnInit()` gate. This checkpoint does not enable live or demo chart initialization.
+
+- Repository: `aliaskari56/SmartTradingBot-Production`
+- Primary source: `MQL5/Experts/SmartTradingBot_FINAL.mq5`
+- EA version after the source corrections in this checkpoint: `1.133`
+- Source-changing commit for the quote-age correction: `51ba1c570d0cc65a697de0883b54d908933e2e6a`
+- Main HEAD when this checkpoint was written: `9a9fc92c2931cca80406c67ecb631ea363983646`
+- Scope: source integration, execution-boundary review, scanner data integrity, build provenance, and CI regression checks.
+- Not performed: a full Strategy Tester scenario suite, terminal restart/fault-injection tests, demo account execution, or broker-specific validation.
+
+## Corrections made in this checkpoint
+
+### 1. Scanner quote-age configuration is now authoritative
+
+Previously, quote validation used `MathMax(30, InpScannerMaxQuoteAgeSec)`, which silently accepted quotes up to 30 seconds old even when a lower limit was configured. The market-quality freshness score repeated the same floor, so eligibility and scoring did not fully honor the input.
+
+Changes:
+- `InpScannerMaxQuoteAgeSec` is validated to the range **1–3600 seconds**.
+- The shared quote validator rejects quotes older than the configured value.
+- Market-quality freshness scoring uses that same configured value.
+- The hidden 30-second floor was removed from both paths.
+- Regression checks were added to both the static audit and safety-defaults suite.
+- The input comment for `InpScannerSymbols` was de-duplicated and the EA version was advanced to 1.133.
+
+This change affects data freshness gating, not the strategy's entry thresholds or scoring weights.
+
+### 2. Build provenance metadata corrected
+
+The MetaEditor workflow's provenance manifest previously recorded `riskSizingDefault = false`, while the source declares `InpUseRiskSizing = true`. The workflow metadata now reports `riskSizingDefault = true`; `liveAutoTradingDefault = false` remains consistent with `InpAutoTrading = false`.
+
+A safety-defaults regression check now compares the source defaults with the build manifest so this mismatch is less likely to recur.
+
+### 3. Previously integrated execution safeguards retained
+
+The current source retains the following architecture:
+- Pending-order geometry is routed through a central writer with preflight checks, server-retcode classification, and post-write geometry verification.
+- Pending-order deletion has one direct broker writer and authorization checks.
+- Position SL modification has one direct broker writer and shared SL proposal arbitration.
+- Automatic and manual pending-order creation paths perform preflight checks, validate server results, and verify initial SL protection.
+- Pending trailing is isolated in `STB_PendingTrail.mqh`; distance resolution and directional tick alignment are in `STB_PendingDistanceResolver.mqh`.
+- Newly selected scanner symbols request M15/H4 history through `CopyRates` before incomplete history is rejected.
+- The tester-only `OnInit()` gate remains unchanged.
+
+## Integrated component map
+
+| Component | Responsibility | Current status |
+|---|---|---|
+| `SmartTradingBot_FINAL.mq5` | Scanner, setup construction, execution gates, position/pending managers, lifecycle handoff, dashboard | Primary EA; Strategy Tester only |
+| `STB_PendingDistanceResolver.mqh` | Broker limits, tick-size alignment, pending entry/SL distance resolution | Included and used by pending geometry paths |
+| `STB_PendingTrail.mqh` | Pending-order trail state, closed-M5 structure for stop orders, retry/backoff, restart reconstruction | Included and used by the management cycle |
+| `STB_LRN04Journal.mqh` | Canonical record codec and CRC validation | Codec only; durable persistence is intentionally not wired into `OnTradeTransaction()` |
+| `tools/audit_static_checks.py` | Source-level invariants and include/delimiter checks | Static regression guard; not a compiler |
+| `tools/test_trading_safety_defaults.py` | Conservative defaults, trade gates, quote-age contract, provenance consistency | Regression guard; not runtime proof |
+| `tools/test_lrn04_journal_contract.py` | Python reference model and codec-parity tests | Reference contract only; not an MQL5 storage/runtime test |
+
+## Professional documentation reviewed
+
+The execution checks were reviewed against the official MQL5 reference:
+- `OrderCheck()`: https://www.mql5.com/en/docs/trading/ordercheck
+- `OrderSend()`: https://www.mql5.com/en/docs/trading/ordersend
+- Trade-server return codes: https://www.mql5.com/en/docs/constants/errorswarnings/enum_trade_return_codes
+
+These references make an important distinction: a preflight check does not guarantee that a later server operation will succeed, and the Boolean result from `OrderSend()` is not by itself proof of final execution. The EA therefore must continue checking trade-server return codes and verifying terminal-visible postconditions. These checks reduce known failure modes; they do not guarantee fills, bounded losses, or profitable results.
+
+## CI evidence at checkpoint time
+
+For HEAD `9a9fc92c2931cca80406c67ecb631ea363983646`:
+- MQL5 static audit: **passed** — run [39733392895](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392895)
+- Trading safety defaults: **passed** — run [39733393008](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733393008)
+- LRN-04 journal contract tests: **passed** — run [39733392930](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392930)
+- MetaEditor compile: **in progress at checkpoint time** — run [39733392922](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392922)
+
+A green static test suite is not a substitute for compiler success, Strategy Tester behavior, restart/fault injection, or broker-specific validation. Re-check the current workflow state before treating the source as compile-verified.
+
+## Remaining release blockers and test gaps
+
+### A. LRN-04 durable journal is not integrated
+
+The MQL5 module currently implements record encoding/decoding and checksum validation; it does not implement durable append/recovery, writer locking/fencing, transaction idempotency, or aggregate projection recovery. The primary transaction handler is deliberately not wired to this codec.
+
+Do not wire it into the live learning path until the schema, lock/fencing contract, recovery policy, and numeric semantics are approved and the terminal-level fault-injection suite is implemented. The Python tests are an in-memory reference model, not evidence of file durability or crash consistency.
+
+### B. Strategy-contract decisions remain open
+
+Do not silently change strategy semantics while doing structural refactoring. The older strategy-to-manager audit identified contracts requiring explicit decisions and/or regression fixtures, including:
+- Whether the structure detector represents one fresh break or a separately ordered CHoCH-then-BOS sequence.
+- Whether Universal mode can override a required H4-alignment rejection.
+- Whether local FVG and Order Block must share a displacement/BOS event identity.
+- Whether automatic protection is intended to cover every account position or only positions within the managed-symbol scope.
+- Whether stability is historical persistence or a current-state score component.
+
+Some earlier findings have since received source corrections; re-audit the current implementation before treating an old finding as still open or fully closed.
+
+### C. Runtime tests still required
+
+At minimum, exercise:
+- Quote ages just below, at, and above the configured threshold; future timestamps; unavailable server clock; missing M15/H4 history; newly selected symbols.
+- Pending order accepted, initial SL verified, partial fill, remainder trailing, full fill, order disappearance, and restart reconstruction.
+- Broker rejections around tick-size, stops level, freeze level, and changing quotes between preflight and write.
+- Duplicate/delayed trade-transaction events, partial closes, INOUT reversal, restart between PnL accumulation and adaptive-stat update.
+- Multiple EA instances competing for a symbol-management lease and entry lock.
+- Daily-loss guard behavior when state is missing/corrupt, server time regresses, a close is rejected, or the terminal restarts.
+
+## Release decision
+
+**BLOCKED / NOT VERIFIED for production use.** Keep the Strategy Tester-only gate. Do not infer profitability or broker compatibility from a clean compile or static tests. The next safe step is to finish the current MetaEditor run, then add controlled non-live tests for the specific lifecycle and broker-edge cases above before considering any deployment change.
