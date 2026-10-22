@@ -375,8 +375,8 @@ def main() -> int:
          bool(auto_placement_code)
          and "STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume," in auto_placement_code
          and "finalPendingType=(s.direction>0?ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);" in re.sub(r"\\s+", "", auto_placement_code)
-         and auto_placement_code.index("STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,")
-             < auto_placement_code.index("trade.BuyStop(")),
+         and auto_placement_code.rfind("STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,")
+             < auto_placement_code.rfind("trade.BuyStop(")),
         ("pending placement success helper accepts DONE and PLACED only",
          bool(placement_retcode_code)
          and all(token in placement_retcode_code for token in (
