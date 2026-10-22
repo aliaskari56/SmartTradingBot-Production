@@ -7196,7 +7196,9 @@ bool IsValidSLForPendingOrder(const string symbol,
       return false;
 
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick))
+   string quoteReason="";
+   if(!SymbolInfoTick(symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
       return false;
 
    double minDist=TradeMinDistance(symbol);
@@ -7231,7 +7233,9 @@ bool STB_IsPendingEntryBrokerValid(const string symbol,
       return false;
 
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+   string quoteReason="";
+   if(!SymbolInfoTick(symbol,tick) ||
+      !STB_ScannerQuoteValid(tick,quoteReason))
       return false;
 
    double minDist=TradeMinDistance(symbol);
