@@ -11863,8 +11863,84 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                                       riskMoney>0.0 && MathIsValidNumber(riskMoney));
         }
 
+      // Close the old adaptive lifecycle first. In netting mode an INOUT
+      // deal can leave a new position in the opposite direction; that exposure
+      // must receive its own profile/risk state rather than inheriting the old
+      // lifecycle or remaining untracked.
+      int newProfileId=STB_AdaptiveReadOrderProfile(trans.order);
+      if(newProfileId<0)
+         newProfileId=STB_AdaptiveParseProfileFromComment(comment);
+      double newRiskMoney=STB_AdaptiveReadOrderRisk(trans.order);
+
       STB_AdaptiveDeletePositionProfile(positionId);
       STB_AdaptiveDeletePositionRisk(positionId);
+
+      long incomingDealType=HistoryDealGetInteger(trans.deal,DEAL_TYPE);
+      bool activeReversalPosition=false;
+      ulong newPositionId=0;
+      double newPositionVolume=0.0;
+      double newEntryPrice=0.0;
+      double newInitialSL=0.0;
+      long newPositionType=-1;
+
+      // Position selection by symbol is required because the ticket can change
+      // across a netting reversal while the position identifier may persist.
+      if(PositionSelect(symbol))
+        {
+         newPositionId=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+         newPositionVolume=PositionGetDouble(POSITION_VOLUME);
+         newEntryPrice=PositionGetDouble(POSITION_PRICE_OPEN);
+         newInitialSL=PositionGetDouble(POSITION_SL);
+         newPositionType=PositionGetInteger(POSITION_TYPE);
+
+         activeReversalPosition=
+            newPositionId>0 &&
+            newPositionVolume>0.0 &&
+            ((incomingDealType==DEAL_TYPE_BUY &&
+              newPositionType==POSITION_TYPE_BUY) ||
+             (incomingDealType==DEAL_TYPE_SELL &&
+              newPositionType==POSITION_TYPE_SELL));
+        }
+
+      if(activeReversalPosition && newProfileId>=0)
+        {
+         STB_AdaptiveRememberPositionProfile(newPositionId,newProfileId);
+
+         if(newInitialSL>0.0 && newEntryPrice>0.0)
+           {
+            ENUM_ORDER_TYPE newOrderType=
+               (newPositionType==POSITION_TYPE_BUY ?
+                ORDER_TYPE_BUY:ORDER_TYPE_SELL);
+            double actualRiskMoney=0.0;
+
+            if(OrderCalcProfit(newOrderType,symbol,newPositionVolume,
+                               newEntryPrice,newInitialSL,actualRiskMoney))
+              {
+               actualRiskMoney=MathAbs(actualRiskMoney);
+               if(actualRiskMoney>0.0 &&
+                  MathIsValidNumber(actualRiskMoney))
+                  newRiskMoney=actualRiskMoney;
+              }
+           }
+
+         if(newRiskMoney>0.0 && MathIsValidNumber(newRiskMoney))
+            STB_AdaptiveRememberPositionRisk(newPositionId,newRiskMoney);
+
+         STB_AdaptiveDeleteOrderState(trans.order);
+         Print("STB ADAPTIVE reversal lifecycle initialized symbol=",symbol,
+               " position=",newPositionId,
+               " profile=",newProfileId,
+               " riskMoney=",DoubleToString(newRiskMoney,2));
+        }
+      else
+        {
+         Print("STB ADAPTIVE reversal lifecycle not initialized symbol=",symbol,
+               " oldPosition=",positionId,
+               " activePosition=",newPositionId,
+               " profile=",newProfileId,
+               " active=",activeReversalPosition,
+               "; order state retained for reconciliation");
+        }
       return;
      }
 
