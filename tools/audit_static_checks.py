@@ -324,9 +324,15 @@ def main() -> int:
           "STB management lease tracking allocation failed" in source and
           source.count("if(!STB_LeaseTrackSymbol(symbol))") == 3 and
           source.count("GlobalVariableSetOnCondition(ownerKey,0.0,me);") >= 4),
-        ("new pending placement does not accept NO_CHANGES as success",
+        ("pending placement accepts only DONE or PLACED, not partial execution or NO_CHANGES",
          "bool TradeRetcodePlacementSucceeded()" in source and
          "TRADE_RETCODE_NO_CHANGES" not in source_region(
+             source, "bool TradeRetcodePlacementSucceeded()",
+             "double TradeMinDistance(") and
+         "TRADE_RETCODE_DONE_PARTIAL" not in source_region(
+             source, "bool TradeRetcodePlacementSucceeded()",
+             "double TradeMinDistance(") and
+         "TRADE_RETCODE_DONE" in source_region(
              source, "bool TradeRetcodePlacementSucceeded()",
              "double TradeMinDistance(") and
          "TRADE_RETCODE_PLACED" in source_region(
