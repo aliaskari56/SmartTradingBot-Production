@@ -4735,6 +4735,13 @@ bool OneClickHedge()
        return false;
       }
 
+    ENUM_ORDER_TYPE hedgeOrderType=(hedgeType==POSITION_TYPE_BUY)
+                                      ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP;
+    if(!STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0,
+                                     typeTime,expiration,(ulong)InpMagic,
+                                     comment,"ONE_CLICK_HEDGE"))
+       return false;
+
     bool ok=(hedgeType==POSITION_TYPE_BUY)
            ? trade.BuyStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,symbol,sl,0.0,typeTime,expiration,comment);
@@ -8087,50 +8094,74 @@ bool ValidatePendingSetup(const Setup &s)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-bool CheckPendingOrder(const Setup &s,
-                       const double volume,
-                       const ENUM_ORDER_TYPE_TIME typeTime,
-                       const datetime expiration)
+bool STB_CheckPendingOrderRequest(const string symbol,
+                                    const ENUM_ORDER_TYPE orderType,
+                                    const double volume,
+                                    const double price,
+                                    const double sl,
+                                    const double tp,
+                                    const ENUM_ORDER_TYPE_TIME typeTime,
+                                    const datetime expiration,
+                                    const ulong magic,
+                                    const string comment,
+                                    const string context)
   {
-   MqlTradeRequest request= {};
-   MqlTradeCheckResult check= {};
+   if(symbol=="" || volume<=0.0 || price<=0.0 ||
+      !MathIsValidNumber(volume) || !MathIsValidNumber(price) ||
+      !MathIsValidNumber(sl) || !MathIsValidNumber(tp))
+      return false;
 
+   MqlTradeRequest request={};
+   MqlTradeCheckResult check={};
    request.action=TRADE_ACTION_PENDING;
-   request.symbol=s.symbol;
-   request.magic=InpMagic;
+   request.symbol=symbol;
+   request.magic=magic;
    request.volume=volume;
-   request.type=(s.direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
-   request.price=s.entry;
-   request.sl=s.sl;
-   request.tp=s.tp;
+   request.type=orderType;
+   request.price=price;
+   request.sl=sl;
+   request.tp=tp;
    request.type_filling=ORDER_FILLING_RETURN;
    request.type_time=typeTime;
    request.expiration=expiration;
-   request.comment="STB";
+   request.comment=comment;
 
    ResetLastError();
-
    if(!OrderCheck(request,check))
      {
-      Print("STB OrderCheck call failed symbol=",s.symbol,
+      Print("STB PENDING ORDERCHECK CALL FAILED context=",context,
+            " symbol=",symbol,
             " err=",GetLastError(),
             " ret=",check.retcode," ",check.comment);
       return false;
      }
 
-// OrderCheck() success is represented by retcode=0.
-// TRADE_RETCODE_* values such as DONE/PLACED belong to the
-// subsequent trade-server execution result, not this check result.
+   // OrderCheck success is retcode=0. Execution retcodes are evaluated only
+   // after the actual broker submission.
    if(check.retcode!=0)
      {
-      Print("STB OrderCheck rejected symbol=",s.symbol,
-            " dir=",(s.direction>0 ? "BUY":"SELL"),
+      Print("STB PENDING ORDERCHECK REJECT context=",context,
+            " symbol=",symbol,
+            " type=",EnumToString(orderType),
             " ret=",check.retcode,
             " comment=",check.comment);
       return false;
      }
-
    return true;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool CheckPendingOrder(const Setup &s,
+                       const double volume,
+                       const ENUM_ORDER_TYPE_TIME typeTime,
+                       const datetime expiration)
+  {
+   ENUM_ORDER_TYPE orderType=(s.direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
+   return STB_CheckPendingOrderRequest(s.symbol,orderType,volume,
+                                       s.entry,s.sl,s.tp,typeTime,expiration,
+                                       (ulong)InpMagic,"STB","SCANNER_SETUP");
   }
 
 //+------------------------------------------------------------------+
@@ -9044,6 +9075,11 @@ bool PlaceManualPendingDirection(const int direction)
              " reason=",(manualQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualQuoteReason));
        return false;
       }
+    ENUM_ORDER_TYPE manualStopType=(direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
+    if(!STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0,
+                                     typeTime,expiration,0,comment,"MANUAL_STOP"))
+       return false;
+
     bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
@@ -9191,6 +9227,11 @@ bool PlaceManualLimitDirection(const int direction)
              " reason=",(manualLimitQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualLimitQuoteReason));
        return false;
       }
+    ENUM_ORDER_TYPE manualLimitType=(direction>0 ? ORDER_TYPE_BUY_LIMIT:ORDER_TYPE_SELL_LIMIT);
+    if(!STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0,
+                                     typeTime,expiration,0,comment,"MANUAL_LIMIT"))
+       return false;
+
     bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
