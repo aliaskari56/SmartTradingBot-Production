@@ -11680,16 +11680,15 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
 void STB_EnforceDailyRiskGuard()
   {
    bool riskBlocked=STB_DailyLossLimitHit();
-   // Missing/corrupt risk state blocks new entries, but only a verified loss
-   // threshold breach triggers risk enforcement actions.
-   if(!riskBlocked || !g_stbDailyLossThresholdReached)
+   // Missing/corrupt risk state blocks new entries and cancels pending entries,
+   // but it must never be treated as a verified loss breach for liquidation.
+   if(!riskBlocked)
       return;
 
-   // Preserve the historical tester behavior. In terminal/demo/live runtime,
-   // do not forcibly close already-open positions: the daily guard blocks new
-   // entries and cancels eligible EA pending orders; normal position protection
-   // continues. This matches InpMaxDailyLossPercent's user-facing purpose.
-   if(MQLInfoInteger(MQL_TESTER))
+   // Preserve historical tester liquidation only for a verified threshold breach.
+   // In terminal/demo/live runtime, existing positions remain under normal
+   // protection; managed EA pending entries are canceled to avoid new exposure.
+   if(MQLInfoInteger(MQL_TESTER) && g_stbDailyLossThresholdReached)
      {
       for(int i=PositionsTotal()-1;i>=0;i--)
         {
