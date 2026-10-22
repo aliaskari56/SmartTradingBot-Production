@@ -217,6 +217,14 @@ def main() -> int:
          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
          "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("pending trail does not classify partial execution as successful modification",
+         "int STB_PendingClassifyResult(const bool ok)" in trail_source and
+         "case TRADE_RETCODE_DONE_PARTIAL:" not in source_region(
+             trail_source, "int STB_PendingClassifyResult(const bool ok)",
+             "//--- Register a real terminal pending order") and
+         "case TRADE_RETCODE_DONE:" in source_region(
+             trail_source, "int STB_PendingClassifyResult(const bool ok)",
+             "//--- Register a real terminal pending order")),
         ("pending trail retires disappeared orders before exposure-allocation checks",
          (lambda body: bool(body) and
           "if(!OrderSelect(g_stbPendingTrail[idx].ticket))" in body and
