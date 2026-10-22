@@ -393,6 +393,12 @@ def main() -> int:
          and "case ORDER_TYPE_SELL_LIMIT:" in source_code
          and "STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)" in pending_modify_code
          and pending_modify_code.count("STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry)") >= 2),
+        ("pending modification broker guards reject stale or invalid quotes",
+         "bool STB_IsPendingEntryBrokerValid(" in source_code
+         and "bool IsValidSLForPendingOrder(" in source_code
+         and source_code.count("!STB_ScannerQuoteValid(tick,quoteReason)") >= 2
+         and "REJECT_STALE_DATA" in source_code
+         and "tick.ask<tick.bid" in source_code),
         ("pending limit broker-distance checks use the correct quote side",
          "case ORDER_TYPE_BUY_LIMIT:" in source_code
          and "return entry<tick.ask-minDist;" in source_code
