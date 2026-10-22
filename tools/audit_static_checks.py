@@ -744,6 +744,19 @@ def main() -> int:
          "currentSL>0.0 && c<=currentSL" in position_sl_resolver and
          "currentSL>0.0 && c>=currentSL" in position_sl_resolver),
     ]
+    placement_result = source_region(
+        source,
+        "bool TradeRetcodePlacementSucceeded()",
+        "// Minimum distance required by the broker")
+    checks.append((
+        "new-order placement accepts only explicit placement/completion retcodes",
+        bool(placement_result) and
+        all(token in placement_result for token in (
+            "TRADE_RETCODE_DONE",
+            "TRADE_RETCODE_DONE_PARTIAL",
+            "TRADE_RETCODE_PLACED")) and
+        "TRADE_RETCODE_NO_CHANGES" not in placement_result
+    ))
     include_errors = include_dependency_errors(path)
     checks.append(("recursive #include dependencies exist", not include_errors))
     errors = lexical_errors(source)
