@@ -584,6 +584,9 @@ def main() -> int:
          "bool STB_SumClosedLifecyclePnlFromHistory(" in source
          and "HistorySelectByPosition(positionId)" in source
          and "entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY" in source
+         and "lastReversalDeal" in source
+         and "DEAL_TIME_MSC" in source
+         and "DEAL_ENTRY_INOUT" in source
          and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in on_trade_transaction_full
          and on_trade_transaction_full.find("TakeAccumulatedPositionPnl(positionId)") <
              on_trade_transaction_full.find("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
