@@ -782,7 +782,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          return true;
         }
 
-      // Other resolver failures retain bounded 5/15/60s exponential backoff.
+      // Other resolver failures retain bounded backoff. Retry with the same bounded 5/15/60s policy.
       // The actionable M5 bar remains unconsumed so broker geometry can recover.
       g_stbPendingTrail[idx].failureCount++;
       int fc=g_stbPendingTrail[idx].failureCount;
