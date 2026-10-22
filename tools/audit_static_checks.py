@@ -383,6 +383,14 @@ def main() -> int:
          "ret!=TRADE_RETCODE_DONE_PARTIAL" not in source_region(
              source, "bool STB_ExecuteOrderDelete(",
              "// Single controlled entry used by every permitted pending delete.")),
+        ("modify retcodes never treat partial execution as successful geometry change",
+         "bool TradeRetcodeModifySucceeded()" in source and
+         "TRADE_RETCODE_DONE_PARTIAL" not in source_region(
+             source, "bool TradeRetcodeModifySucceeded()",
+             "bool TradeRetcodePlacementSucceeded()") and
+         "TRADE_RETCODE_DONE" in source_region(
+             source, "bool TradeRetcodeModifySucceeded()",
+             "bool TradeRetcodePlacementSucceeded()")),
         ("pending placement accepts only DONE or PLACED, not partial execution or NO_CHANGES",
          "bool TradeRetcodePlacementSucceeded()" in source and
          "TRADE_RETCODE_NO_CHANGES" not in source_region(
