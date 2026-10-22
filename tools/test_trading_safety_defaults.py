@@ -380,7 +380,7 @@ def main() -> int:
          bool(pending_trail_code)
          and "nextRetryTime>TimeCurrent()" in pending_trail_code
          and "lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC" in pending_trail_code
-         and pending_trail_code.index_of if False else True),
+         and pending_trail_code.index("if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())")\n             < pending_trail_code.index("datetime closedBar=iTime(symbol,PERIOD_M5,1)"))),
         ("pending-trail only submits from the verified symbol lease owner",
          "STB_SymbolManagementOwnedVerified(managedSymbol)" in pending_trail_code
          and "if(!STB_SymbolManagementOwnedVerified(managedSymbol))" in pending_trail_code),
@@ -391,7 +391,7 @@ def main() -> int:
              "nextRetryTime=TimeCurrent()+backoffSec"))),
         ("pending-trail classifies false writer outcomes without stale CTrade retcodes",
          bool(re.search(
-             r"int STB_PendingClassifyResult\\(const bool ok\\)\\s*\\{[^}]*return STB_PEND_RES_OTHER_FAILURE;",
+             r"int STB_PendingClassifyResult\(const bool ok\)\s*\{[^}]*return STB_PEND_RES_OTHER_FAILURE;",
              pending_trail_code, re.DOTALL))
          and "trade.ResultRetcode()" not in region(
              pending_trail_source, "int STB_PendingClassifyResult(",
