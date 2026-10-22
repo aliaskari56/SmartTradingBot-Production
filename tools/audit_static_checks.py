@@ -663,6 +663,11 @@ def main() -> int:
          'stage=WATCHLIST_AGE symbol=' in scanner_run and
          'stage=WATCHLIST_SCORE symbol=' in scanner_run and
          'c.rejectReason' in scanner_run),
+        ("scanner logs entry-lock rejection and reports confidence runner-up from full watchlist",
+         bool(execute_top_candidate) and
+         'stage=ENTRY_LOCK' in execute_top_candidate and
+         'g_scannerWatchlist[1].opportunityScore' in execute_top_candidate and
+         'g_scannerWatchlistCount>1' in execute_top_candidate),
         ("selected structural SL can attach a missing structural TP in the same verified broker request",
          "double tpForRequest=-1.0" in source and
          "if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL" in source and
