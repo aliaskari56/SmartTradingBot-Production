@@ -302,6 +302,11 @@ def main() -> int:
          input_default("InpUseRiskSizing", source_code) == "true"),
         ("scanner rejects stale quotes after one minute by default",
          input_default("InpScannerMaxQuoteAgeSec", source_code) == "60"),
+        ("scanner quote age input is bounded and enforced exactly as configured",
+         "InpScannerMaxQuoteAgeSec<1" in source_code
+         and "InpScannerMaxQuoteAgeSec>3600" in source_code
+         and "ageSeconds>(long)InpScannerMaxQuoteAgeSec" in source_code
+         and "MathMax(30,InpScannerMaxQuoteAgeSec)" not in source_code),
         ("daily and adaptive tester state are isolated by a fresh run namespace",
          "bool STB_InitRunNamespace()" in source_code
          and "g_stbRunNamespace" in source_code
