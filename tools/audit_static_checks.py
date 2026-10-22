@@ -213,8 +213,14 @@ def main() -> int:
          "(dt.day_of_week-dayOffset+7)%7" in scanner_session and
          "dayOffset==1 && nowSec<=toSec" in scanner_session and
          "if(!TimeToStruct(from,fd) || !TimeToStruct(to,td))" in scanner_session),
-        ("risk-based sizing remains opt-in by default",
-         "input bool    InpUseRiskSizing         = false;" in source),
+        ("bounded equity-risk sizing is enabled by default while live AUTO remains off",
+         "input bool    InpUseRiskSizing         = true;" in source and
+         "input bool    InpAutoTrading            = false;" in source),
+        ("tester adaptive and daily-risk state are namespaced per initialization",
+         "bool STB_InitRunNamespace()" in source and
+         "g_stbRunNamespace=" in source and
+         '"|TESTER|RUN|"+g_stbRunNamespace' in source and
+         "if(!STB_InitRunNamespace())" in on_init),
         ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
          "MQL_TESTER" in on_init and
          "g_autoTrading=(InpAutoTrading ||" in on_init and
@@ -459,14 +465,19 @@ def main() -> int:
              "STB_SymbolManagementOwnedVerified(symbol)",
              "if(expiryAuthority)",
              "authorized=serverExpired || localAgeExpired"))),
+        ("daily-loss guard closes only EA-magic positions and verifies the result",
+         "PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic" in source and
+         "trade.PositionClose(ticket)" in source and
+         "closeRetcode!=TRADE_RETCODE_DONE" in source and
+         "STB DAILY GUARD POSITION CLOSED" in source),
         ("daily-loss guard uses dedicated authorization for aged EA and UI-manual pending orders",
-         all(token in source for token in (
-             "STB_DEL_DAILY_RISK_GUARD=5",
-             "if(reason==STB_DEL_DAILY_RISK_GUARD)",
-             'source=="DailyLossGuard"',
-             'StringFind(orderComment,"STB|M|")==0',
-             'STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD,"DailyLossGuard")',
-             "STB_SymbolManagementOwnedVerified(symbol)"))),
+          all(token in source for token in (
+              "STB_DEL_DAILY_RISK_GUARD=5",
+              "if(reason==STB_DEL_DAILY_RISK_GUARD)",
+              'source=="DailyLossGuard"',
+              'StringFind(orderComment,"STB|M|")==0',
+              'STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD,"DailyLossGuard")',
+              "STB_SymbolManagementOwnedVerified(symbol)"))),
         ("position modify rechecks TP snapshot",
          "position state changed before request" in source),
         # Fail closed on the confirmed root cause. A one-element proposal
