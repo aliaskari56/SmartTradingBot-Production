@@ -2159,7 +2159,11 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
    datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
-   double stopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   // Preserve the original child-price snapshot separately from the adjusted
+   // stop-limit price submitted below. OrderCheck can yield while another
+   // terminal action changes the live order geometry.
+   double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   double stopLimit=stbCurStopLimit;
 
    // Keep a Stop-Limit's trigger-to-limit offset when trailing its trigger.
    // Leaving stoplimit unchanged would detach the child limit price from the
@@ -2250,13 +2254,15 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double latestSL=OrderGetDouble(ORDER_SL);
    double latestTP=OrderGetDouble(ORDER_TP);
+   double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
    double latestPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
    double latestTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
    double latestTolerance=MathMax(latestPoint*0.5,
                                   latestTickSize>0.0 ? latestTickSize*0.5:latestPoint*0.5);
    if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
       MathAbs(latestSL-stbCurSL)>latestTolerance ||
-      MathAbs(latestTP-stbCurTP)>latestTolerance)
+      MathAbs(latestTP-stbCurTP)>latestTolerance ||
+      MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance)
       return false;
 
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
