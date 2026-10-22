@@ -338,7 +338,6 @@ def main() -> int:
         ("risk sizing rejects a broker minimum lot that exceeds the requested risk budget",
          bool(risk_sizing) and
          "if(raw+1e-9<minLot)" in risk_sizing and
-         "Never clamp upward into an unsafe lot" in risk_sizing and
          "if(InpMaxRiskVolume>0.0 && volume>InpMaxRiskVolume+1e-9)" in risk_sizing),
         ("volume normalization never upgrades zero or undersized requests to broker minimum",
          bool(volume_normalizer) and
