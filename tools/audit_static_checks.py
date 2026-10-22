@@ -668,6 +668,10 @@ def main() -> int:
          'stage=ENTRY_LOCK' in execute_top_candidate and
          'g_scannerWatchlist[1].opportunityScore' in execute_top_candidate and
          'g_scannerWatchlistCount>1' in execute_top_candidate),
+        ("watchlist age gate uses the effective adaptive setup-age limit consistently",
+         'int watchlistMaxAge=STB_EffectiveMaxSetupAgeBars();' in scanner_run and
+         'c.setupAgeBars>watchlistMaxAge' in scanner_run and
+         'maxAgeBars=",IntegerToString(watchlistMaxAge)' in scanner_run),
         ("selected structural SL can attach a missing structural TP in the same verified broker request",
          "double tpForRequest=-1.0" in source and
          "if(STB_CalculatePositionTPFromStructure(symbol,side,entry,chosenSL" in source and
