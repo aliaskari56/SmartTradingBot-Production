@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.132"
+#property version   "1.133"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -22,7 +22,7 @@ input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
-input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols   // empty = selected Market Watch; comma/semicolon separated
+input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 45.0;
@@ -9465,7 +9465,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason)
    if(ageSeconds<0)
       ageSeconds=0;
 
-   if(ageSeconds>(long)MathMax(30,InpScannerMaxQuoteAgeSec))
+   if(ageSeconds>(long)InpScannerMaxQuoteAgeSec)
      {
       reason="REJECT_STALE_DATA";
       return false;
@@ -10896,7 +10896,8 @@ bool ValidateInputs()
       return false;
    if(StringLen(InpScannerSymbols)>1024)
       return false;
-   if(InpScanSeconds<1)
+   if(InpScanSeconds<1 || InpScannerMaxQuoteAgeSec<1 ||
+      InpScannerMaxQuoteAgeSec>3600)
       return false;
    if(InpAdaptiveMinScore<0.0 ||
       InpAdaptiveMaxScore>100.0 ||
