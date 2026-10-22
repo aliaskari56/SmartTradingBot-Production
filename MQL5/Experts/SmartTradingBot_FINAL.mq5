@@ -337,6 +337,7 @@ struct TrendInfo
   {
    string            bias;
    bool              valid;
+   string            reason;       // Diagnostic classification; does not change trade eligibility.
    int               touches;
    datetime          t1;
    datetime          t2;
@@ -2726,19 +2727,24 @@ void ReleaseIndicatorHandles()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-int CollectSwings(const string symbol,
-                  const ENUM_TIMEFRAMES tf,
-                  const int maxBars,
-                  SwingPoint &highs[],
-                  SwingPoint &lows[])
+int CollectSwingsDetailed(const string symbol,
+                          const ENUM_TIMEFRAMES tf,
+                          const int maxBars,
+                          SwingPoint &highs[],
+                          SwingPoint &lows[],
+                          string &diagnostic)
   {
+   diagnostic="RATES_NOT_READY_OR_COPY_INCOMPLETE";
    MqlRates r[];
 
    if(!GetRates(symbol,tf,maxBars,r))
       return 0;
 
+   diagnostic="SWINGS_NOT_CLASSIFIED";
+
    if(ArrayResize(highs,0)<0 || ArrayResize(lows,0)<0)
      {
+      diagnostic="SWING_BUFFER_ALLOCATION_FAILED";
       Print("STB swing buffers reset failed symbol=",symbol,
             " timeframe=",EnumToString(tf));
       return 0;
@@ -2750,7 +2756,10 @@ int CollectSwings(const string symbol,
    int minShift=right+1;
 
    if(maxShift<minShift)
+     {
+      diagnostic="LOOKBACK_TOO_SHORT_FOR_SWING_CONFIRMATION";
       return 0;
+     }
 
    for(int s=maxShift; s>=minShift; --s)
      {
@@ -2784,6 +2793,7 @@ int CollectSwings(const string symbol,
          int n=ArraySize(highs);
          if(ArrayResize(highs,n+1)!=n+1)
            {
+            diagnostic="SWING_HIGH_ALLOCATION_FAILED";
             Print("STB swing-high allocation failed symbol=",symbol,
                   " timeframe=",EnumToString(tf));
             ArrayFree(highs);
@@ -2802,6 +2812,7 @@ int CollectSwings(const string symbol,
          int n=ArraySize(lows);
          if(ArrayResize(lows,n+1)!=n+1)
            {
+            diagnostic="SWING_LOW_ALLOCATION_FAILED";
             Print("STB swing-low allocation failed symbol=",symbol,
                   " timeframe=",EnumToString(tf));
             ArrayFree(highs);
@@ -2816,7 +2827,21 @@ int CollectSwings(const string symbol,
         }
      }
 
-   return ArraySize(highs)+ArraySize(lows);
+   int swingCount=ArraySize(highs)+ArraySize(lows);
+   diagnostic=(swingCount>0 ? "SWINGS_FOUND":"NO_CONFIRMED_SWINGS");
+   return swingCount;
+  }
+
+// Backward-compatible wrapper: existing strategy/trade-management callers
+// keep the exact same return contract; H4 diagnostics use the detailed path.
+int CollectSwings(const string symbol,
+                  const ENUM_TIMEFRAMES tf,
+                  const int maxBars,
+                  SwingPoint &highs[],
+                  SwingPoint &lows[])
+  {
+   string ignoredDiagnostic="";
+   return CollectSwingsDetailed(symbol,tf,maxBars,highs,lows,ignoredDiagnostic);
   }
 
 //==================================================================
@@ -2832,22 +2857,62 @@ TrendInfo GetH4Trend(const string symbol)
 
    result.bias="NEUTRAL";
    result.valid=false;
+   result.reason="H4_STATUS_UNCLASSIFIED";
    result.touches=0;
    result.t1=0;
    result.t2=0;
    result.p1=0.0;
    result.p2=0.0;
 
+   // Record symbol/timeframe history readiness separately. SymbolIsSynchronized
+   // reports symbol-wide synchronization; SERIES_SYNCHRONIZED and
+   // SERIES_BARS_COUNT describe this specific H4 series.
+   long h4SeriesSynchronized=0;
+   bool h4SeriesStateRead=SeriesInfoInteger(symbol,PERIOD_H4,
+                                             SERIES_SYNCHRONIZED,
+                                             h4SeriesSynchronized);
+   long h4Bars=SeriesInfoInteger(symbol,PERIOD_H4,SERIES_BARS_COUNT);
+   bool symbolSynchronized=SymbolIsSynchronized(symbol);
+   int requestedBars=MathMax(1,InpLookbackH4);
+   string historyState="H4_SERIES_READY";
+
+   if(!symbolSynchronized)
+      historyState="H4_SYMBOL_NOT_SYNCHRONIZED";
+   else if(!h4SeriesStateRead || h4SeriesSynchronized==0)
+      historyState="H4_SERIES_NOT_SYNCHRONIZED";
+   else if(h4Bars<requestedBars)
+      historyState="H4_HISTORY_BELOW_LOOKBACK";
+
    SwingPoint highs[];
    SwingPoint lows[];
+   string swingDiagnostic="";
 
-   CollectSwings(symbol,PERIOD_H4,InpLookbackH4,highs,lows);
+   CollectSwingsDetailed(symbol,PERIOD_H4,InpLookbackH4,
+                         highs,lows,swingDiagnostic);
 
    int nh=ArraySize(highs);
    int nl=ArraySize(lows);
 
    if(nh<2 || nl<2)
+     {
+      if(swingDiagnostic=="RATES_NOT_READY_OR_COPY_INCOMPLETE")
+        {
+         result.reason=(historyState=="H4_SERIES_READY" ?
+                        "H4_COPYRATES_INCOMPLETE":historyState);
+        }
+      else if(StringFind(swingDiagnostic,"ALLOCATION_FAILED")>=0 ||
+              swingDiagnostic=="LOOKBACK_TOO_SHORT_FOR_SWING_CONFIRMATION")
+         result.reason="H4_"+swingDiagnostic;
+      else if(swingDiagnostic=="NO_CONFIRMED_SWINGS")
+         result.reason="H4_NO_CONFIRMED_SWINGS";
+      else
+         result.reason="H4_INSUFFICIENT_CONFIRMED_SWINGS_H"+
+                       IntegerToString(nh)+"_L"+IntegerToString(nl);
+
       return result;
+     }
+
+   result.reason="H4_SWINGS_READY";
 
 // Determine H4 market structure from the two latest CONFIRMED
 // swing pairs. The line itself is then anchored to those exact
@@ -2863,14 +2928,20 @@ TrendInfo GetH4Trend(const string symbol)
    double lastClose=iClose(symbol,PERIOD_H4,1);
    datetime lastClosedBar=iTime(symbol,PERIOD_H4,1);
    if(lastClose<=0.0 || lastClosedBar<=0)
+     {
+      result.reason="H4_LAST_CLOSED_BAR_UNAVAILABLE";
       return result;
+     }
 
    // Compare the last closed candle with the trendline at that candle's
    // close time. TimeCurrent() projects the line beyond the candle being
    // tested and can create a time mismatch late in the next H4 bar.
    int h4Seconds=PeriodSeconds(PERIOD_H4);
    if(h4Seconds<=0)
+     {
+      result.reason="H4_TIMEFRAME_PERIOD_INVALID";
       return result;
+     }
    datetime evaluationTime=lastClosedBar+h4Seconds;
 
    double pip=PipSize(symbol);
@@ -2884,7 +2955,10 @@ TrendInfo GetH4Trend(const string symbol)
       SwingPoint b=lows[nl-1];
 
       if(b.time<=a.time || b.price<=a.price)
+        {
+         result.reason="H4_BULLISH_SWING_ANCHORS_INVALID";
          return result;
+        }
 
       result.bias="BULLISH";
       result.t1=a.time;
@@ -2908,6 +2982,7 @@ TrendInfo GetH4Trend(const string symbol)
          if(lows[i].price < expected-tolerance)
            {
             result.valid=false;
+            result.reason="H4_BULLISH_LINE_BROKEN_BY_CONFIRMED_SWING";
             return result;
            }
         }
@@ -2932,6 +3007,8 @@ TrendInfo GetH4Trend(const string symbol)
       // The line is structurally valid when price has not decisively
       // broken below it. This check affects trading validity only.
       result.valid=(lastClose>=lineNow-tolerance);
+      result.reason=(result.valid ? "H4_BULLISH_CONFIRMED":
+                                    "H4_BULLISH_LINE_INVALIDATED_BY_CLOSE");
      }
 
    if(bearish)
@@ -2942,7 +3019,10 @@ TrendInfo GetH4Trend(const string symbol)
       SwingPoint b=highs[nh-1];
 
       if(b.time<=a.time || b.price>=a.price)
+        {
+         result.reason="H4_BEARISH_SWING_ANCHORS_INVALID";
          return result;
+        }
 
       result.bias="BEARISH";
       result.t1=a.time;
@@ -2965,6 +3045,7 @@ TrendInfo GetH4Trend(const string symbol)
          if(highs[i].price > expected+tolerance)
            {
             result.valid=false;
+            result.reason="H4_BEARISH_LINE_BROKEN_BY_CONFIRMED_SWING";
             return result;
            }
         }
@@ -2989,7 +3070,12 @@ TrendInfo GetH4Trend(const string symbol)
       // This affects trading validity only; the drawing still shows
       // the confirmed structural line.
       result.valid=(lastClose<=lineNow+tolerance);
+      result.reason=(result.valid ? "H4_BEARISH_CONFIRMED":
+                                    "H4_BEARISH_LINE_INVALIDATED_BY_CLOSE");
      }
+
+   if(result.reason=="H4_SWINGS_READY")
+      result.reason="H4_STRUCTURE_NEUTRAL";
 
    return result;
   }
@@ -3720,11 +3806,18 @@ bool BuildSetup(const string symbol,
        (direction<0 && ti.bias=="BEARISH"));
 
    if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))
-      return STB_BuildReject(symbol,direction,
-                             ti.valid ? "H4_DIRECTION_MISMATCH" : "H4_TREND_UNAVAILABLE");
+     {
+      string h4Reject=(ti.valid ? "H4_DIRECTION_MISMATCH" :
+                       "H4_TREND_UNAVAILABLE_"+ti.reason);
+      return STB_BuildReject(symbol,direction,h4Reject);
+     }
 
    if(!aligned && !InpAllowUniversal)
-      return STB_BuildReject(symbol,direction,"H4_ALIGNMENT_REQUIRED");
+     {
+      string h4Reject=(ti.valid ? "H4_ALIGNMENT_REQUIRED" :
+                       "H4_ALIGNMENT_REQUIRED_"+ti.reason);
+      return STB_BuildReject(symbol,direction,h4Reject);
+     }
 
    int chochShift=-1;
    int bosShift=-1;

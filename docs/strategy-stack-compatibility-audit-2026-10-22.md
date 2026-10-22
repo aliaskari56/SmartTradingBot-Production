@@ -1,0 +1,230 @@
+# SmartTradingBot strategy-stack compatibility audit — 2026-10-22
+
+## Scope and status
+
+This is a static source/configuration audit of `MQL5/Experts/SmartTradingBot_FINAL.mq5` at commit `985ebc67258fdcaf86266c54b0b421ec00d073b7`, combined with the operator-provided terminal log excerpts from 2026-10-22. It is not a claim that the strategy has been shown profitable or that the full Expert Advisor has passed a new compile/Strategy Tester run from this document.
+
+**No entry/exit rule, threshold, risk parameter, or order-placement behavior is changed by this audit.** A universal “best” parameter set cannot be established from compile results or rejection logs alone. For that, repeatable backtests and independent out-of-sample/forward validation are required.
+
+## Runtime evidence supplied for the current build
+
+Latest supplied scanner summaries around 13:33–13:34 show approximately:
+
+- universe: 302 symbols
+- eligible: 147–148
+- quality: 18–19
+- regime: 17–18
+- buy and sell candidates: 0
+- direction-gate rejects: 14–16
+- build-setup rejects: 18–20
+- setup-age rejects: 0
+- score rejects: 0
+- minimum scanner score: 55
+- confidence: `NO_CLEAR_WINNER`
+
+The 30 most recent `STB SETUP REJECT` records in the supplied interval comprised 16 `H4_TREND_UNAVAILABLE_H4_BULLISH_LINE_INVALIDATED_BY_CLOSE`, 10 `H4_TREND_UNAVAILABLE_H4_STRUCTURE_NEUTRAL`, 2 `H4_DIRECTION_MISMATCH`, and 2 `BOS_TOO_OLD`.
+
+This is strong evidence that the **H4 hard gate is the first observed bottleneck in that interval**. Since `scoreRejects=0`, changing the score threshold would not address the observed failure. The full-day counts (including `BROKER_STOP_NORMALIZATION_FAILED`) must not be mixed with the later interval: a setup rejected at H4 never reaches later M15/FVG/OB/geometry checks, so earlier geometry counts are not proof that geometry is the current bottleneck.
+
+## Strategy pipeline and gate interactions
+
+The source currently applies these checks in sequence; a setup must survive every enabled hard gate.
+
+1. **Symbol and quote preflight / scanner eligibility** — symbol selected and synchronized, quote availability/freshness, broker trade mode and supported order flags.
+2. **Market quality and regime** — spread relative to M15 ATR and volatility/activity/freshness filters; only a small subset of the 302-symbol universe survives these gates.
+3. **Per-direction eligibility** — broker's symbol direction/order restrictions before building the setup.
+4. **Base setup checks** — direction tradability, spread, optional oscillator hard filter, cooldown.
+5. **H4 directional context** — `InpRequireH4TrendAlignment=true` rejects an invalid/neutral H4 result and rejects a direction contrary to H4. `InpAllowUniversal=true` does not bypass this earlier condition in `BuildSetup`; it is not a switch that overrides mandatory H4 alignment.
+6. **M15 market structure** — confirmed swing-based CHoCH/BOS must be detected; `BOS_TOO_OLD` is rejected using the effective maximum setup age (configured default `InpMaxSetupAgeBars=4`).
+7. **Local pattern conditions** — `InpRequireFVG=true` and `InpRequireOB=true` are independent hard gates. `InpStrictPatternFilters=false` does not turn these two individual requirements off.
+8. **Higher-timeframe confluence** — `InpRequireHTFConfluence=true` requires HTF FVG/OB confluence; configured timeframe is H1 and configured lookback is 120 bars.
+9. **Structural stop/target and pending geometry** — the code rejects invalid structural stop anchors, crossed/stale pending triggers, invalid broker distances, missing suitable structural TP targets, and inadequate reward/risk. It deliberately should not “repair” a stale breakout by chasing price after the trigger is crossed.
+10. **Scoring, ranking, candidate and execution stages** — only setups surviving earlier gates reach the score/ranking stage. A zero score-reject count with zero candidates means earlier gates are more relevant than the minimum scanner score for the supplied interval.
+
+## H4 interpretation
+
+`GetH4Trend` requires two latest confirmed swing highs and lows to agree directionally (higher highs + higher lows for bullish, lower highs + lower lows for bearish), then checks the corresponding line and the last closed H4 bar. A neutral structure or a close invalidating a previously bullish/bearish line is therefore a deliberate hard rejection under the current setting, not by itself proof of a coding error.
+
+Do not loosen H4 or pattern filters merely to increase the number of candidates. If H4 is considered too restrictive, that needs an explicit strategy-policy decision followed by a controlled Strategy Tester comparison; a higher candidate count by itself is not evidence of a better strategy.
+
+## Configuration/reproducibility concerns
+
+- The log confirms `universal=ON` and `requireH4Align=ON` at the same time. Under the current gate order, the latter remains mandatory even when universal mode is on. The input names alone can mislead an operator about this interaction.
+- FVG, OB, and H1 confluence are all individually enabled, so the combined confluence filter is strict even though `InpStrictPatternFilters=false`.
+- Adaptive learning and adaptive parameter learning are enabled in the supplied initialization log. That can make the effective profile important when comparing runs. A reproducibility run should record the selected profile and effective parameters and separate fixed-parameter diagnostics from adaptive behavior.
+- The 302-symbol universe contains instruments with different tick sizes, contract modes, session schedules, stop/freeze distances, volume limits and quote behavior. A single hard-coded pip assumption cannot be presumed valid across every symbol. The source should continue to derive geometry and constraints from each symbol's broker properties and fail closed when those values are unavailable.
+- Current logs show `auto=ON` and `testerForceAuto=ON`. The tester-specific option must remain tester-specific in its implementation, and the EA should not be attached or activated for trading as part of a static audit.
+
+## Validation protocol (no parameter “winner” inferred in advance)
+
+1. Freeze and identify the exact source commit and input set; record build hash and initialization log.
+2. Run a baseline test with complete tick data appropriate to the strategy. Save the complete tester report and the Expert/Journal logs.
+3. Compare one hypothesis at a time in the Strategy Tester, without changing multiple gates together. First verify whether the H4 gate alone accounts for the zero-candidate behavior; next inspect the newly exposed downstream reject categories. Keep the same symbol, date window, timeframe, spread/commission assumptions and modeling mode across comparisons.
+4. Use separate in-sample and out-of-sample date ranges, then forward validation on data not used to choose parameters. Do not select a single isolated optimization peak as “best”; look for stability across periods and instruments and report trade count, drawdown, expectancy, profit factor, rejected setup counts, and sensitivity to costs.
+5. Check broker-specific order geometry and symbol capabilities separately from signal quality; technical validity is not evidence of profitability.
+
+## Authoritative references
+
+- MetaQuotes, `CopyRates`: https://www.mql5.com/en/docs/series/copyrates
+- MetaQuotes, Strategy Tester and testing modes: https://www.mql5.com/en/docs/runtime/testing
+- MetaQuotes, symbol properties including tick size, stops/freeze levels, volume limits and allowed order modes: https://www.mql5.com/en/docs/constants/environment_state/marketinfoconstants
+- MetaQuotes, `OrderCheck` and its limitations: https://www.mql5.com/en/docs/trading/ordercheck
+- MetaQuotes, optimization and out-of-sample/forward-validation workflow (Pardo method): https://www.mql5.com/en/articles/19520
+
+
+## Follow-up from the 13:34 terminal logs
+
+The operator later supplied five initialization records. The active M5 instance at 13:19 reports `universal=ON`, `requireFVG=ON`, `requireOB=ON`, `requireH4Align=ON`, and `requireHTFConfluence=ON`. Other chart instances were also initialized on D1, M1, and W1, so logs from a given date are not automatically attributable to one chart/instance unless the symbol, timeframe, initialization time, and instance are matched.
+
+For the interval selected from 13:20 onward, the operator's PowerShell extraction returned 30 `STB SETUP REJECT` messages:
+- 16 `H4_TREND_UNAVAILABLE_H4_BULLISH_LINE_INVALIDATED_BY_CLOSE`
+- 10 `H4_TREND_UNAVAILABLE_H4_STRUCTURE_NEUTRAL`
+- 2 `H4_DIRECTION_MISMATCH`
+- 2 `BOS_TOO_OLD`
+
+The last reported M5 summaries at 13:33:44, 13:33:54, and 13:34:04 showed 302-symbol universe, 147–148 eligible, 18–19 quality-passing, 17–18 regime-passing, zero buy/sell candidates, 14–16 direction-gate rejects, 18–20 setup-build rejects, zero setup-age rejects, and zero score rejects. That further confirms that the score floor is not the current first-order obstacle.
+
+Importantly, `BuildSetup` tests the hard H4 condition before `DetectStructure`, FVG/OB detection, HTF confluence, and pending-order geometry. Thus these 30 recent records are censored by an upstream gate: they do **not** establish that downstream checks would pass. The broader full-day count of `BROKER_STOP_NORMALIZATION_FAILED` is from a different interval and must not be interpreted as the active interval's dominant cause.
+
+## Next diagnostic split to make (tester only)
+
+Do not silently change production defaults based on rejection counts. Use a controlled Strategy Tester comparison with an otherwise identical parameter set:
+
+- **Baseline:** keep all current filters unchanged; save the report, exact inputs, log, build hash, date window, tick model, spread/commission and symbol.
+- **Single-gate diagnostic:** toggle only `InpRequireH4TrendAlignment` for that tester run to reveal the downstream CHoCH/BOS, FVG, OB, HTF and geometry rejection distribution. Treat the result as a diagnostic branch, not as a recommended or proven better strategy.
+- **Downstream audit:** determine which subsequent hard gates reject the newly visible setups. Keep counts separated by symbol/timeframe and by run; do not combine old terminal logs with the comparison interval.
+- **Do not infer quality from volume:** more candidates or trades alone does not mean higher expectancy or lower drawdown. Compare the complete tester report, and preserve a separate out-of-sample period that was not used to choose inputs.
+
+## Additional implementation observation
+
+`STB_CalcMarketQuality` defines relative spread as `(ask-bid)/M15_ATR * 100`, rejects values above `InpMaxRelativeSpreadPct`, and applies quality-score penalties for spread, volatility, activity, and quote freshness. The summary count `eligible` includes symbols before market-quality checks; the large difference between `eligible` (about 147) and `quality` (about 18–19) means the aggregate summary alone cannot say whether spread, activity, volatility, freshness, or missing data explains that drop. The next diagnostic should collect reason counts for `STB SCANNER REJECT stage=MARKET_QUALITY` and `stage=DATA_ELIGIBILITY` separately rather than loosening thresholds blindly.
+
+MetaQuotes documents that `CopyRates` may initially return fewer bars while data history is still downloading/building, so multi-symbol test repeatability depends on confirming series readiness and using consistent historical data. For the multi-symbol EA, a test on one symbol should not be treated as a complete reproduction of a 302-symbol live scan.
+
+
+## Follow-up from the stage rejection aggregation
+
+The operator's next aggregation (still scoped to chart label `SmartTradingBot_FINAL (XAUUSD+,M5)`, starting at 13:20 server-log time) returned these **event counts**, not unique-symbol counts:
+
+| Rejection stage/reason | Logged events |
+|---|---:|
+| DATA_ELIGIBILITY / REJECT_STALE_DATA | 27,856 |
+| DATA_ELIGIBILITY / REJECT_DATA_UNAVAILABLE | 2,499 |
+| DATA_ELIGIBILITY / REJECT_SESSION | 395 |
+| MARKET_QUALITY / REJECT_RELATIVE_SPREAD | 24,971 |
+| MARKET_QUALITY / REJECT_VOLATILITY | 198 |
+| MARKET_QUALITY / REJECT_ACTIVITY | 196 |
+| MARKET_QUALITY / REJECT_QUALITY_SCORE | 5 |
+| REGIME_FILTER / REJECT_UNSTABLE_REGIME | 248 |
+
+The repeated per-symbol scan loop means these are repeated observations across cycles and must not be read as 27,856 distinct symbols or independent trade opportunities.
+
+### Source-backed interpretations
+
+- `STB_ScannerQuoteValid` rejects a symbol when the timestamp in its latest `MqlTick` exceeds `max(30, InpScannerMaxQuoteAgeSec)`; current configured max quote age is 300 seconds. Official `SymbolInfoTick` documentation describes the returned timestamp as the time of the last price update, so instruments with no new quote for several minutes will naturally fail a freshness gate. This can be prudent, but it also means a broad mixed-symbol universe can repeatedly count dormant instruments.
+- In `STB_ScannerDataEligible`, freshness/quote checks currently occur before `STB_ScannerSessionOpen`. A closed-session instrument whose last quote is old is therefore labelled `REJECT_STALE_DATA` before the code can classify it as `REJECT_SESSION`. Reordering the session check before quote freshness would improve diagnosis without making a stale quote valid or loosening entry gates; it should be tested because broker session metadata can vary by symbol.
+- `STB_CalcMarketQuality` defines `relativeSpread = (ask-bid)/M15_ATR*100` and rejects when the value exceeds the input `InpMaxRelativeSpreadPct=10.0`. The 24,971 event count shows this is the predominant quality-gate reason in this interval. It does **not** prove that 10.0 is an incorrect threshold: symbol classes differ materially in quote frequency, tick size, session schedules and spreads. Do not set the threshold to zero or simply raise it from this count alone.
+- The initialization logs show a 302-symbol universe with mixed instruments. The correct next measurement is the number of unique symbols affected per reason, the most recent timestamp/quote age per symbol, and rejection counts per full scan cycle. These are necessary to separate repeated dormant quotes from a systemic time-basis or feed problem.
+- `REJECT_UNSTABLE_REGIME` is downstream of market quality and represents 248 further events in the same interval. Since only symbols that pass market quality reach this stage, the event count is conditional on earlier gates and should not be compared as if each gate saw the same universe.
+
+### Next audit action
+
+Before changing any trade-selection threshold, collect unique-symbol coverage and compare it against the number of `STB SCANNER SUMMARY` rows in the same time interval. If most stale symbols are consistently outside their published trade sessions, classify sessions first for clearer telemetry. If they are supposed to be active, compare terminal/server clock, latest tick timestamp and current session metadata. Independently report relative spread as a distribution by symbol and asset class rather than loosening the shared cap blindly.
+
+
+## Latest unique-symbol aggregation (13:20 onward)
+
+The latest operator-provided summary covers 255 scanner cycles, ending around 14:02 server-log time, for the `SmartTradingBot_FINAL (XAUUSD+,M5)` instance.
+
+| Stage / reason | Repeated events | Unique symbols |
+|---|---:|---:|
+| Data eligibility — stale quote | 36,093 | 168 |
+| Data eligibility — unavailable data | 3,192 | 141 |
+| Data eligibility — outside session | 510 | 2 |
+| Market quality — relative spread | 32,178 | 147 |
+| Market quality — activity | 277 | 2 |
+| Market quality — volatility | 255 | 1 |
+| Market quality — quality score | 7 | 2 |
+| Regime filter — unstable regime | 326 | 3 |
+
+These are grouped from repeated per-cycle log events. Unique-symbol counts can overlap across reasons and cycles, so they are not intended to sum to the 302-symbol universe.
+
+### What this shows
+
+- Average scanner summary is still near 146 eligible symbols, 17 quality-passing symbols and 16 regime-passing symbols. Roughly 126 relative-spread rejects per scan is consistent with the quality pass count being low; this is a hard gate, not a later ranking penalty.
+- Stale quote rejections average roughly 142 events per cycle. The code's `InpScannerMaxQuoteAgeSec` defaults to 300, and `STB_ScannerQuoteValid` compares server/current time to `MqlTick.time`, the last quote update. This may be expected for instruments that do not tick frequently, but the symbol-by-symbol distribution and their published quote/trading sessions must be checked before interpreting it as feed failure. Official references: [SymbolInfoTick](https://www.mql5.com/en/docs/marketinformation/symbolinfotick), [MqlTick time field](https://www.mql5.com/en/docs/constants/structures/mqltick), and [SymbolInfoSessionTrade](https://www.mql5.com/en/docs/marketinformation/symbolinfosessiontrade).
+- `REJECT_SESSION` only accounts for two unique symbols because the current code tests quote freshness before checking the trading session. Thus a symbol with a stale quote can get counted as stale without ever reaching session classification. Moving the session classification earlier would improve the explanatory label but would not make an actually closed symbol tradable; any such source change requires compile and tester verification.
+- The relative-spread gate compares `(ask-bid)/M15_ATR*100` against `InpMaxRelativeSpreadPct=10.0`. The 147 unique symbols rejected across the interval are an important second bottleneck, but the current logs do not print the exact `relativeSpread` value. Do not raise or disable this threshold until the spread/ATR distribution by symbol has been collected and execution-cost assumptions validated.
+- Data-unavailable events average about 12.5 per cycle. `GetRates` requires the requested number of bars from `CopyRates`, while MetaQuotes notes that history may still be downloading/building and a request may initially return fewer bars. Track these separately from stale quotes. See [CopyRates](https://www.mql5.com/en/docs/series/copyrates).
+
+### Current prioritized findings
+
+1. **H4 hard gate:** first observed blocker once a symbol survives eligibility, quality, regime, and broker direction checks. The last interval showed 28 of 30 setup rejects related to H4.
+2. **Relative-spread hard gate:** eliminates approximately 126 eligible symbols per scanner cycle; the exact per-symbol spread/ATR values are not logged yet.
+3. **Universe freshness/history coverage:** approximately 142 stale-quote events per cycle and 12.5 data-unavailable events per cycle. Determine whether these are closed-session/dormant symbols or active instruments with unexpectedly old timestamps.
+4. **Other quality/regime gates:** low occurrence in the supplied interval, so do not prioritize changing volatility/activity thresholds without additional evidence.
+
+The next implementation-quality improvement should be observability only: log per-symbol quote age, current session state, relative spread percent, ATR, and rejection reason in a rate-limited way, plus per-cycle unique-symbol counts. Keep signal gates unchanged until the same dataset has been replayed and the downstream strategy rejection distribution is known.
+
+
+## Symbol-level results from the next operator sample
+
+The user supplied the following top-symbol scan results (13:20–14:08 server-log interval):
+- Repeated stale quote names include US corporate shares such as Hilton, Oneok, Novartis, NortonLife, Nordstrom, Nikola, NextEra, Mosaic, MGM, and McKesson. Each appeared about 290 times, matching repeated scan cycles rather than 290 independent failures. Their classification as outside-session is plausible but must be confirmed with the broker's session metadata/time basis, not guessed from company name alone.
+- Repeated data-unavailable names include deferred/dated broker instruments such as `DE40Z6+`, `HK50X6+`, `NGX6+`, `NGZ6+`, `UT100Z6+`, `USOILZ6+`, `US500Z6+`, `US30Z6+`, `FRA40X6+`, and `ESP35X6+`. They repeated about 292 times each. The current EA folds several causes into `REJECT_DATA_UNAVAILABLE` (symbol not synchronized, tick unavailable, insufficient M15 bars, or insufficient H4 bars), so the current log alone cannot identify which cause applies to any of these symbols.
+- The `REJECT_RELATIVE_SPREAD` table was empty because the PowerShell extractor used `$Matches` again to parse `spreadPips`, overwriting the prior match groups for stage/symbol/reason. This is a **PowerShell diagnostic bug**, not evidence that no symbols were rejected for relative spread.
+
+## Read-only diagnostic script added
+
+A standalone script was added at `MQL5/Scripts/STB_ScannerUniverseDiagnostics.mq5` on this branch. It:
+- enumerates selected symbols (default) without changing selection;
+- reads symbol synchronization, published trade session, M15/H4 bars, last tick and quote age, bid/ask, point/spread and computed M15 ATR/relative spread;
+- writes a CSV under terminal `MQL5/Files` and concise `STB_DIAG` lines to the Experts log;
+- submits no orders and does not change or attach the EA.
+
+This script is new and has **not been compiled or executed on the user's terminal yet**. Its role is observability only. The next step is to compile it locally, run it once from MT5 Navigator on any chart, and inspect the generated CSV. Check the `session_open`, `quote_age_seconds`, `m15_bars`, `h4_bars`, and `relative_spread_pct` fields together before assigning blame to a particular gate.
+
+
+## First execution of the read-only terminal diagnostic script
+
+The user ran `STB_ScannerUniverseDiagnostics` on 2026-10-22 around 14:16 terminal time. It compiled successfully with 0 errors and 0 warnings. The CSV read by PowerShell contained 302 symbols with these mutually exclusive diagnostic classifications:
+
+| Result | Symbol count |
+|---|---:|
+| `RELATIVE_SPREAD_OVER_CAP` | 127 |
+| `OUTSIDE_TRADE_SESSION` | 120 |
+| `STALE_OR_INVALID_QUOTE` | 26 |
+| `H4_HISTORY_SHORT` | 10 |
+| `OK` | 17 |
+| `M15_AND_H4_HISTORY_SHORT` | 1 |
+| `NO_TICK` | 1 |
+
+This totals 302 diagnostic rows. These are classifications produced by the stand-alone script in that one run, not the EA's multi-cycle counts. The 120 symbols reported out of session should not be “fixed” by loosening the gate; they should simply be omitted until the broker says their trading session is open. The 26 stale/invalid quote symbols need their row-level age, session and validity fields reviewed. Ten symbols have too little H4 history for the diagnostic's current 180-bar threshold, one lacks both M15 and H4 history, and one has no tick.
+
+Examples of relative spread among session-open symbols include AUDCAD+ 46.875%, AUDCHF+ 43.030%, AUDJPY+ 22.675%, AUDNZD+ 38.132%, AUDUSD+ 46.512%, CADCHF+ 61.823%, EURAUD+ 34.882%, and EURCAD+ 31.818% of M15 ATR. These are the exact values from the diagnostic CSV; current source hard-rejects relative spread above `InpMaxRelativeSpreadPct=10.0`. The metric is `(ask-bid)/ATR*100`, so these values mean transaction spread is a substantial fraction of the recent M15 average true range. They do not automatically prove an implementation bug: they could reflect unusually quiet/low ATR bars, broad broker spreads, instrument-specific pricing, or a calculation/unit issue, all of which need to be distinguished. In the stand-alone script, the ATR function intentionally matches the EA's `LocalATR` algorithm (simple mean of 14 true ranges), which reduces one source of calculation mismatch.
+
+The diagnostic script's first 25 rejected rows show session-open FX pairs and equities/crypto with materially different spreads and volatility; that reinforces that the single symbol universe is heterogeneous. Do not globally raise the cap or disable it to increase scanner counts. The next useful extraction is a compact distribution of `relative_spread_pct` for all 127 rejected symbols and all 17 `OK` symbols, with actual spread price, points, ATR, and a comparison grouped by instrument class where recognizable. A controlled offline Strategy Tester comparison must then measure net results after spread/commission and use separate out-of-sample data before any parameter can be described as preferable.
+
+Current conclusion: the diagnostic and EA are not yet proven mismatched on the ATR formula. The evidence supports three independent classes of skips—outside-session symbols, stale/missing history/quotes, and a hard relative-spread cap—plus the earlier observed H4 hard gate. No live trading thresholds have been changed based on this one snapshot.
+
+
+## Relative-spread distribution from the diagnostic CSV
+
+The user supplied the following percentile output for the 127 symbols classified as `RELATIVE_SPREAD_OVER_CAP` in the single-run diagnostic:
+
+| Percentile | Relative spread as % of M15 ATR |
+|---:|---:|
+| 50th | 46.510% |
+| 75th | 121.820% |
+| 90th | 199.140% |
+| 95th | 258.820% |
+
+The 15 rejected instruments nearest the 10% cap ranged from 11.242% (Unilever) to 17.854% (UK100+), while the ten largest values ranged from 235.912% (DOGUSD+) to 457.143% (XLMUSD+). Some examples are consistent with very low recent ATR relative to current spread; do not automatically interpret the extreme values as a unit bug, because both spread price and ATR are in price units and the diagnostic was written to reproduce the EA's `LocalATR` method. Check `spread_price`, `point`, `spread_points`, `m15_atr14`, current session and recent bars for any specific symbol under investigation.
+
+The 17 initially accepted examples had relative-spread values from 3.322% (XAUUSD+) through 9.446% (Micron), with all 17 below the 10% cap. This is consistent with the cap acting as designed in this snapshot. The accepted list is still only a preflight data/spread list: it is not a set of signals or a finding about profitability.
+
+The median rejected ratio of 46.51% means a simple small increase in the global cap would not admit the bulk of rejected symbols; admitting them would require allowing transaction spread to consume a substantial fraction of recent M15 range. This is especially unsuitable as a blanket change for a heterogeneous universe containing FX, indices, energy, crypto and cash-equity symbols. Keep the global gate unchanged pending asset-class-specific analysis and out-of-sample testing. More useful next steps are:
+1. emit a symbol property report with `SYMBOL_TRADE_TICK_SIZE`, `SYMBOL_POINT`, `SYMBOL_DIGITS`, exact `ask-bid`, ATR, and ratio;
+2. assess the ratio distribution separately within symbol classes and across several active sessions, not one snapshot;
+3. in an offline tester, quantify net expectancy after realistic spread/commission on the subset with valid data and a stable session;
+4. separately diagnose the H4 gate and downstream structural/pattern gates for this subset, since passing the spread preflight is not equivalent to passing the strategy.
