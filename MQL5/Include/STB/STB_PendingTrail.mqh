@@ -208,7 +208,6 @@ int STB_PendingClassifyResult(const bool ok)
    switch(ret)
    {
       case TRADE_RETCODE_DONE:
-      case TRADE_RETCODE_DONE_PARTIAL:
          return STB_PEND_RES_SUCCESS;
       case TRADE_RETCODE_NO_CHANGES:
          return STB_PEND_RES_NO_CHANGE;

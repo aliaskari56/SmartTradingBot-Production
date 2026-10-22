@@ -230,21 +230,23 @@ def main() -> int:
          "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "iHigh(symbol,PERIOD_M5,1)" in initial_pending_sl and
          "IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL)" in initial_pending_sl),
-        ("pending STOP trailing reads a closed M5 bar once and validates OHLC before consuming it",
+        ("pending STOP trailing validates finite/positive/ordered closed-M5 OHLC and preserves retryability",
          bool(trail_source) and
-         "datetime lastProcessedM5Bar;" in trail_source and
-         "datetime closedBar=iTime(symbol,PERIOD_M5,1);" in trail_source and
-         "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
-         "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
-         "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
-        ("pending-distance resolver covers all six pending types and validates broker geometry before returning valid",
+         "datetime actionableClosedBar=0;" in trail_source and
+         "MathIsValidNumber(barOpen)" in trail_source and
+         "barLow<=barHigh" in trail_source and
+         "barLow<=MathMin(barOpen,barClose)" in trail_source and
+         "barHigh>=MathMax(barOpen,barClose)" in trail_source and
+         "g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;" in trail_source and
+         "STB_PEND_BACKOFF_1_SEC" in trail_source),
+        ("pending-distance resolver uses directional tick alignment and validates all six pending types",
          bool(resolver_source) and
          all(token in resolver_source for token in (
              "ORDER_TYPE_BUY_STOP", "ORDER_TYPE_SELL_STOP",
              "ORDER_TYPE_BUY_LIMIT", "ORDER_TYPE_SELL_LIMIT",
              "ORDER_TYPE_BUY_STOP_LIMIT", "ORDER_TYPE_SELL_STOP_LIMIT",
-             "STB_TickAlignPrice(symbol,rawEntry)",
-             "STB_TickAlignPrice(symbol,rawSL)",
+             "STB_TickAlignPriceDirectional(symbol,rawEntry,entryRoundUp)",
+             "STB_TickAlignPriceDirectional(symbol,rawSL,isSell)",
              "BUY_ENTRY_INSIDE_BROKER_ZONE", "SELL_ENTRY_INSIDE_BROKER_ZONE",
              "BUY_SL_INSIDE_BROKER_ZONE", "SELL_SL_INSIDE_BROKER_ZONE",
              "r.valid=true;", "r.reason=\"OK\";")) and
