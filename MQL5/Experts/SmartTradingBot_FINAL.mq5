@@ -2284,6 +2284,12 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
       return false;
+   // Preserve order lifetime policy as well as geometry. Another terminal
+   // action can change expiration while OrderCheck is running; submitting the
+   // old type_time/expiration snapshot would otherwise overwrite that change.
+   if((ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME)!=typeTime ||
+      (datetime)OrderGetInteger(ORDER_TIME_EXPIRATION)!=expiration)
+      return false;
    // Do not re-enable a manual-override pause after OrderCheck: every
    // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
