@@ -2199,6 +2199,40 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
         }
      }
 
+   // NormalizePrice() rounds to display digits, which is not necessarily the
+   // symbol's tradable tick grid (e.g. exchange-traded instruments). Reject
+   // off-grid geometry rather than silently shifting the risk contract.
+   double pendingTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   double pendingPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   if(pendingTickSize<=0.0)
+      pendingTickSize=pendingPoint;
+   if(pendingTickSize<=0.0 || pendingPoint<=0.0)
+      return false;
+   double pendingGridTolerance=MathMax(pendingTickSize*1e-6,pendingPoint*1e-8);
+   bool pendingPricesOnTickGrid=
+      MathAbs(newEntry-MathRound(newEntry/pendingTickSize)*pendingTickSize)<=pendingGridTolerance &&
+      MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance &&
+      (newTP==0.0 ||
+       (newTP>0.0 &&
+        MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance));
+   if(stbOt==ORDER_TYPE_BUY_STOP_LIMIT ||
+      stbOt==ORDER_TYPE_SELL_STOP_LIMIT)
+      pendingPricesOnTickGrid=pendingPricesOnTickGrid &&
+         stopLimit>0.0 &&
+         MathAbs(stopLimit-MathRound(stopLimit/pendingTickSize)*pendingTickSize)<=pendingGridTolerance;
+   if(!pendingPricesOnTickGrid)
+     {
+      Print("STB PENDING MODIFY REJECT ticket=",ticket,
+            " symbol=",symbol,
+            " reason=PRICE_OFF_TRADE_TICK_GRID",
+            " tickSize=",DoubleToString(pendingTickSize,10),
+            " entry=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " sl=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " tp=",DoubleToString(newTP,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " stopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+      return false;
+     }
+
    // One broker geometry write per ticket per management cycle. This also
    // prevents ManagePendingOrders' initial-SL repair and the trailing engine
    // from both modifying the same pending ticket in one cycle.
