@@ -337,20 +337,12 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    //   entry = extreme + offSign*offset  =>  extreme = entry - offSign*offset.
    double inferredExtreme=currentEntry-offSign*entryBufferPips*pip;
 
-   // STOP orders use the latest CLOSED M5 candle as their initial structural
-   // anchor. Subsequent trailing is evaluated once per newly closed M5 bar.
-   if(orderType==(long)ORDER_TYPE_BUY_STOP)
-     {
-      double m5Low=iLow(symbol,PERIOD_M5,1);
-      if(m5Low>0.0)
-         inferredExtreme=m5Low;
-     }
-   else if(orderType==(long)ORDER_TYPE_SELL_STOP)
-     {
-      double m5High=iHigh(symbol,PERIOD_M5,1);
-      if(m5High>0.0)
-         inferredExtreme=m5High;
-     }
+   // Keep the anchor reconstructed from the CURRENT order geometry and its
+   // EB offset. EB is defined against Bid for BUY-side orders and Ask for
+   // SELL-side orders at registration/recovery. Unconditionally replacing this
+   // anchor with a candle extreme combines an unrelated extreme with the EB
+   // offset and can make the first trail proposal jump or fail broker geometry.
+   // Actual STOP trailing still evaluates each NEW closed M5 low/high below.
 
    if(inferredExtreme<=0.0)
       return false;
@@ -755,19 +747,43 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(bar<=0)
          bar=TimeCurrent();
 
+      bool noFavorableEntry=
+         (res.reason=="BUY_STOP_NO_FAVORABLE_VALID_ENTRY" ||
+          res.reason=="SELL_STOP_NO_FAVORABLE_VALID_ENTRY");
+
       if(g_stbPendingTrail[idx].lastFailLogBar!=bar)
       {
          g_stbPendingTrail[idx].lastFailLogBar=bar;
 
-         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
-               " symbol=",symbol,
-               " type=",STB_PendingTrailTypeName(orderType),
-               " stage=RESOLVE",
-               " reason=",res.reason);
+         if(noFavorableEntry)
+            Print("PENDING_TRAIL_WAIT ticket=",IntegerToString((int)ticket),
+                  " symbol=",symbol,
+                  " type=",STB_PendingTrailTypeName(orderType),
+                  " reason=",res.reason,
+                  " extreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                  " currentEntry=",DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN),
+                                                   (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+         else
+            Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+                  " symbol=",symbol,
+                  " type=",STB_PendingTrailTypeName(orderType),
+                  " stage=RESOLVE",
+                  " reason=",res.reason);
       }
 
-      // The action bar is deliberately NOT consumed: broker geometry may
-      // become valid as quotes move. Retry with the same bounded 5/15/60s policy.
+      // A no-favorable-entry condition is transient: retry at a short fixed
+      // interval without treating it as repeated broker failure. Keep the bar
+      // unconsumed so the same structural anchor can be re-evaluated if quotes
+      // move back into a valid, monotonic geometry window.
+      if(noFavorableEntry)
+        {
+         g_stbPendingTrail[idx].nextRetryTime=
+            TimeCurrent()+STB_PEND_BACKOFF_1_SEC;
+         return true;
+        }
+
+      // Other resolver failures retain bounded 5/15/60s exponential backoff.
+      // The actionable M5 bar remains unconsumed so broker geometry can recover.
       g_stbPendingTrail[idx].failureCount++;
       int fc=g_stbPendingTrail[idx].failureCount;
       int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
