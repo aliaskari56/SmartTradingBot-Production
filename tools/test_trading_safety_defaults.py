@@ -375,6 +375,14 @@ def main() -> int:
          and "double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
          and "double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
          and "MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance" in pending_modify_code),
+        ("pending modification rejects prices outside the tradable tick grid",
+         bool(pending_modify_code)
+         and "double pendingTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);" in pending_modify_code
+         and "if(pendingTickSize<=0.0)" in pending_modify_code
+         and "MathAbs(newEntry-MathRound(newEntry/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "MathAbs(newSL-MathRound(newSL/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "MathAbs(newTP-MathRound(newTP/pendingTickSize)*pendingTickSize)<=pendingGridTolerance" in pending_modify_code
+         and "reason=PRICE_OFF_TRADE_TICK_GRID" in pending_modify_code),
         ("pending-order modification checks server retcode and verified final geometry",
          bool(pending_modify_code)
          and "if(!TradeRetcodeModifySucceeded())" in pending_modify_code
