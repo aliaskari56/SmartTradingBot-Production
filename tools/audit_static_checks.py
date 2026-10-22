@@ -578,6 +578,13 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic &&"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)"))),
+        ("closed lifecycle PnL can be reconstructed from OUT/OUT_BY broker history",
+         "bool STB_SumClosedLifecyclePnlFromHistory(" in source
+         and "HistorySelectByPosition(positionId)" in source
+         and "entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY" in source
+         and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in source
+         and source.find("TakeAccumulatedPositionPnl(positionId)") <
+             source.find("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
         ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
              "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
