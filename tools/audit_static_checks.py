@@ -439,7 +439,7 @@ def main() -> int:
               "SYMBOL_WRITER_LEASE_LOST",
               "MANAGED_EXPOSURE_CHANGED_BEFORE_SUBMIT")) and
           place_setup.index("PENDING_GEOMETRY_CHANGED_BEFORE_SUBMIT") <
-          place_setup.index("bool ok=false;") <
+          place_setup.index("bool requestOK=false;") <
           place_setup.index("trade.BuyStop(volume,s.entry")),
         ("scanner allocation failures fail closed, clear candidates, and restore temporary symbol selection",
           "void STB_ScannerAllocationAbort(" in source and
