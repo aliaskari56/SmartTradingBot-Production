@@ -153,20 +153,46 @@ int    g_stbDailyKey=0;
 bool   g_stbDailyLimitLogged=false;
 string g_stbRunNamespace="";
 
-// A fresh namespace is created for each tester initialization so adaptive
-// statistics and daily-equity baselines from an earlier test cannot bleed
-// into a new run. The namespace is also used by the daily guard across all
-// callbacks within this initialized run.
+// A compact token separates tester runs. Keep it in a terminal global so
+// ordinary EA reinitialization within the same test preserves the daily-loss
+// baseline and adaptive state; OnDeinit clears the token when the test instance
+// is finally unloaded, so the next run receives a new namespace.
+string STB_RunNamespaceKey()
+  {
+   return "STB_RUN_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+
+          (string)InpMagic+"_"+(string)ChartID();
+  }
+
 bool STB_InitRunNamespace()
   {
    if(!MQLInfoInteger(MQL_TESTER))
       return false;
-   // Keep the token compact: terminal GlobalVariable names are limited
-   // in length, and the daily-state key must remain well below that limit.
-   uint runToken=(uint)TimeLocal() ^ GetTickCount() ^
-                 (uint)AccountInfoInteger(ACCOUNT_LOGIN) ^
-                 (uint)InpMagic ^ (uint)ChartID();
-   g_stbRunNamespace=(string)runToken;
+
+   string runKey=STB_RunNamespaceKey();
+   if(GlobalVariableCheck(runKey))
+     {
+      double stored=GlobalVariableGet(runKey);
+      if(MathIsValidNumber(stored) && stored>=1.0 && stored<=4294967295.0)
+         g_stbRunNamespace=(string)(uint)stored;
+     }
+
+   if(g_stbRunNamespace=="")
+     {
+      uint runToken=(uint)TimeLocal() ^ GetTickCount() ^
+                    (uint)AccountInfoInteger(ACCOUNT_LOGIN) ^
+                    (uint)InpMagic ^ (uint)ChartID();
+      if(runToken==0)
+         runToken=1;
+      g_stbRunNamespace=(string)runToken;
+      if(GlobalVariableSet(runKey,(double)runToken)<=0)
+        {
+         Print("STB INIT FAILED: cannot persist tester run namespace.");
+         g_stbRunNamespace="";
+         return false;
+        }
+      GlobalVariablesFlush();
+     }
+
    return (StringLen(g_stbRunNamespace)>0);
   }
 
@@ -196,6 +222,8 @@ void STB_DailyRiskClearState()
    GlobalVariableDel(STB_DailyRiskStateName("DAY"));
    GlobalVariableDel(STB_DailyRiskStateName("EQ"));
    GlobalVariableDel(STB_DailyRiskStateName("LOG"));
+   GlobalVariableDel(STB_RunNamespaceKey());
+   GlobalVariablesFlush();
    g_stbDailyKey=0;
    g_stbDailyStartEquity=0.0;
    g_stbDailyLimitLogged=false;
