@@ -2208,9 +2208,18 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    req.stoplimit=stopLimit;
 
    ResetLastError();
+   bool pendingOrderCheckOK=OrderCheck(req,check);
+   int pendingOrderCheckLastError=GetLastError();
 
-   if(!OrderCheck(req,check))
+   if(!pendingOrderCheckOK)
+     {
+      Print("STB PENDING MODIFY ORDERCHECK API FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " ret=",IntegerToString((int)check.retcode),
+            " comment=",check.comment,
+            " lastError=",IntegerToString(pendingOrderCheckLastError));
       return false;
+     }
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
