@@ -1907,8 +1907,9 @@ bool TradeRetcodeModifySucceeded()
   {
    uint ret=trade.ResultRetcode();
 
+   // A modify request changes order geometry; partial execution is not
+   // a valid success signal for that operation.
    return ret==TRADE_RETCODE_DONE ||
-          ret==TRADE_RETCODE_DONE_PARTIAL ||
           ret==TRADE_RETCODE_NO_CHANGES ||
           ret==TRADE_RETCODE_ORDER_CHANGED;
   }
