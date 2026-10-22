@@ -66,16 +66,15 @@ The execution checks were reviewed against the official MQL5 reference:
 
 These references make an important distinction: a preflight check does not guarantee that a later server operation will succeed, and the Boolean result from `OrderSend()` is not by itself proof of final execution. The EA therefore must continue checking trade-server return codes and verifying terminal-visible postconditions. These checks reduce known failure modes; they do not guarantee fills, bounded losses, or profitable results.
 
-## CI evidence at checkpoint time
+## CI evidence — refreshed 2026-10-22
 
-For HEAD `9a9fc92c2931cca80406c67ecb631ea363983646`:
-- MQL5 static audit: **passed** — run [39733392895](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392895)
-- Trading safety defaults: **passed** — run [39733393008](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733393008)
-- LRN-04 journal contract tests: **passed** — run [39733392930](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733392930)
-- MetaEditor compile for the then-current source: **passed, 0 errors / 0 warnings** — run [39733518351](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39733518351), commit `569e8ee031cd7c0b7508b4fef00965a4182e1ae8`.
-- The isolated LRN-04 SHA-256 golden-vector script also compiled with **0 errors / 0 warnings** in the same workflow.
+Latest reviewed HEAD: `75ad6055dfed3f323484bd193fb80141d6983a5c`.
+- MQL5 static audit: **passed** — run [39736355470](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736355470)
+- Trading safety defaults: **passed** — run [39736355417](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736355417)
+- LRN-04 journal contract tests: **passed** — run [39736355473](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736355473)
+- MetaEditor compile: **passed** — run [39736355430](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736355430). Both `SmartTradingBot_FINAL.mq5` and the isolated LRN-04 SHA-256 golden-vector script completed successfully. The compile job uploaded the compiler log, EX5, and provenance manifest.
 
-A successful compile is confirmed for commit `569e8ee031cd7c0b7508b4fef00965a4182e1ae8`. A later documentation-only commit does not change MQL5 source. A green compile/static test suite is not a substitute for Strategy Tester behavior, restart/fault injection, or broker-specific validation.
+The latest compile is tied to HEAD `75ad6055dfed3f323484bd193fb80141d6983a5c`; the intervening source change corrected comments in the daily-risk guard and the test changes passed in the same revision. Clean compilation and source-level tests do not establish Strategy Tester correctness, crash recovery, broker compatibility, or profitability.
 
 ## Remaining release blockers and test gaps
 
@@ -108,4 +107,4 @@ At minimum, exercise:
 
 ## Release decision
 
-**BLOCKED / NOT VERIFIED for production use.** Keep the Strategy Tester-only gate. Do not infer profitability or broker compatibility from a clean compile or static tests. The next safe step is to finish the current MetaEditor run, then add controlled non-live tests for the specific lifecycle and broker-edge cases above before considering any deployment change.
+**BLOCKED / NOT VERIFIED for production use.** Keep the Strategy Tester-only gate. Do not infer profitability or broker compatibility from a clean compile or static tests. The latest MetaEditor run is complete and passed. The next safe step is to add controlled non-live tests for the specific lifecycle and broker-edge cases above before considering any deployment change.
