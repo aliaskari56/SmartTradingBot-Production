@@ -9179,6 +9179,22 @@ void STB_ExecuteTopCandidate()
 // MANUAL PENDING COMMANDS
 //==================================================================
 
+// Shared rejection logger for manual chart buttons. This is diagnostic-only:
+// it does not change input values, thresholds, requested price, or volume.
+bool STB_ManualEntryReject(const string command,const string reason)
+  {
+   Print("STB MANUAL BUTTON REJECT command=",command,
+         " reason=",reason,
+         " symbol=",_Symbol,
+         " terminalTradeAllowed=",TerminalInfoInteger(TERMINAL_TRADE_ALLOWED),
+         " programTradeAllowed=",MQLInfoInteger(MQL_TRADE_ALLOWED),
+         " accountExpertAllowed=",AccountInfoInteger(ACCOUNT_TRADE_EXPERT),
+         " accountTradeAllowed=",AccountInfoInteger(ACCOUNT_TRADE_ALLOWED),
+         " auto=",g_autoTrading ? "ON":"OFF",
+         " chartId=",IntegerToString((long)ChartID()));
+   return false;
+  }
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -9187,17 +9203,17 @@ bool PlaceManualPendingDirection(const int direction)
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_01_DAILY_RISK_GUARD");
      }
 
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_02_DIRECTION_OR_TRADE_PERMISSION");
 
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
      {
       Print("STB MANUAL PENDING REJECTED: symbol writer lease not owned symbol=",_Symbol);
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_03_SYMBOL_LEASE");
      }
 
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
@@ -9205,20 +9221,20 @@ bool PlaceManualPendingDirection(const int direction)
       tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
       (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
       (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_04_SYMBOL_TRADE_MODE");
 
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_05_NO_TICK");
 
    double pip=PipSize(_Symbol);
    if(pip<=0.0)
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_06_PIP_SIZE");
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
    if((orderModes&SYMBOL_ORDER_STOP)!=SYMBOL_ORDER_STOP ||
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_07_ORDER_MODE");
 
    int expirationModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_EXPIRATION_MODE);
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
@@ -9229,7 +9245,7 @@ bool PlaceManualPendingDirection(const int direction)
       if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
          typeTime=ORDER_TIME_DAY;
       else
-         return false;
+         return STB_ManualEntryReject(command,"MANUAL_STOP_08_EXPIRATION_MODE");
      }
 
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_STOP
@@ -9238,11 +9254,11 @@ bool PlaceManualPendingDirection(const int direction)
                                       : tick.bid-InpManualPendingGapPips*pip);
    double entry=0.0;
    if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_09_ENTRY_RESOLUTION");
 
    double sl=0.0;
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_10_INITIAL_SL");
 
    // Manual pending entries obey the same equity-risk sizing policy as scanner setups.
    double volume=0.0;
@@ -9261,10 +9277,10 @@ bool PlaceManualPendingDirection(const int direction)
    if(volume<=0.0 || !MathIsValidNumber(volume))
      {
       Print("STB MANUAL PENDING REJECTED: risk volume invalid symbol=",_Symbol);
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_11_RISK_VOLUME");
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_12_VOLUME_LIMIT");
 
    trade.SetExpertMagicNumber(0);
    trade.SetAsyncMode(false);
@@ -9273,7 +9289,7 @@ bool PlaceManualPendingDirection(const int direction)
    double effectiveManualOffset=MathAbs(entry-(direction>0 ? tick.bid:tick.ask))/pip;
    string comment="STB|M|"+(direction>0 ? "BUY":"SELL")+"|EB"+DoubleToString(effectiveManualOffset,8);
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_13_LEASE_LOST_BEFORE_SUBMIT");
    MqlTick manualSubmitTick;
     string manualQuoteReason="";
     if(!SymbolInfoTick(_Symbol,manualSubmitTick) ||
@@ -9281,19 +9297,19 @@ bool PlaceManualPendingDirection(const int direction)
       {
        Print("STB MANUAL PENDING REJECTED: quote invalid/stale symbol=",_Symbol,
              " reason=",(manualQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualQuoteReason));
-       return false;
+       return STB_ManualEntryReject(command,"MANUAL_STOP_14_STALE_OR_INVALID_QUOTE");
       }
     ENUM_ORDER_TYPE manualStopType=(direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
     if(!STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
-       return false;
+       return STB_ManualEntryReject(command,"MANUAL_STOP_15_ORDERCHECK_REJECTED");
 
     bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
    if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_16_BROKER_REQUEST_REJECTED");
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
@@ -9302,7 +9318,7 @@ bool PlaceManualPendingDirection(const int direction)
             _Symbol," order=",IntegerToString((int)ticket));
       if(ticket>0 && OrderSelect(ticket))
          STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"PlaceManual");
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_STOP_17_POST_ACCEPT_SL_VERIFY_ROLLBACK");
      }
 
    // SIMPLIFIED: origin registry call removed.
@@ -9333,17 +9349,17 @@ bool PlaceManualLimitDirection(const int direction)
    if(STB_DailyLossLimitHit())
      {
       Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_01_DAILY_RISK_GUARD");
      }
 
    if((direction!=1 && direction!=-1) ||
       !STB_TradeEnvironmentAllowed())
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_02_DIRECTION_OR_TRADE_PERMISSION");
 
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
      {
       Print("STB MANUAL LIMIT REJECTED: symbol writer lease not owned symbol=",_Symbol);
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_03_SYMBOL_LEASE");
      }
 
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
@@ -9351,20 +9367,20 @@ bool PlaceManualLimitDirection(const int direction)
       tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
       (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
       (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_04_SYMBOL_TRADE_MODE");
 
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_05_NO_TICK");
 
    double pip=PipSize(_Symbol);
    if(pip<=0.0)
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_06_PIP_SIZE");
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
    if((orderModes&SYMBOL_ORDER_LIMIT)!=SYMBOL_ORDER_LIMIT ||
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_07_ORDER_MODE");
 
    int expirationModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_EXPIRATION_MODE);
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
@@ -9375,7 +9391,7 @@ bool PlaceManualLimitDirection(const int direction)
       if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
          typeTime=ORDER_TIME_DAY;
       else
-         return false;
+         return STB_ManualEntryReject(command,"MANUAL_LIMIT_08_EXPIRATION_MODE");
      }
 
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_LIMIT
@@ -9384,11 +9400,11 @@ bool PlaceManualLimitDirection(const int direction)
                                       : tick.ask+InpManualPendingGapPips*pip);
    double entry=0.0;
    if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_09_ENTRY_RESOLUTION");
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_10_INITIAL_SL");
 
    // Manual limit entries obey the same equity-risk sizing policy as scanner setups.
    double volume=0.0;
@@ -9407,10 +9423,10 @@ bool PlaceManualLimitDirection(const int direction)
    if(volume<=0.0 || !MathIsValidNumber(volume))
      {
       Print("STB MANUAL LIMIT REJECTED: risk volume invalid symbol=",_Symbol);
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_11_RISK_VOLUME");
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_12_VOLUME_LIMIT");
 
    trade.SetExpertMagicNumber(0);
    trade.SetAsyncMode(false);
@@ -9420,7 +9436,7 @@ bool PlaceManualLimitDirection(const int direction)
    string comment="STB|M|"+(direction>0 ? "BUY_LIMIT":"SELL_LIMIT")+
                   "|EB"+DoubleToString(effectiveManualOffset,8);
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_13_LEASE_LOST_BEFORE_SUBMIT");
    MqlTick manualLimitSubmitTick;
     string manualLimitQuoteReason="";
     if(!SymbolInfoTick(_Symbol,manualLimitSubmitTick) ||
@@ -9428,19 +9444,19 @@ bool PlaceManualLimitDirection(const int direction)
       {
        Print("STB MANUAL LIMIT REJECTED: quote invalid/stale symbol=",_Symbol,
              " reason=",(manualLimitQuoteReason=="" ? "QUOTE_UNAVAILABLE":manualLimitQuoteReason));
-       return false;
+       return STB_ManualEntryReject(command,"MANUAL_LIMIT_14_STALE_OR_INVALID_QUOTE");
       }
     ENUM_ORDER_TYPE manualLimitType=(direction>0 ? ORDER_TYPE_BUY_LIMIT:ORDER_TYPE_SELL_LIMIT);
     if(!STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
-       return false;
+       return STB_ManualEntryReject(command,"MANUAL_LIMIT_15_ORDERCHECK_REJECTED");
 
     bool ok=(direction>0)
            ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
    if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_16_BROKER_REQUEST_REJECTED");
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
@@ -9449,7 +9465,7 @@ bool PlaceManualLimitDirection(const int direction)
             _Symbol," order=",IntegerToString((int)ticket));
       if(ticket>0 && OrderSelect(ticket))
          STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK,"PlaceManual");
-      return false;
+      return STB_ManualEntryReject(command,"MANUAL_LIMIT_17_POST_ACCEPT_SL_VERIFY_ROLLBACK");
      }
 
    // SIMPLIFIED: origin registry call removed.
@@ -12195,6 +12211,15 @@ void OnChartEvent(const int id,
 
    if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
+
+   // OBJ_BUTTON is a toggle by default. Release it at event entry so these
+   // controls behave as momentary command buttons on repeated clicks.
+   if(ObjectFind(0,sparam)>=0)
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+
+   Print("STB UI BUTTON CLICK object=",sparam,
+         " symbol=",_Symbol,
+         " chartId=",IntegerToString((long)ChartID()));
 
    string buyName=g_prefix+"BUY_STOP";
    string sellName=g_prefix+"SELL_STOP";
