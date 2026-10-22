@@ -368,11 +368,12 @@ def main() -> int:
          and "STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK," in strip_strings(auto_placement)
          and strip_strings(auto_placement).find("VerifyPendingInitialSL(placedOrder)")
          < strip_strings(auto_placement).find("STB_RequestOrderDelete(placedOrder,STB_DEL_AUTO_ROLLBACK,")),
-        ("placement success helper enumerates accepted server retcodes",
+        ("pending placement success helper accepts DONE and PLACED only",
          bool(placement_retcode_code)
          and all(token in placement_retcode_code for token in (
-             "TRADE_RETCODE_DONE", "TRADE_RETCODE_DONE_PARTIAL",
-             "TRADE_RETCODE_PLACED"))),
+             "TRADE_RETCODE_DONE", "TRADE_RETCODE_PLACED"))
+         and "TRADE_RETCODE_DONE_PARTIAL" not in placement_retcode_code
+         and "TRADE_RETCODE_NO_CHANGES" not in placement_retcode_code),
         ("directional symbol permissions are checked before auto placement",
          bool(auto_placement_code)
          and "if(!IsDirectionTradable(s.symbol,s.direction))" in auto_placement_code),
