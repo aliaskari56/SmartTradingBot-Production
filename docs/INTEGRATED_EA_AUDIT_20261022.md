@@ -76,6 +76,22 @@ Latest reviewed HEAD: `75ad6055dfed3f323484bd193fb80141d6983a5c`.
 
 The latest compile is tied to HEAD `75ad6055dfed3f323484bd193fb80141d6983a5c`; the intervening source change corrected comments in the daily-risk guard and the test changes passed in the same revision. Clean compilation and source-level tests do not establish Strategy Tester correctness, crash recovery, broker compatibility, or profitability.
 
+## Follow-up source change — adaptive INOUT reversal lifecycle
+
+After the checkpoint above, commit `ea9da7a4cd22285cd0ca10db86624be338c90bbf` updated the `DEAL_ENTRY_INOUT` branch in `OnTradeTransaction()`. It now clears the old adaptive position state, checks whether an active position remains in the incoming deal direction, and transfers a valid order profile plus risk estimate to the new lifecycle. If the active exposure/profile cannot be confirmed, it logs the condition and retains order state for reconciliation instead of claiming initialization succeeded.
+
+Regression guards were added in commit `93425dad9203179d493b78e58c76cb1a341b0fa7`:
+- The safety-defaults suite checks ordering of old-state deletion and new-state initialization.
+- It checks that the reverse position direction is validated and order state is retained when transfer cannot be confirmed.
+
+CI for the latest HEAD `93425dad9203179d493b78e58c76cb1a341b0fa7`:
+- MetaEditor compile: **passed**, run [39736851164](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736851164); both the EA and isolated SHA-256 golden-vector script reported **0 errors, 0 warnings**. Build artifacts were uploaded.
+- Trading safety defaults: **passed**, run [39736851179](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736851179).
+- MQL5 static audit: **passed**, run [39736851031](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736851031).
+- LRN-04 journal contract tests: **passed**, run [39736851053](https://github.com/aliaskari56/SmartTradingBot-Production/actions/runs/39736851053).
+
+These checks verify compilation and source-level contracts, not the runtime semantics of a netting reversal. In particular, the branch still requires Strategy Tester coverage for broker event ordering, position-identifier behavior, missing order metadata, absent SL, and restart/reconciliation paths.
+
 ## Remaining release blockers and test gaps
 
 ### A. LRN-04 durable journal is not integrated
