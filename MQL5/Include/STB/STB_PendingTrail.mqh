@@ -839,6 +839,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    // 4) Forward the proposal to the central submit gate. A failed broker
    //    write leaves the action bar unconsumed, so a later cycle can retry.
+   int failuresBeforeSubmit=g_stbPendingTrail[idx].failureCount;
    ResetLastError();
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
@@ -846,11 +847,16 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                                  prop.tp,
                                                  manual);
 
-   if(!committed)
+   // The submit gate also returns false for expected no-op/defer paths
+   // (cooldown, step, lease change, or an order that disappeared). Log a
+   // MODIFY_FAILED event only when this attempt actually advanced the
+   // bounded failure counter; otherwise it would be a false broker failure.
+   int writerIdx=STB_PendingTrailFind(ticket);
+   int failuresAfterSubmit=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
+   if(!committed && writerIdx>=0 &&
+      failuresAfterSubmit>failuresBeforeSubmit)
      {
-      int writerIdx=STB_PendingTrailFind(ticket);
-      int failures=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
-      datetime retryAt=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].nextRetryTime:0);
+      datetime retryAt=g_stbPendingTrail[writerIdx].nextRetryTime;
       Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
             " symbol=",symbol,
             " type=",STB_PendingTrailTypeName(orderType),
@@ -859,9 +865,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
             " proposedSL=",DoubleToString(prop.sl,digits),
             " currentEntry=",DoubleToString(currentEntry,digits),
             " currentSL=",DoubleToString(currentSL,digits),
-            " failureCount=",failures,
+            " failureCount=",failuresAfterSubmit,
             " retryAt=",(string)retryAt,
-            " writerOutcome=NOT_CONFIRMED");
+            " writerOutcome=FAILED_ATTEMPT");
      }
 
    if(committed)
