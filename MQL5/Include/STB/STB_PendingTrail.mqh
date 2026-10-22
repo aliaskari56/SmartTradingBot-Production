@@ -20,8 +20,8 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY STOP: closed bearish M5 candle low drives trailing       |
-//|   - SELL STOP: closed bullish M5 candle high drives trailing     |
+//|   - BUY STOP: each closed M5 low is tested as a favorable extreme|
+//|   - SELL STOP: each closed M5 high is tested as a favorable extreme|
 //|   - other pending types retain live Bid/Ask extreme trailing     |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
@@ -110,6 +110,29 @@ int STB_PendingTrailFind(const ulong ticket)
    return -1;
 }
 
+// Distinguish a filled order from cancelled/expired/rejected orders when it
+// disappears from the live order pool. A missing live ticket alone is not proof
+// that the pending order was triggered.
+string STB_PendingTrailMissingOrderReason(const ulong ticket)
+{
+   if(!HistoryOrderSelect(ticket))
+      return "ORDER_HISTORY_UNAVAILABLE";
+
+   ENUM_ORDER_STATE state=
+      (ENUM_ORDER_STATE)HistoryOrderGetInteger(ticket,ORDER_STATE);
+
+   if(state==ORDER_STATE_FILLED)
+      return "ORDER_FILLED";
+   if(state==ORDER_STATE_CANCELED)
+      return "ORDER_CANCELED";
+   if(state==ORDER_STATE_EXPIRED)
+      return "ORDER_EXPIRED";
+   if(state==ORDER_STATE_REJECTED)
+      return "ORDER_REJECTED";
+
+   return "ORDER_STATE_"+EnumToString(state);
+}
+
 void STB_PendingTrailClear()
 {
    ArrayResize(g_stbPendingTrail,0);
@@ -185,11 +208,8 @@ int STB_PendingClassifyResult(const bool ok)
    switch(ret)
    {
       case TRADE_RETCODE_DONE:
+      case TRADE_RETCODE_DONE_PARTIAL:
          return STB_PEND_RES_SUCCESS;
-      // DONE_PARTIAL is a deal/execution result, not proof that an order
-      // modification was fully accepted. The central writer verifies its
-      // own modify retcode and returns false for this code, so keep this
-      // classifier consistent and route it to OTHER_FAILURE below.
       case TRADE_RETCODE_NO_CHANGES:
          return STB_PEND_RES_NO_CHANGE;
       case TRADE_RETCODE_INVALID_STOPS:
@@ -317,20 +337,12 @@ bool STB_PendingTrailRegister(const ulong ticket,const string source)
    //   entry = extreme + offSign*offset  =>  extreme = entry - offSign*offset.
    double inferredExtreme=currentEntry-offSign*entryBufferPips*pip;
 
-   // STOP orders use the latest CLOSED M5 candle as their initial structural
-   // anchor. Subsequent trailing is evaluated once per newly closed M5 bar.
-   if(orderType==(long)ORDER_TYPE_BUY_STOP)
-     {
-      double m5Low=iLow(symbol,PERIOD_M5,1);
-      if(m5Low>0.0)
-         inferredExtreme=m5Low;
-     }
-   else if(orderType==(long)ORDER_TYPE_SELL_STOP)
-     {
-      double m5High=iHigh(symbol,PERIOD_M5,1);
-      if(m5High>0.0)
-         inferredExtreme=m5High;
-     }
+   // Keep the anchor reconstructed from the CURRENT order geometry and its
+   // EB offset. EB is defined against Bid for BUY-side orders and Ask for
+   // SELL-side orders at registration/recovery. Unconditionally replacing this
+   // anchor with a candle extreme combines an unrelated extreme with the EB
+   // offset and can make the first trail proposal jump or fail broker geometry.
+   // Actual STOP trailing still evaluates each NEW closed M5 low/high below.
 
    if(inferredExtreme<=0.0)
       return false;
@@ -525,7 +537,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       // STB Trade Manager owns any resulting position.
       Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
             " symbol=",g_stbPendingTrail[idx].symbol,
-            " reason=ORDER_NOT_ON_TERMINAL");
+            " reason=",STB_PendingTrailMissingOrderReason(ticket));
       g_stbPendingTrail[idx].active=false;
       return false;
    }
@@ -583,7 +595,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // Initial structural protection owns unprotected pending orders. Do not
    // let the trail fallback silently install a generic fixed-distance SL.
    if(OrderGetDouble(ORDER_SL)<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket,
+            " symbol=",g_stbPendingTrail[idx].symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=SL_NOT_INSTALLED");
       return true;
+     }
 
    g_stbPendingTrail[idx].orderType=orderType;
 
@@ -593,61 +611,92 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    double pip=PipSize(symbol);
 
    if(direction==0 || point<=0.0 || pip<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=INVALID_SYMBOL_GEOMETRY",
+            " direction=",direction,
+            " point=",DoubleToString(point,10),
+            " pip=",DoubleToString(pip,10));
       return true;
+     }
 
-   // 1) STOP orders follow the latest CLOSED M5 candle, not live ticks.
-   // BUY STOP moves only after a bearish M5 candle and anchors to its low.
-   // SELL STOP moves only after a bullish M5 candle and anchors to its high.
-   // Other pending types retain their previous live-extreme behavior.
+   // 1) STOP orders use closed M5 structure, never the forming candle.
+   // BUY STOP evaluates each closed candle's low; SELL STOP its high.
+   // Candle body color is deliberately irrelevant: a wick can create the
+   // favorable extreme. Other pending types retain live Bid/Ask behavior.
    double extreme=0.0;
    datetime actionableClosedBar=0;
    if(candleStop)
      {
       datetime closedBar=iTime(symbol,PERIOD_M5,1);
-      if(closedBar<=0 ||
-         closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
+      if(closedBar<=0)
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=M5_CLOSED_BAR_UNAVAILABLE");
+         return true;
+        }
+      if(closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar)
          return true;
 
       double barOpen=iOpen(symbol,PERIOD_M5,1);
       double barClose=iClose(symbol,PERIOD_M5,1);
       double barLow=iLow(symbol,PERIOD_M5,1);
       double barHigh=iHigh(symbol,PERIOD_M5,1);
-      if(barOpen<=0.0 || barClose<=0.0 || barLow<=0.0 || barHigh<=0.0)
+      bool ohlcFinite=(MathIsValidNumber(barOpen) &&
+                       MathIsValidNumber(barClose) &&
+                       MathIsValidNumber(barLow) &&
+                       MathIsValidNumber(barHigh));
+      bool ohlcPositive=(barOpen>0.0 && barClose>0.0 &&
+                         barLow>0.0 && barHigh>0.0);
+      bool ohlcOrdered=(barLow<=barHigh &&
+                        barLow<=MathMin(barOpen,barClose) &&
+                        barHigh>=MathMax(barOpen,barClose));
+      if(!ohlcFinite || !ohlcPositive || !ohlcOrdered)
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=M5_OHLC_INVALID",
+               " finite=",ohlcFinite,
+               " positive=",ohlcPositive,
+               " ordered=",ohlcOrdered,
+               " open=",DoubleToString(barOpen,10),
+               " close=",DoubleToString(barClose,10),
+               " low=",DoubleToString(barLow,10),
+               " high=",DoubleToString(barHigh,10));
          return true;
+        }
 
-      // An actionable bar is committed only after the proposal is resolved
-      // and the server write is confirmed. A rejected proposal stays retryable.
+      // Candle color is not a trailing criterion: a wick can set a valid
+      // favorable extreme on either candle body color. The monotonic extreme
+      // gate below decides whether the closed bar can improve the proposal.
+      // Commit this bar only after a no-change decision or confirmed write;
+      // resolver/writer failures leave it retryable under bounded backoff.
       actionableClosedBar=closedBar;
-
-      if(orderType==(long)ORDER_TYPE_BUY_STOP)
-        {
-         if(barClose>=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            return true; // this candle cannot move BUY STOP down
-           }
-         extreme=barLow;
-        }
-      else
-        {
-         if(barClose<=barOpen)
-           {
-            g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;
-            return true; // this candle cannot move SELL STOP up
-           }
-         extreme=barHigh;
-        }
+      extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);
      }
    else
      {
       MqlTick liveTick;
       if(!SymbolInfoTick(symbol,liveTick))
+        {
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=LIVE_TICK_UNAVAILABLE");
          return true;
+        }
       extreme=(direction>0 ? liveTick.bid:liveTick.ask);
      }
 
    if(extreme<=0.0)
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=EXTREME_INVALID",
+            " extreme=",DoubleToString(extreme,10));
       return true;
+     }
 
    // P4 monotonic trackedExtreme: BUY side only moves down, SELL side only up.
    bool isNewExtreme=false;
@@ -664,6 +713,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(candleStop && actionableClosedBar>0)
          g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
 
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=NO_NEW_EXTREME",
+            " extreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
       STB_PendingTrailLogNoNewExtreme(ticket,symbol,
                                       STB_PendingTrailFind(ticket));
       return true;
@@ -678,7 +732,14 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                  extreme,
                                  g_stbPendingTrail[idx].entryBufferPips,
                                  res,
-                                 g_stbPendingTrail[idx].slBufferPips);
+                                 g_stbPendingTrail[idx].slBufferPips,
+                                 STB_PendingIsStopKind((ENUM_ORDER_TYPE)g_stbPendingTrail[idx].orderType)
+                                 ? OrderGetDouble(ORDER_PRICE_OPEN):0.0);
+
+   // Do not fabricate a synthetic candle extreme merely to push a pending
+   // STOP beyond the current market. If the true candle-derived geometry is
+   // currently invalid, retain the real extreme and retry after bounded
+   // backoff; the resolver will re-evaluate it against the latest quote.
 
    if(!resolved || !res.valid)
    {
@@ -687,19 +748,43 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(bar<=0)
          bar=TimeCurrent();
 
+      bool noFavorableEntry=
+         (res.reason=="BUY_STOP_NO_FAVORABLE_VALID_ENTRY" ||
+          res.reason=="SELL_STOP_NO_FAVORABLE_VALID_ENTRY");
+
       if(g_stbPendingTrail[idx].lastFailLogBar!=bar)
       {
          g_stbPendingTrail[idx].lastFailLogBar=bar;
 
-         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
-               " symbol=",symbol,
-               " type=",STB_PendingTrailTypeName(orderType),
-               " stage=RESOLVE",
-               " reason=",res.reason);
+         if(noFavorableEntry)
+            Print("PENDING_TRAIL_WAIT ticket=",IntegerToString((int)ticket),
+                  " symbol=",symbol,
+                  " type=",STB_PendingTrailTypeName(orderType),
+                  " reason=",res.reason,
+                  " extreme=",DoubleToString(extreme,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+                  " currentEntry=",DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN),
+                                                   (int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+         else
+            Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
+                  " symbol=",symbol,
+                  " type=",STB_PendingTrailTypeName(orderType),
+                  " stage=RESOLVE",
+                  " reason=",res.reason);
       }
 
-      // The action bar is deliberately NOT consumed: broker geometry may
-      // become valid as quotes move. Retry with the same bounded 5/15/60s policy.
+      // A no-favorable-entry condition is transient: retry at a short fixed
+      // interval without treating it as repeated broker failure. Keep the bar
+      // unconsumed so the same structural anchor can be re-evaluated if quotes
+      // move back into a valid, monotonic geometry window.
+      if(noFavorableEntry)
+        {
+         g_stbPendingTrail[idx].nextRetryTime=
+            TimeCurrent()+STB_PEND_BACKOFF_1_SEC;
+         return true;
+        }
+
+      // Other resolver failures retain bounded backoff. Retry with the same bounded 5/15/60s policy.
+      // The actionable M5 bar remains unconsumed so broker geometry can recover.
       g_stbPendingTrail[idx].failureCount++;
       int fc=g_stbPendingTrail[idx].failureCount;
       int backoffSec=(fc<=1 ? STB_PEND_BACKOFF_1_SEC
@@ -730,11 +815,18 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       MathAbs(prop.sl-currentSL)<step)
      {
       g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " reason=STEP_GATE",
+            " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
+            " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
+            " stepPips=",DoubleToString(InpTrailStepPips,2));
       return true;
      }
 
    // 4) Forward the proposal to the central submit gate. A failed broker
    //    write leaves the action bar unconsumed, so a later cycle can retry.
+   ResetLastError();
    bool committed=STB_SubmitPendingTrailGeometry(ticket,
                                                  prop.entry,
                                                  prop.sl,
@@ -742,26 +834,24 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                                  manual);
 
    if(!committed)
-   {
-      // Bounded, per-M15-bar diagnostic: the proposal was valid but the
-      // central writer did not confirm a server-side geometry change.
-      // The writer remains the only broker-facing path.
-      datetime failBar=iTime(symbol,PERIOD_M15,1);
-      if(failBar<=0)
-         failBar=TimeCurrent();
-      if(g_stbPendingTrail[idx].lastFailLogBar!=failBar)
-      {
-         g_stbPendingTrail[idx].lastFailLogBar=failBar;
-         Print("PENDING_TRAIL_MODIFY_FAILED ticket=",IntegerToString((int)ticket),
-               " symbol=",symbol,
-               " type=",STB_PendingTrailTypeName(orderType),
-               " stage=WRITE",
-               " reason=GEOMETRY_CHANGE_NOT_CONFIRMED",
-               " retcode=",IntegerToString((int)trade.ResultRetcode()),
-               " description=",trade.ResultRetcodeDescription(),
-               " lastError=",IntegerToString(GetLastError()));
-      }
-   }
+     {
+      int writerIdx=STB_PendingTrailFind(ticket);
+      int failures=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].failureCount:0);
+      datetime retryAt=(writerIdx>=0 ? g_stbPendingTrail[writerIdx].nextRetryTime:0);
+      Print("PENDING_TRAIL_MODIFY_FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " type=",STB_PendingTrailTypeName(orderType),
+            " stage=SUBMIT",
+            " proposedEntry=",DoubleToString(prop.entry,digits),
+            " proposedSL=",DoubleToString(prop.sl,digits),
+            " currentEntry=",DoubleToString(currentEntry,digits),
+            " currentSL=",DoubleToString(currentSL,digits),
+            " failureCount=",failures,
+            " retryAt=",(string)retryAt,
+            " lastError=",GetLastError(),
+            " tradeRetcode=",(string)trade.ResultRetcode(),
+            " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+     }
 
    if(committed)
    {
