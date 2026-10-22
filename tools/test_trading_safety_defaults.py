@@ -300,6 +300,8 @@ def main() -> int:
          input_default("InpAutoTrading", source_code) == "false"),
         ("bounded equity-risk sizing is enabled by default",
          input_default("InpUseRiskSizing", source_code) == "true"),
+        ("scanner rejects stale quotes after one minute by default",
+         input_default("InpScannerMaxQuoteAgeSec", source_code) == "60"),
         ("daily and adaptive tester state are isolated by a fresh run namespace",
          "bool STB_InitRunNamespace()" in source_code
          and "g_stbRunNamespace" in source_code
