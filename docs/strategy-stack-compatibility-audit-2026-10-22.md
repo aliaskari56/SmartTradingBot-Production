@@ -100,3 +100,33 @@ Do not silently change production defaults based on rejection counts. Use a cont
 `STB_CalcMarketQuality` defines relative spread as `(ask-bid)/M15_ATR * 100`, rejects values above `InpMaxRelativeSpreadPct`, and applies quality-score penalties for spread, volatility, activity, and quote freshness. The summary count `eligible` includes symbols before market-quality checks; the large difference between `eligible` (about 147) and `quality` (about 18–19) means the aggregate summary alone cannot say whether spread, activity, volatility, freshness, or missing data explains that drop. The next diagnostic should collect reason counts for `STB SCANNER REJECT stage=MARKET_QUALITY` and `stage=DATA_ELIGIBILITY` separately rather than loosening thresholds blindly.
 
 MetaQuotes documents that `CopyRates` may initially return fewer bars while data history is still downloading/building, so multi-symbol test repeatability depends on confirming series readiness and using consistent historical data. For the multi-symbol EA, a test on one symbol should not be treated as a complete reproduction of a 302-symbol live scan.
+
+
+## Follow-up from the stage rejection aggregation
+
+The operator's next aggregation (still scoped to chart label `SmartTradingBot_FINAL (XAUUSD+,M5)`, starting at 13:20 server-log time) returned these **event counts**, not unique-symbol counts:
+
+| Rejection stage/reason | Logged events |
+|---|---:|
+| DATA_ELIGIBILITY / REJECT_STALE_DATA | 27,856 |
+| DATA_ELIGIBILITY / REJECT_DATA_UNAVAILABLE | 2,499 |
+| DATA_ELIGIBILITY / REJECT_SESSION | 395 |
+| MARKET_QUALITY / REJECT_RELATIVE_SPREAD | 24,971 |
+| MARKET_QUALITY / REJECT_VOLATILITY | 198 |
+| MARKET_QUALITY / REJECT_ACTIVITY | 196 |
+| MARKET_QUALITY / REJECT_QUALITY_SCORE | 5 |
+| REGIME_FILTER / REJECT_UNSTABLE_REGIME | 248 |
+
+The repeated per-symbol scan loop means these are repeated observations across cycles and must not be read as 27,856 distinct symbols or independent trade opportunities.
+
+### Source-backed interpretations
+
+- `STB_ScannerQuoteValid` rejects a symbol when the timestamp in its latest `MqlTick` exceeds `max(30, InpScannerMaxQuoteAgeSec)`; current configured max quote age is 300 seconds. Official `SymbolInfoTick` documentation describes the returned timestamp as the time of the last price update, so instruments with no new quote for several minutes will naturally fail a freshness gate. This can be prudent, but it also means a broad mixed-symbol universe can repeatedly count dormant instruments.
+- In `STB_ScannerDataEligible`, freshness/quote checks currently occur before `STB_ScannerSessionOpen`. A closed-session instrument whose last quote is old is therefore labelled `REJECT_STALE_DATA` before the code can classify it as `REJECT_SESSION`. Reordering the session check before quote freshness would improve diagnosis without making a stale quote valid or loosening entry gates; it should be tested because broker session metadata can vary by symbol.
+- `STB_CalcMarketQuality` defines `relativeSpread = (ask-bid)/M15_ATR*100` and rejects when the value exceeds the input `InpMaxRelativeSpreadPct=10.0`. The 24,971 event count shows this is the predominant quality-gate reason in this interval. It does **not** prove that 10.0 is an incorrect threshold: symbol classes differ materially in quote frequency, tick size, session schedules and spreads. Do not set the threshold to zero or simply raise it from this count alone.
+- The initialization logs show a 302-symbol universe with mixed instruments. The correct next measurement is the number of unique symbols affected per reason, the most recent timestamp/quote age per symbol, and rejection counts per full scan cycle. These are necessary to separate repeated dormant quotes from a systemic time-basis or feed problem.
+- `REJECT_UNSTABLE_REGIME` is downstream of market quality and represents 248 further events in the same interval. Since only symbols that pass market quality reach this stage, the event count is conditional on earlier gates and should not be compared as if each gate saw the same universe.
+
+### Next audit action
+
+Before changing any trade-selection threshold, collect unique-symbol coverage and compare it against the number of `STB SCANNER SUMMARY` rows in the same time interval. If most stale symbols are consistently outside their published trade sessions, classify sessions first for clearer telemetry. If they are supposed to be active, compare terminal/server clock, latest tick timestamp and current session metadata. Independently report relative spread as a distribution by symbol and asset class rather than loosening the shared cap blindly.
