@@ -8349,6 +8349,15 @@ bool STB_HasDuplicatePendingType(const string symbol,
          (ulong)OrderGetInteger(ORDER_MAGIC)!=magic)
          continue;
 
+      string existingComment=OrderGetString(ORDER_COMMENT);
+      if(magic==0)
+        {
+         if(StringFind(existingComment,"STB|M|")!=0)
+            continue;
+        }
+      else if(StringFind(existingComment,"STB|")!=0)
+         continue;
+
       // An existing same-symbol, same-direction/type pending order with the
       // same owner is treated as a duplicate; do not stack a second request.
       Print("STB DUPLICATE PENDING BLOCK symbol=",symbol,
