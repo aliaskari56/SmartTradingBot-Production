@@ -495,6 +495,13 @@ def main() -> int:
              < trade_transaction_code.index("if(magic!=(long)InpMagic")
          and "if(entryType==DEAL_ENTRY_IN && positionId>0)" in trade_transaction_code
          and "if(isHedge)" in trade_transaction_code),
+        ("closed adaptive lifecycle PnL is reconstructed from broker history after restart",
+         "bool STB_SumClosedLifecyclePnlFromHistory(" in source
+         and "HistorySelectByPosition(positionId)" in source
+         and "entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY" in source
+         and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in trade_transaction_code
+         and trade_transaction_code.index("TakeAccumulatedPositionPnl(positionId)")
+             < trade_transaction_code.index("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
         ("INOUT reversal closes old adaptive state before initializing a distinct active reverse lifecycle",
          bool(trade_transaction)
          and "if(entryType==DEAL_ENTRY_INOUT)" in trade_transaction_code
