@@ -375,6 +375,12 @@ def main() -> int:
          and "double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
          and "double latestStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
          and "MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance" in pending_modify_code),
+        ("pending modification revalidates expiration policy after OrderCheck",
+         bool(pending_modify_code)
+         and "ENUM_ORDER_TYPE_TIME typeTime=" in pending_modify_code
+         and "datetime expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);" in pending_modify_code
+         and "(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME)!=typeTime" in pending_modify_code
+         and "(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION)!=expiration" in pending_modify_code),
         ("pending modification rejects prices outside the tradable tick grid",
          bool(pending_modify_code)
          and "double pendingTickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);" in pending_modify_code
