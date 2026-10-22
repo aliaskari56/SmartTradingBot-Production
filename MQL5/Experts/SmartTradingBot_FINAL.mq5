@@ -7248,11 +7248,13 @@ bool STB_IsPendingEntryBrokerValid(const string symbol,
       case ORDER_TYPE_SELL_STOP_LIMIT:
          return entry<tick.bid-minDist;
 
+      // Limit orders are validated against the opposite quote side:
+      // BUY_LIMIT must be below Ask; SELL_LIMIT must be above Bid.
       case ORDER_TYPE_BUY_LIMIT:
-         return entry<tick.bid-minDist;
+         return entry<tick.ask-minDist;
 
       case ORDER_TYPE_SELL_LIMIT:
-         return entry>tick.ask+minDist;
+         return entry>tick.bid+minDist;
 
       default:
          return false;
