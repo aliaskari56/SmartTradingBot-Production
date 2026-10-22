@@ -560,9 +560,20 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return false;
    }
 
-   // After lifecycle/ownership checks, honor per-ticket backoff before
-   // rebuilding an actionable-bar proposal.
+   // Only the terminal-wide symbol lease owner may evaluate/submit this
+   // ticket. Other chart instances must defer silently rather than generate
+   // a false SUBMIT failure for a writer request they are not authorized to make.
+   string managedSymbol=OrderGetString(ORDER_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(managedSymbol))
+      return true;
+
+   // Honor retry backoff and the successful-write cooldown before rebuilding
+   // an actionable-bar proposal. These are normal no-op states, not failures.
    if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())
+      return true;
+   if(g_stbPendingTrail[idx].lastModifyTime>0 &&
+      TimeCurrent()<g_stbPendingTrail[idx].lastModifyTime+
+                   STB_PEND_TRAIL_COOLDOWN_SEC)
       return true;
 
    long orderType=OrderGetInteger(ORDER_TYPE);
@@ -804,22 +815,25 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
 
    int digits=(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS);
 
-   // Match the central step gate before submitting, so an insignificant
-   // proposal consumes its candle instead of being recalculated each tick.
+   // Apply the step gate before calling the submit wrapper for every
+   // pending type. A step/cooldown no-op is not a failed broker modification.
    double currentEntry=OrderGetDouble(ORDER_PRICE_OPEN);
    double currentSL=OrderGetDouble(ORDER_SL);
    double step=MathMax(0.0,InpTrailStepPips)*pip;
-   if(candleStop && step>0.0 &&
+   if(step>0.0 &&
       MathAbs(prop.entry-currentEntry)<step &&
       MathAbs(prop.sl-currentSL)<step)
      {
-      g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
-      Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
-            " type=",STB_PendingTrailTypeName(orderType),
-            " reason=STEP_GATE",
-            " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
-            " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
-            " stepPips=",DoubleToString(InpTrailStepPips,2));
+      if(candleStop && actionableClosedBar>0)
+        {
+         g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+         Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
+               " type=",STB_PendingTrailTypeName(orderType),
+               " reason=STEP_GATE",
+               " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
+               " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
+               " stepPips=",DoubleToString(InpTrailStepPips,2));
+        }
       return true;
      }
 
@@ -847,9 +861,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
             " currentSL=",DoubleToString(currentSL,digits),
             " failureCount=",failures,
             " retryAt=",(string)retryAt,
-            " lastError=",GetLastError(),
-            " tradeRetcode=",(string)trade.ResultRetcode(),
-            " tradeRetcodeDescription=",trade.ResultRetcodeDescription());
+            " writerOutcome=NOT_CONFIRMED");
      }
 
    if(committed)
