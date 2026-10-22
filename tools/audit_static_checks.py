@@ -240,8 +240,10 @@ def main() -> int:
         ("pending STOP prices are directionally tick-aligned and monotonicity checks final entry",
          bool(resolver_source) and all(token in resolver_source for token in (
              "double STB_TickAlignPriceDirectional(",
+             "double tickSize=(bl.tickSize>0.0 ? bl.tickSize:bl.point)",
              "MathCeil(units-1e-10)",
              "MathFloor(units+1e-10)",
+             "r.slBuffer=MathAbs(entry-sl)",
              "STB_TickAlignPriceDirectional(symbol,rawEntry,entryRoundUp)",
              "STB_TickAlignPriceDirectional(symbol,rawSL,isSell)",
              "double rawSL=(isBuy ? entry-slBufferPips*pip",

@@ -93,13 +93,18 @@ double STB_TickAlignPriceDirectional(const string symbol,
       return 0.0;
 
    STBBrokerLimits bl;
-   if(!STB_ReadBrokerLimits(symbol,bl) || bl.tickSize<=0.0)
+   if(!STB_ReadBrokerLimits(symbol,bl))
       return NormalizePrice(symbol,price);
 
-   double units=price/bl.tickSize;
+   // Prefer exchange tick size; fall back to point if the symbol omits it.
+   double tickSize=(bl.tickSize>0.0 ? bl.tickSize:bl.point);
+   if(tickSize<=0.0)
+      return NormalizePrice(symbol,price);
+
+   double units=price/tickSize;
    double alignedUnits=(roundUp ? MathCeil(units-1e-10)
                                 : MathFloor(units+1e-10));
-   return NormalizePrice(symbol,alignedUnits*bl.tickSize);
+   return NormalizePrice(symbol,alignedUnits*tickSize);
 }
 
 //--- Pending classification (single source of truth) ---------------
@@ -394,7 +399,7 @@ bool STB_ResolvePendingDistance(const string symbol,
    r.entry=entry;
    r.sl=sl;
    r.entryOffset=effectiveOffset;
-   r.slBuffer=slBufferPips*pip;
+   r.slBuffer=MathAbs(entry-sl); // Actual aligned SL distance, in price units.
    r.brokerMinDistance=bl.minDistance;
    r.valid=true;
    r.reason="OK";
