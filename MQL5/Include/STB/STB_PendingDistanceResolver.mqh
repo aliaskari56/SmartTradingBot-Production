@@ -139,7 +139,8 @@ bool STB_ResolvePendingDistance(const string symbol,
                                 const double extreme,
                                 const double configuredBaseDistance,
                                 STBPendingResolution &r,
-                                const double configuredSLBufferPips=-1.0)
+                                const double configuredSLBufferPips=-1.0,
+                                const double currentEntry=0.0)
 {
    ZeroMemory(r);
    r.valid=false;
@@ -200,18 +201,72 @@ bool STB_ResolvePendingDistance(const string symbol,
       return false;
    }
 
-   // Broker validity floor for the entry offset. The configured buffer is a
-   // preference; the broker minimum distance is the hard validity floor. For
-   // STOP-kind geometry the pending entry must also clear the current spread
-   // relative to the near-side market price.
-   double spread=MathMax(0.0,tick.ask-tick.bid);
-   double minOffset=(isStop ? (spread+bl.minDistance+bl.point)
-                            : (bl.minDistance+bl.point));
+   // Broker validity floor for the entry offset. STOP trails can be anchored
+   // to a CLOSED M5 extreme, which may be well behind the current quote.
+   // Therefore calculate the minimum offset from the ACTUAL anchor to the
+   // current legal trigger boundary, not merely from the spread.
+   double priceStep=MathMax(bl.point,
+                            bl.tickSize>0.0 ? bl.tickSize:bl.point);
+   double minOffset=bl.minDistance+priceStep;
+
+   if(orderType==ORDER_TYPE_BUY_STOP ||
+      orderType==ORDER_TYPE_BUY_STOP_LIMIT)
+     {
+      double minimumBuyEntry=tick.ask+bl.minDistance+priceStep;
+      minOffset=MathMax(minOffset,minimumBuyEntry-extreme);
+     }
+   else if(orderType==ORDER_TYPE_SELL_STOP ||
+           orderType==ORDER_TYPE_SELL_STOP_LIMIT)
+     {
+      double maximumSellEntry=tick.bid-bl.minDistance-priceStep;
+      minOffset=MathMax(minOffset,extreme-maximumSellEntry);
+     }
+
+   minOffset=MathMax(0.0,minOffset);
    double effectiveOffset=MathMax(entryOffsetPips*pip,minOffset);
 
    // The entry keeps a fixed offset from the tracked anchor extreme; the offset
    // sign encodes stop (breakout) vs limit (pullback) geometry per side.
    double rawEntry=extreme+offSign*effectiveOffset;
+
+   // Enforce the broker-valid boundary after applying the anchor offset. If a
+   // STOP order would have to move in the wrong direction to become valid,
+   // defer it rather than submitting an invalid or non-improving proposal.
+   double entryTolerance=MathMax(bl.point*0.5,
+                                 bl.tickSize>0.0 ? bl.tickSize*0.5:bl.point*0.5);
+
+   if(orderType==ORDER_TYPE_BUY_STOP ||
+      orderType==ORDER_TYPE_BUY_STOP_LIMIT)
+     {
+      double minimumBuyEntry=tick.ask+bl.minDistance+priceStep;
+      if(rawEntry<minimumBuyEntry)
+        {
+         rawEntry=minimumBuyEntry;
+         effectiveOffset=rawEntry-extreme;
+        }
+
+      if(currentEntry>0.0 && rawEntry>=currentEntry-entryTolerance)
+        {
+         r.reason="BUY_STOP_NO_FAVORABLE_VALID_ENTRY";
+         return false;
+        }
+     }
+   else if(orderType==ORDER_TYPE_SELL_STOP ||
+           orderType==ORDER_TYPE_SELL_STOP_LIMIT)
+     {
+      double maximumSellEntry=tick.bid-bl.minDistance-priceStep;
+      if(rawEntry>maximumSellEntry)
+        {
+         rawEntry=maximumSellEntry;
+         effectiveOffset=extreme-rawEntry;
+        }
+
+      if(currentEntry>0.0 && rawEntry<=currentEntry+entryTolerance)
+        {
+         r.reason="SELL_STOP_NO_FAVORABLE_VALID_ENTRY";
+         return false;
+        }
+     }
 
    // Pending SL distance is measured from the pending Entry itself and the SL
    // sits on the risk side of the order direction (BUY below, SELL above).

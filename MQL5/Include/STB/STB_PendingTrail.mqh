@@ -110,6 +110,29 @@ int STB_PendingTrailFind(const ulong ticket)
    return -1;
 }
 
+// Distinguish a filled order from cancelled/expired/rejected orders when it
+// disappears from the live order pool. A missing live ticket alone is not proof
+// that the pending order was triggered.
+string STB_PendingTrailMissingOrderReason(const ulong ticket)
+{
+   if(!HistoryOrderSelect(ticket))
+      return "ORDER_HISTORY_UNAVAILABLE";
+
+   ENUM_ORDER_STATE state=
+      (ENUM_ORDER_STATE)HistoryOrderGetInteger(ticket,ORDER_STATE);
+
+   if(state==ORDER_STATE_FILLED)
+      return "ORDER_FILLED";
+   if(state==ORDER_STATE_CANCELED)
+      return "ORDER_CANCELED";
+   if(state==ORDER_STATE_EXPIRED)
+      return "ORDER_EXPIRED";
+   if(state==ORDER_STATE_REJECTED)
+      return "ORDER_REJECTED";
+
+   return "ORDER_STATE_"+EnumToString(state);
+}
+
 void STB_PendingTrailClear()
 {
    ArrayResize(g_stbPendingTrail,0);
@@ -522,7 +545,7 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       // STB Trade Manager owns any resulting position.
       Print("PENDING_TRAIL_STOPPED ticket=",IntegerToString((int)ticket),
             " symbol=",g_stbPendingTrail[idx].symbol,
-            " reason=ORDER_NOT_ON_TERMINAL");
+            " reason=",STB_PendingTrailMissingOrderReason(ticket));
       g_stbPendingTrail[idx].active=false;
       return false;
    }
@@ -717,7 +740,8 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
                                  extreme,
                                  g_stbPendingTrail[idx].entryBufferPips,
                                  res,
-                                 g_stbPendingTrail[idx].slBufferPips);
+                                 g_stbPendingTrail[idx].slBufferPips,
+                                 candleStop ? OrderGetDouble(ORDER_PRICE_OPEN):0.0);
 
    // Do not fabricate a synthetic candle extreme merely to push a pending
    // STOP beyond the current market. If the true candle-derived geometry is
