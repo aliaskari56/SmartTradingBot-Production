@@ -183,3 +183,26 @@ A standalone script was added at `MQL5/Scripts/STB_ScannerUniverseDiagnostics.mq
 - submits no orders and does not change or attach the EA.
 
 This script is new and has **not been compiled or executed on the user's terminal yet**. Its role is observability only. The next step is to compile it locally, run it once from MT5 Navigator on any chart, and inspect the generated CSV. Check the `session_open`, `quote_age_seconds`, `m15_bars`, `h4_bars`, and `relative_spread_pct` fields together before assigning blame to a particular gate.
+
+
+## First execution of the read-only terminal diagnostic script
+
+The user ran `STB_ScannerUniverseDiagnostics` on 2026-10-22 around 14:16 terminal time. It compiled successfully with 0 errors and 0 warnings. The CSV read by PowerShell contained 302 symbols with these mutually exclusive diagnostic classifications:
+
+| Result | Symbol count |
+|---|---:|
+| `RELATIVE_SPREAD_OVER_CAP` | 127 |
+| `OUTSIDE_TRADE_SESSION` | 120 |
+| `STALE_OR_INVALID_QUOTE` | 26 |
+| `H4_HISTORY_SHORT` | 10 |
+| `OK` | 17 |
+| `M15_AND_H4_HISTORY_SHORT` | 1 |
+| `NO_TICK` | 1 |
+
+This totals 302 diagnostic rows. These are classifications produced by the stand-alone script in that one run, not the EA's multi-cycle counts. The 120 symbols reported out of session should not be “fixed” by loosening the gate; they should simply be omitted until the broker says their trading session is open. The 26 stale/invalid quote symbols need their row-level age, session and validity fields reviewed. Ten symbols have too little H4 history for the diagnostic's current 180-bar threshold, one lacks both M15 and H4 history, and one has no tick.
+
+Examples of relative spread among session-open symbols include AUDCAD+ 46.875%, AUDCHF+ 43.030%, AUDJPY+ 22.675%, AUDNZD+ 38.132%, AUDUSD+ 46.512%, CADCHF+ 61.823%, EURAUD+ 34.882%, and EURCAD+ 31.818% of M15 ATR. These are the exact values from the diagnostic CSV; current source hard-rejects relative spread above `InpMaxRelativeSpreadPct=10.0`. The metric is `(ask-bid)/ATR*100`, so these values mean transaction spread is a substantial fraction of the recent M15 average true range. They do not automatically prove an implementation bug: they could reflect unusually quiet/low ATR bars, broad broker spreads, instrument-specific pricing, or a calculation/unit issue, all of which need to be distinguished. In the stand-alone script, the ATR function intentionally matches the EA's `LocalATR` algorithm (simple mean of 14 true ranges), which reduces one source of calculation mismatch.
+
+The diagnostic script's first 25 rejected rows show session-open FX pairs and equities/crypto with materially different spreads and volatility; that reinforces that the single symbol universe is heterogeneous. Do not globally raise the cap or disable it to increase scanner counts. The next useful extraction is a compact distribution of `relative_spread_pct` for all 127 rejected symbols and all 17 `OK` symbols, with actual spread price, points, ATR, and a comparison grouped by instrument class where recognizable. A controlled offline Strategy Tester comparison must then measure net results after spread/commission and use separate out-of-sample data before any parameter can be described as preferable.
+
+Current conclusion: the diagnostic and EA are not yet proven mismatched on the ATR formula. The evidence supports three independent classes of skips—outside-session symbols, stale/missing history/quotes, and a hard relative-spread cap—plus the earlier observed H4 hard gate. No live trading thresholds have been changed based on this one snapshot.
