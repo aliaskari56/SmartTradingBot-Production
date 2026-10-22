@@ -9310,7 +9310,10 @@ bool PlaceManualPendingDirection(const int direction)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
    if(!ok || !TradeRetcodePlacementSucceeded())
-      return STB_ManualEntryReject(command,"MANUAL_STOP_16_BROKER_REQUEST_REJECTED");
+      return STB_ManualEntryReject(command,
+           "MANUAL_STOP_16_BROKER_REQUEST_REJECTED retcode="+IntegerToString((int)trade.ResultRetcode())+
+           " description="+trade.ResultRetcodeDescription()+
+           " comment="+trade.ResultComment());
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
@@ -9458,7 +9461,10 @@ bool PlaceManualLimitDirection(const int direction)
            : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
    if(!ok || !TradeRetcodePlacementSucceeded())
-      return STB_ManualEntryReject(command,"MANUAL_LIMIT_16_BROKER_REQUEST_REJECTED");
+      return STB_ManualEntryReject(command,
+           "MANUAL_LIMIT_16_BROKER_REQUEST_REJECTED retcode="+IntegerToString((int)trade.ResultRetcode())+
+           " description="+trade.ResultRetcodeDescription()+
+           " comment="+trade.ResultComment());
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
