@@ -9311,40 +9311,68 @@ int g_scannerTop10Count=0;
 //+------------------------------------------------------------------+
 bool STB_ScannerSessionOpen(const string symbol)
   {
+   datetime serverNow=TimeTradeServer();
+   if(serverNow<=0)
+      serverNow=TimeCurrent();
+   if(serverNow<=0)
+      return false;
+
    MqlDateTime dt;
-   TimeToStruct(TimeTradeServer(),dt);
+   if(!TimeToStruct(serverNow,dt))
+      return false;
 
    int nowSec=dt.hour*3600+dt.min*60+dt.sec;
 
-   for(uint session=0;session<32;session++)
+   // Check today's sessions and the previous weekday's overnight sessions.
+   // A session such as 22:00-02:00 belongs to its start day, so checking
+   // only today's weekday incorrectly rejects the 00:00-02:00 segment.
+   for(int dayOffset=0;dayOffset<=1;dayOffset++)
      {
-      datetime from=0;
-      datetime to=0;
+      int sessionDay=(dt.day_of_week-dayOffset+7)%7;
 
-      if(!SymbolInfoSessionTrade(symbol,
-                                 (ENUM_DAY_OF_WEEK)dt.day_of_week,
-                                 session,
-                                 from,to))
-         break;
-
-      MqlDateTime fd,td;
-      TimeToStruct(from,fd);
-      TimeToStruct(to,td);
-
-      int fromSec=fd.hour*3600+fd.min*60+fd.sec;
-      int toSec=td.hour*3600+td.min*60+td.sec;
-
-      if(fromSec==toSec)
-         return true;
-
-      if(fromSec<toSec)
+      for(uint session=0;session<32;session++)
         {
-         if(nowSec>=fromSec && nowSec<=toSec)
-            return true;
+         datetime from=0;
+         datetime to=0;
+
+         if(!SymbolInfoSessionTrade(symbol,
+                                    (ENUM_DAY_OF_WEEK)sessionDay,
+                                    session,
+                                    from,to))
+            break;
+
+         MqlDateTime fd,td;
+         if(!TimeToStruct(from,fd) || !TimeToStruct(to,td))
+            continue;
+
+         int fromSec=fd.hour*3600+fd.min*60+fd.sec;
+         int toSec=td.hour*3600+td.min*60+td.sec;
+
+         if(fromSec==toSec)
+           {
+            // Equal endpoints represent a full-day session only for the
+            // weekday on which that session is declared.
+            if(dayOffset==0)
+               return true;
+            continue;
+           }
+
+         if(fromSec<toSec)
+           {
+            if(dayOffset==0 && nowSec>=fromSec && nowSec<=toSec)
+               return true;
+           }
+         else
+           {
+            // Before midnight: today's overnight session.
+            if(dayOffset==0 && nowSec>=fromSec)
+               return true;
+
+            // After midnight: previous weekday's overnight session.
+            if(dayOffset==1 && nowSec<=toSec)
+               return true;
+           }
         }
-      else
-         if(nowSec>=fromSec || nowSec<=toSec)
-            return true;
      }
 
    return false;
