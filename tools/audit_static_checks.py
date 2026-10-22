@@ -155,6 +155,8 @@ def main() -> int:
         source, "bool STB_ScannerQuoteValid(", "bool STB_ScannerDataEligible(")
     scanner_data = source_region(
         source, "bool STB_ScannerDataEligible(", "bool STB_ScannerDirectionAllowed(")
+    scanner_session = source_region(
+        source, "bool STB_ScannerSessionOpen(", "// Reject invalid market quotes")
     market_quality = source_region(
         source, "bool STB_CalcMarketQuality(", "bool STB_EvaluateRegime(")
     scanner_run = source_region(
@@ -202,6 +204,15 @@ def main() -> int:
     checks: list[tuple[str, bool]] = [
         ("live automatic trading remains opt-in by default",
          "input bool    InpAutoTrading            = false;" in source),
+        ("scanner session gate falls back to a valid clock and includes previous-weekday overnight sessions",
+         bool(scanner_session) and
+         "datetime serverNow=TimeTradeServer();" in scanner_session and
+         "serverNow=TimeCurrent();" in scanner_session and
+         "if(serverNow<=0)" in scanner_session and
+         "for(int dayOffset=0;dayOffset<=1;dayOffset++)" in scanner_session and
+         "(dt.day_of_week-dayOffset+7)%7" in scanner_session and
+         "dayOffset==1 && nowSec<=toSec" in scanner_session and
+         "if(!TimeToStruct(from,fd) || !TimeToStruct(to,td))" in scanner_session),
         ("risk-based sizing remains opt-in by default",
          "input bool    InpUseRiskSizing         = false;" in source),
         ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
