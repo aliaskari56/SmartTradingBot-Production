@@ -2108,28 +2108,44 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const double newEntry,
                                     const double newSL,
                                     const double newTP,
+                                    string &failureReason,
                                     const bool isUserAction=false)
   {
+   failureReason="UNCLASSIFIED_WRITER_FAILURE";
    if(ticket==0 || !OrderSelect(ticket))
-      return false;
-
-   string symbol=OrderGetString(ORDER_SYMBOL); if(!IsManagedOrder(ticket)) return false; // P1 writer safety barrier
-   if(STB_ExposureEnsure(ticket,false)<0)
      {
-      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
-            " reason=EXPOSURE_REGISTRY_ALLOCATION_FAILED");
+      failureReason="INVALID_TICKET_OR_ORDER_MISSING";
       return false;
      }
-   if(!STB_SymbolManagementOwnedVerified(symbol)) return false; // P6/P10 cross-instance single pending writer
+
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   if(!IsManagedOrder(ticket))
+     {
+      failureReason="ORDER_NOT_MANAGED";
+      return false;
+     } // P1 writer safety barrier
+   if(STB_ExposureEnsure(ticket,false)<0)
+     {
+      failureReason="EXPOSURE_REGISTRY_ALLOCATION_FAILED";
+      Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
+            " reason=",failureReason);
+      return false;
+     }
+   if(!STB_SymbolManagementOwnedVerified(symbol))
+     {
+      failureReason="SYMBOL_WRITER_OWNERSHIP_NOT_VERIFIED";
+      return false;
+     } // P6/P10 cross-instance single pending writer
 
    MqlTick pendingWriteTick;
    string pendingQuoteReason="";
    if(!SymbolInfoTick(symbol,pendingWriteTick) ||
       !STB_ScannerQuoteValid(pendingWriteTick,pendingQuoteReason))
      {
+      failureReason=(pendingQuoteReason=="" ? "QUOTE_UNAVAILABLE":pendingQuoteReason);
       Print("STB PENDING MODIFY DEFERRED ticket=",ticket,
             " symbol=",symbol,
-            " reason=",(pendingQuoteReason=="" ? "QUOTE_UNAVAILABLE":pendingQuoteReason));
+            " reason=",failureReason);
       return false;
      }
 
@@ -2144,17 +2160,29 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
    if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+     {
+      failureReason="SL_INVALID_FOR_PENDING_ORDER";
       return false;
+     }
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
+     {
+      failureReason="ENTRY_DIRECTION_POLICY_REJECTED";
       return false;
+     }
 
    if(!STB_PendingRiskFloorOK(stbOt,stbCurEntry,stbCurSL,newEntry,newSL))
+     {
+      failureReason="RISK_EXPANSION_FLOOR_REJECTED";
       return false;
+     }
 
 
    if(newEntry<=0.0)
+     {
+      failureReason="ENTRY_PRICE_NONPOSITIVE";
       return false;
+     }
 
    ENUM_ORDER_TYPE_TIME typeTime=
       (ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
@@ -2168,7 +2196,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       stbOt==ORDER_TYPE_SELL_STOP_LIMIT)
      {
       if(stbCurEntry<=0.0 || stopLimit<=0.0)
+        {
+         failureReason="STOP_LIMIT_ORIGINAL_GEOMETRY_INVALID";
          return false;
+        }
 
       double stopLimitOffset=stopLimit-stbCurEntry;
       stopLimit=NormalizePrice(symbol,newEntry+stopLimitOffset);
@@ -2179,6 +2210,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
       if(!offsetValid)
         {
+         failureReason="STOP_LIMIT_OFFSET_INVALID";
          Print("STB STOP-LIMIT MODIFY REJECT ticket=",ticket,
                " symbol=",symbol,
                " oldEntry=",DoubleToString(stbCurEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
@@ -2192,7 +2224,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // prevents ManagePendingOrders' initial-SL repair and the trailing engine
    // from both modifying the same pending ticket in one cycle.
    if(STB_CycleWriteAlreadyDone(ticket))
+     {
+      failureReason="CYCLE_WRITE_BUDGET_ALREADY_USED";
       return false;
+     }
 
    MqlTradeRequest req={};
    MqlTradeCheckResult check={};
@@ -2210,11 +2245,18 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    ResetLastError();
 
    if(!OrderCheck(req,check))
+     {
+      failureReason="ORDERCHECK_CALL_FAILED";
+      Print("STB PENDING MODIFY ORDERCHECK CALL FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " lastError=",GetLastError());
       return false;
+     }
 
    // OrderCheck success is retcode=0 in this terminal/broker path.
    if(check.retcode!=0)
      {
+      failureReason="ORDERCHECK_REJECTED";
       Print("STB PENDING MODIFY ORDERCHECK REJECT ticket=",ticket,
             " symbol=",symbol,
             " ret=",IntegerToString((int)check.retcode),
@@ -2225,10 +2267,16 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    // OrderCheck can take time. Re-read the ticket and verify that both the
    // symbol-writer lease and the geometry snapshot are still ours to modify.
    if(!OrderSelect(ticket) || !IsManagedOrder(ticket))
+     {
+      failureReason="ORDER_CHANGED_OR_REMOVED_DURING_ORDERCHECK";
       return false;
+     }
    if(OrderGetString(ORDER_SYMBOL)!=symbol ||
       OrderGetInteger(ORDER_TYPE)!=stbOt)
+     {
+      failureReason="ORDER_SYMBOL_OR_TYPE_CHANGED_DURING_ORDERCHECK";
       return false;
+     }
    // Do not re-enable a manual-override pause after OrderCheck: every
    // managed pending order remains eligible for automatic protection/trailing.
    double latestEntry=OrderGetDouble(ORDER_PRICE_OPEN);
@@ -2241,13 +2289,19 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(MathAbs(latestEntry-stbCurEntry)>latestTolerance ||
       MathAbs(latestSL-stbCurSL)>latestTolerance ||
       MathAbs(latestTP-stbCurTP)>latestTolerance)
+     {
+      failureReason="ORDER_GEOMETRY_CHANGED_DURING_ORDERCHECK";
       return false;
+     }
 
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
       !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
+     {
+      failureReason="FINAL_PRE_SUBMIT_VALIDATION_REJECTED";
       return false;
+     }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -2261,16 +2315,29 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    if(!trade.OrderModify(ticket,newEntry,newSL,newTP,
                          typeTime,expiration,stopLimit))
      {
+      failureReason="BROKER_ORDERMODIFY_RETURNED_FALSE";
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
                        OrderGetDouble(ORDER_SL),
                        OrderGetDouble(ORDER_TP));
+      Print("STB PENDING MODIFY BROKER CALL FAILED ticket=",ticket,
+            " symbol=",symbol,
+            " lastError=",GetLastError(),
+            " retcode=",trade.ResultRetcode(),
+            " retcodeDescription=",trade.ResultRetcodeDescription(),
+            " comment=",trade.ResultComment());
       return false;
      }
 
    if(!TradeRetcodeModifySucceeded())
      {
+      failureReason="BROKER_RETCODE_NOT_SUCCESS";
+      Print("STB PENDING MODIFY BROKER REJECTED ticket=",ticket,
+            " symbol=",symbol,
+            " retcode=",trade.ResultRetcode(),
+            " retcodeDescription=",trade.ResultRetcodeDescription(),
+            " comment=",trade.ResultComment());
       if(OrderSelect(ticket))
          STB_GeomStore(ticket,false,
                        OrderGetDouble(ORDER_PRICE_OPEN),
@@ -2280,7 +2347,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
      }
 
    if(!OrderSelect(ticket))
+     {
+      failureReason="ORDER_NOT_SELECTABLE_AFTER_MODIFY";
       return false;
+     }
 
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
    double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
@@ -2305,6 +2375,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       // Stop-limit tickets also verify the child limit price, not just the
       // trigger Entry/SL/TP. A broker-side mismatch is not a committed trail.
       STB_GeomStore(ticket,false,ve,vs,vt);
+      failureReason="POST_MODIFY_GEOMETRY_VERIFICATION_FAILED";
       Print("STB PENDING MODIFY POSTCHECK FAILED ticket=",ticket,
             " symbol=",symbol,
             " expectedType=",EnumToString((ENUM_ORDER_TYPE)stbOt),
@@ -2318,6 +2389,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
    STB_GeomStore(ticket,false,ve,vs,vt); // MANUAL_OVERRIDE: verified own write only
    STB_CycleMarkWritten(ticket); // one pending geometry write per cycle
+   failureReason="VERIFIED_SUCCESS";
    return true;
   }
 
@@ -7391,10 +7463,12 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
       return false;
      }
 
+   string writerFailureReason="";
    if(!STB_ModifyPendingOrderGeometry(ticket,
                                       entry,
                                       candidate,
-                                      OrderGetDouble(ORDER_TP)) ||
+                                      OrderGetDouble(ORDER_TP),
+                                      writerFailureReason) ||
       !VerifyPendingInitialSL(ticket))
      {
       STB_RecordPendingInitialSLFailure(stateIdx);
@@ -7905,7 +7979,8 @@ bool EnsureInitialTPForPendingOrder(const ulong ticket)
       return false;
      }
 
-   if(!STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,false))
+   string writerFailureReason="";
+   if(!STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,writerFailureReason,false))
      {
       if(!STB_CycleWriteAlreadyDone(ticket))
          GlobalVariableSet(retryKey,(double)TimeCurrent());
