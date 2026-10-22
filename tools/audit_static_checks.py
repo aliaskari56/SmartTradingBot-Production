@@ -141,6 +141,9 @@ def main() -> int:
         return 2
     source = path.read_text(encoding="utf-8")
     trail_path = pathlib.Path("MQL5/Include/STB/STB_PendingTrail.mqh")
+    resolver_path = pathlib.Path("MQL5/Include/STB/STB_PendingDistanceResolver.mqh")
+    resolver_source = (resolver_path.read_text(encoding="utf-8")
+                       if resolver_path.is_file() else "")
     trail_source = (trail_path.read_text(encoding="utf-8")
                     if trail_path.is_file() else "")
     on_init = source_region(source, "int OnInit()", "// DEINIT")
@@ -217,6 +220,18 @@ def main() -> int:
          "closedBar==g_stbPendingTrail[idx].lastProcessedM5Bar" in trail_source and
          "double barOpen=iOpen(symbol,PERIOD_M5,1);" in trail_source and
          "g_stbPendingTrail[idx].lastProcessedM5Bar=closedBar;" in trail_source),
+        ("pending-distance resolver covers all six pending types and validates broker geometry before returning valid",
+         bool(resolver_source) and
+         all(token in resolver_source for token in (
+             "ORDER_TYPE_BUY_STOP", "ORDER_TYPE_SELL_STOP",
+             "ORDER_TYPE_BUY_LIMIT", "ORDER_TYPE_SELL_LIMIT",
+             "ORDER_TYPE_BUY_STOP_LIMIT", "ORDER_TYPE_SELL_STOP_LIMIT",
+             "STB_TickAlignPrice(symbol,rawEntry)",
+             "STB_TickAlignPrice(symbol,rawSL)",
+             "BUY_ENTRY_INSIDE_BROKER_ZONE", "SELL_ENTRY_INSIDE_BROKER_ZONE",
+             "BUY_SL_INSIDE_BROKER_ZONE", "SELL_SL_INSIDE_BROKER_ZONE",
+             "r.valid=true;", "r.reason=\"OK\";")) and
+         "STB_ResolvePendingDistance(" in trail_source),
         ("pending trail does not classify partial execution as successful modification",
          "int STB_PendingClassifyResult(const bool ok)" in trail_source and
          "case TRADE_RETCODE_DONE_PARTIAL:" not in source_region(
