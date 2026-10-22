@@ -534,7 +534,8 @@ def main() -> int:
          bool(hedge_placement_code)
          and "trade.BuyStop(" in hedge_placement_code
          and "trade.SellStop(" in hedge_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
+         and "STB_ReconcilePendingSubmit(symbol,hedgeOrderType" in hedge_placement_code
+         and "STB_MarkPendingSubmitUnknown(symbol,(ulong)InpMagic,hedgeOrderType" in hedge_placement_code
          and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
          and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK," in hedge_placement_code),
         ("hedge rechecks directional volume after fresh-quote validation and before OrderCheck",
@@ -575,6 +576,22 @@ def main() -> int:
          "STB_HasDuplicatePendingType(symbol,hedgeOrderType" in hedge_placement_code
          and hedge_placement_code.index("STB_HasDuplicatePendingType(")
              < hedge_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("ambiguous pending submissions reconcile exact active order signature",
+         "bool STB_ReconcilePendingSubmit(" in source
+         and "ORDER_COMMENT)!=comment" in source
+         and "ORDER_VOLUME_INITIAL)-volume" in source
+         and "ORDER_PRICE_OPEN)-entry" in source
+         and "matches==1" in source
+         and "matches>1" in source),
+        ("unresolved pending submission quarantines retries and expires safely",
+         "void STB_MarkPendingSubmitUnknown(" in source
+         and "TimeLocal()+90" in source
+         and "prior request unresolved" in source
+         and "GlobalVariableDel(unknownKey)" in source),
+        ("restart recovery rebuilds pending trail state from active managed orders",
+         "STB_PendingTrailRebuildFromTerminal();" in source
+         and "int STB_PendingTrailRebuildFromTerminal()" in pending_trail_source
+         and "STB_PendingTrailRegister(ticket,\"RESTART_RECOVERY\")" in pending_trail_source),
         ("pending setup validation rejects stale or invalid market quotes",
          "STB_ScannerQuoteValid(tick,quoteReason)" in source
          and "STB PENDING SETUP REJECT: invalid/stale quote" in source),
@@ -587,7 +604,8 @@ def main() -> int:
          bool(manual_stop_placement_code)
          and "trade.BuyStop(" in manual_stop_placement_code
          and "trade.SellStop(" in manual_stop_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_stop_placement_code
+         and "STB_ReconcilePendingSubmit(_Symbol,manualStopType,0" in manual_stop_placement_code
+         and "STB_MarkPendingSubmitUnknown(_Symbol,0,manualStopType" in manual_stop_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_stop_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_stop_placement_code),
         ("manual limit placement preflights the exact pending type before broker submission",
@@ -599,7 +617,8 @@ def main() -> int:
          bool(manual_limit_placement_code)
          and "trade.BuyLimit(" in manual_limit_placement_code
          and "trade.SellLimit(" in manual_limit_placement_code
-         and "if(!ok || !TradeRetcodePlacementSucceeded())" in manual_limit_placement_code
+         and "STB_ReconcilePendingSubmit(_Symbol,manualLimitType,0" in manual_limit_placement_code
+         and "STB_MarkPendingSubmitUnknown(_Symbol,0,manualLimitType" in manual_limit_placement_code
          and "VerifyPendingInitialSL(ticket)" in manual_limit_placement_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_AUTO_ROLLBACK," in manual_limit_placement_code),
         ("daily equity guard fails closed on invalid clock/equity and failed persistence",
