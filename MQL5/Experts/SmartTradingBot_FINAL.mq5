@@ -4948,6 +4948,12 @@ bool OneClickHedge()
 
     ENUM_ORDER_TYPE hedgeOrderType=(hedgeType==POSITION_TYPE_BUY)
                                       ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP;
+   if(STB_HasDuplicatePendingType(symbol,hedgeOrderType,(ulong)InpMagic))
+     {
+      Print("STB HEDGE REJECTED: duplicate same-type pending order symbol=",symbol);
+      return false;
+     }
+
     if(!STB_CheckPendingOrderRequest(symbol,hedgeOrderType,volume,entry,sl,0.0,
                                      typeTime,expiration,(ulong)InpMagic,
                                      comment,"ONE_CLICK_HEDGE"))
@@ -8325,6 +8331,39 @@ double DirectionExposureVolume(const string symbol,const int direction)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+bool STB_HasDuplicatePendingType(const string symbol,
+                                  const ENUM_ORDER_TYPE orderType,
+                                  const ulong magic)
+  {
+   if(symbol=="")
+      return true;
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+
+      if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+         (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE)!=orderType ||
+         (ulong)OrderGetInteger(ORDER_MAGIC)!=magic)
+         continue;
+
+      // An existing same-symbol, same-direction/type pending order with the
+      // same owner is treated as a duplicate; do not stack a second request.
+      Print("STB DUPLICATE PENDING BLOCK symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " magic=",IntegerToString((int)magic),
+            " existingOrder=",IntegerToString((int)ticket));
+      return true;
+     }
+
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool ValidatePendingSetup(const Setup &s)
   {
    MqlTick tick;
@@ -8722,6 +8761,9 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    // The earlier discovery check may be stale after the remaining gates.
    ENUM_ORDER_TYPE finalPendingType=(s.direction>0 ? ORDER_TYPE_BUY_STOP
                                                    : ORDER_TYPE_SELL_STOP);
+   if(STB_HasDuplicatePendingType(s.symbol,finalPendingType,(ulong)InpMagic))
+      return STB_LogPlaceReject(s,"DUPLICATE_PENDING_ORDER");
+
    if(!STB_CheckPendingOrderRequest(s.symbol,finalPendingType,volume,
                                     s.entry,s.sl,s.tp,typeTime,expiration,
                                     (ulong)InpMagic,comment,"SCANNER_FINAL_SUBMIT"))
@@ -9354,6 +9396,9 @@ bool PlaceManualPendingDirection(const int direction)
       return false;
 
     ENUM_ORDER_TYPE manualStopType=(direction>0 ? ORDER_TYPE_BUY_STOP:ORDER_TYPE_SELL_STOP);
+   if(STB_HasDuplicatePendingType(_Symbol,manualStopType,0))
+      return false;
+
     if(!STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
        return false;
@@ -9510,6 +9555,9 @@ bool PlaceManualLimitDirection(const int direction)
       return false;
 
     ENUM_ORDER_TYPE manualLimitType=(direction>0 ? ORDER_TYPE_BUY_LIMIT:ORDER_TYPE_SELL_LIMIT);
+   if(STB_HasDuplicatePendingType(_Symbol,manualLimitType,0))
+      return false;
+
     if(!STB_CheckPendingOrderRequest(_Symbol,manualLimitType,volume,entry,sl,0.0,
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
        return false;
