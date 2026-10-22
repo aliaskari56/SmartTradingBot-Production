@@ -552,6 +552,30 @@ def main() -> int:
          and manual_limit_placement_code.count("STB_DirectionVolumeWithinLimit") >= 2
          and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") > manual_limit_placement_code.find("STB_ScannerQuoteValid")
          and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_limit_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("duplicate pending helper matches symbol, exact order type and owner magic",
+         "bool STB_HasDuplicatePendingType(" in source
+         and "ORDER_SYMBOL)!=symbol" in source
+         and "ORDER_TYPE)!=orderType" in source
+         and "ORDER_MAGIC)!=(long)magic" in source),
+        ("automatic pending path blocks duplicate same-type order before final OrderCheck",
+         "STB_HasDuplicatePendingType(s.symbol,finalPendingType" in auto_placement_code
+         and auto_placement_code.index("STB_HasDuplicatePendingType(")
+             < auto_placement_code.rfind("STB_CheckPendingOrderRequest(")),
+        ("manual stop path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(_Symbol,manualStopType,0)" in manual_stop_placement_code
+         and manual_stop_placement_code.index("STB_HasDuplicatePendingType(")
+             < manual_stop_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("manual limit path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(_Symbol,manualLimitType,0)" in manual_limit_placement_code
+         and manual_limit_placement_code.index("STB_HasDuplicatePendingType(")
+             < manual_limit_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("hedge path blocks duplicate same-type order before OrderCheck",
+         "STB_HasDuplicatePendingType(symbol,hedgeOrderType" in hedge_placement_code
+         and hedge_placement_code.index("STB_HasDuplicatePendingType(")
+             < hedge_placement_code.index("STB_CheckPendingOrderRequest(")),
+        ("pending setup validation rejects stale or invalid market quotes",
+         "STB_ScannerQuoteValid(tick,quoteReason)" in source
+         and "STB PENDING SETUP REJECT: invalid/stale quote" in source),
         ("manual stop placement preflights the exact pending type before broker submission",
          bool(manual_stop_placement_code)
          and "STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0" in manual_stop_placement_code
