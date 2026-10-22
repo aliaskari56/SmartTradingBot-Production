@@ -213,6 +213,15 @@ def main() -> int:
          "(dt.day_of_week-dayOffset+7)%7" in scanner_session and
          "dayOffset==1 && nowSec<=toSec" in scanner_session and
          "if(!TimeToStruct(from,fd) || !TimeToStruct(to,td))" in scanner_session),
+        ("scanner requests M15/H4 history before rejecting newly selected unsynchronized symbols",
+         "Do not block the history request on the symbol-wide synchronization flag." in source and
+         "return copied>=count;" in source and
+         "MqlRates warmM15[];" in scanner_data and
+         "MqlRates warmH4[];" in scanner_data and
+         "GetRates(symbol,PERIOD_M15,needM15,warmM15)" in scanner_data and
+         "GetRates(symbol,PERIOD_H4,needH4,warmH4)" in scanner_data and
+         scanner_data.index("GetRates(symbol,PERIOD_M15,needM15,warmM15)") <
+         scanner_data.index("MqlTick tick;")),
         ("bounded equity-risk sizing is enabled by default while live AUTO remains off",
          "input bool    InpUseRiskSizing         = true;" in source and
          "input bool    InpAutoTrading            = false;" in source),
