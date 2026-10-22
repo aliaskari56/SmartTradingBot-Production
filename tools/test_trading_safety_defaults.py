@@ -340,8 +340,8 @@ def main() -> int:
          bool(controlled_delete_code)
          and "if(!authorized)" in controlled_delete_code
          and "bool requestOK=trade.OrderDelete(ticket);" in controlled_delete_code
-         and "TRADE_RETCODE_DONE" in controlled_delete_code
-         and "TRADE_RETCODE_DONE_PARTIAL" in controlled_delete_code
+         and "if(!requestOK || ret!=TRADE_RETCODE_DONE)" in controlled_delete_code
+         and "TRADE_RETCODE_DONE_PARTIAL" not in controlled_delete_code
          and "if(OrderSelect(ticket))" in controlled_delete_code
          and "STB DELETE CONFIRMED" in controlled_delete),
         ("all broker pending-order deletion goes through the central writer",
