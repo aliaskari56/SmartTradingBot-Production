@@ -236,6 +236,10 @@ def main() -> int:
         "void STB_RunManagementCycle()"
     )
     daily_risk_enforcer_code = strip_strings(daily_risk_enforcer)
+    trade_transaction = region(
+        source, "void OnTradeTransaction(", "void STB_ToggleDashboard()"
+    )
+    trade_transaction_code = strip_strings(strip_comments(trade_transaction))
 
     # Exercise the stripper itself against comment markers inside strings,
     # both comment styles, and line preservation. Static source checks alone
@@ -482,6 +486,23 @@ def main() -> int:
          and "if(STB_DailyLossLimitHit())" in manual_stop_placement_code
          and "if(STB_DailyLossLimitHit())" in manual_limit_placement_code
          and "if(STB_DailyLossLimitHit())" in hedge_placement_code),
+        ("INOUT reversal closes old adaptive state before initializing a distinct active reverse lifecycle",
+         bool(trade_transaction)
+         and "if(entryType==DEAL_ENTRY_INOUT)" in trade_transaction_code
+         and "STB_AdaptiveDeletePositionProfile(positionId)" in trade_transaction_code
+         and "STB_AdaptiveDeletePositionRisk(positionId)" in trade_transaction_code
+         and "if(PositionSelect(symbol))" in trade_transaction_code
+         and "POSITION_IDENTIFIER" in trade_transaction_code
+         and "STB_AdaptiveRememberPositionProfile(newPositionId,newProfileId)" in trade_transaction_code
+         and "STB_AdaptiveRememberPositionRisk(newPositionId,newRiskMoney)" in trade_transaction_code
+         and trade_transaction_code.index("STB_AdaptiveDeletePositionProfile(positionId)")
+             < trade_transaction_code.index("STB_AdaptiveRememberPositionProfile(newPositionId,newProfileId)")),
+        ("INOUT reversal validates opposite exposure and preserves order state when transfer cannot be confirmed",
+         "newPositionType==POSITION_TYPE_BUY" in trade_transaction_code
+         and "newPositionType==POSITION_TYPE_SELL" in trade_transaction_code
+         and "activeReversalPosition && newProfileId>=0" in trade_transaction_code
+         and "order state retained for reconciliation" in trade_transaction
+         and "STB_AdaptiveDeleteOrderState(trans.order)" in trade_transaction_code),
     )
 
     failed = False
