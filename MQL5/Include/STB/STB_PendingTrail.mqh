@@ -185,8 +185,11 @@ int STB_PendingClassifyResult(const bool ok)
    switch(ret)
    {
       case TRADE_RETCODE_DONE:
-      case TRADE_RETCODE_DONE_PARTIAL:
          return STB_PEND_RES_SUCCESS;
+      // DONE_PARTIAL is a deal/execution result, not proof that an order
+      // modification was fully accepted. The central writer verifies its
+      // own modify retcode and returns false for this code, so keep this
+      // classifier consistent and route it to OTHER_FAILURE below.
       case TRADE_RETCODE_NO_CHANGES:
          return STB_PEND_RES_NO_CHANGE;
       case TRADE_RETCODE_INVALID_STOPS:
