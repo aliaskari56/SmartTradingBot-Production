@@ -130,3 +130,38 @@ The repeated per-symbol scan loop means these are repeated observations across c
 ### Next audit action
 
 Before changing any trade-selection threshold, collect unique-symbol coverage and compare it against the number of `STB SCANNER SUMMARY` rows in the same time interval. If most stale symbols are consistently outside their published trade sessions, classify sessions first for clearer telemetry. If they are supposed to be active, compare terminal/server clock, latest tick timestamp and current session metadata. Independently report relative spread as a distribution by symbol and asset class rather than loosening the shared cap blindly.
+
+
+## Latest unique-symbol aggregation (13:20 onward)
+
+The latest operator-provided summary covers 255 scanner cycles, ending around 14:02 server-log time, for the `SmartTradingBot_FINAL (XAUUSD+,M5)` instance.
+
+| Stage / reason | Repeated events | Unique symbols |
+|---|---:|---:|
+| Data eligibility — stale quote | 36,093 | 168 |
+| Data eligibility — unavailable data | 3,192 | 141 |
+| Data eligibility — outside session | 510 | 2 |
+| Market quality — relative spread | 32,178 | 147 |
+| Market quality — activity | 277 | 2 |
+| Market quality — volatility | 255 | 1 |
+| Market quality — quality score | 7 | 2 |
+| Regime filter — unstable regime | 326 | 3 |
+
+These are grouped from repeated per-cycle log events. Unique-symbol counts can overlap across reasons and cycles, so they are not intended to sum to the 302-symbol universe.
+
+### What this shows
+
+- Average scanner summary is still near 146 eligible symbols, 17 quality-passing symbols and 16 regime-passing symbols. Roughly 126 relative-spread rejects per scan is consistent with the quality pass count being low; this is a hard gate, not a later ranking penalty.
+- Stale quote rejections average roughly 142 events per cycle. The code's `InpScannerMaxQuoteAgeSec` defaults to 300, and `STB_ScannerQuoteValid` compares server/current time to `MqlTick.time`, the last quote update. This may be expected for instruments that do not tick frequently, but the symbol-by-symbol distribution and their published quote/trading sessions must be checked before interpreting it as feed failure. Official references: [SymbolInfoTick](https://www.mql5.com/en/docs/marketinformation/symbolinfotick), [MqlTick time field](https://www.mql5.com/en/docs/constants/structures/mqltick), and [SymbolInfoSessionTrade](https://www.mql5.com/en/docs/marketinformation/symbolinfosessiontrade).
+- `REJECT_SESSION` only accounts for two unique symbols because the current code tests quote freshness before checking the trading session. Thus a symbol with a stale quote can get counted as stale without ever reaching session classification. Moving the session classification earlier would improve the explanatory label but would not make an actually closed symbol tradable; any such source change requires compile and tester verification.
+- The relative-spread gate compares `(ask-bid)/M15_ATR*100` against `InpMaxRelativeSpreadPct=10.0`. The 147 unique symbols rejected across the interval are an important second bottleneck, but the current logs do not print the exact `relativeSpread` value. Do not raise or disable this threshold until the spread/ATR distribution by symbol has been collected and execution-cost assumptions validated.
+- Data-unavailable events average about 12.5 per cycle. `GetRates` requires the requested number of bars from `CopyRates`, while MetaQuotes notes that history may still be downloading/building and a request may initially return fewer bars. Track these separately from stale quotes. See [CopyRates](https://www.mql5.com/en/docs/series/copyrates).
+
+### Current prioritized findings
+
+1. **H4 hard gate:** first observed blocker once a symbol survives eligibility, quality, regime, and broker direction checks. The last interval showed 28 of 30 setup rejects related to H4.
+2. **Relative-spread hard gate:** eliminates approximately 126 eligible symbols per scanner cycle; the exact per-symbol spread/ATR values are not logged yet.
+3. **Universe freshness/history coverage:** approximately 142 stale-quote events per cycle and 12.5 data-unavailable events per cycle. Determine whether these are closed-session/dormant symbols or active instruments with unexpectedly old timestamps.
+4. **Other quality/regime gates:** low occurrence in the supplied interval, so do not prioritize changing volatility/activity thresholds without additional evidence.
+
+The next implementation-quality improvement should be observability only: log per-symbol quote age, current session state, relative spread percent, ATR, and rejection reason in a rate-limited way, plus per-cycle unique-symbol counts. Keep signal gates unchanged until the same dataset has been replayed and the downstream strategy rejection distribution is known.
