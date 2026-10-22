@@ -8432,6 +8432,20 @@ bool STB_HasDuplicatePendingType(const string symbol,
    if(symbol=="")
       return true;
 
+   string unknownKey=STB_PendingSubmitUnknownKey(symbol,magic,orderType);
+   if(GlobalVariableCheck(unknownKey))
+     {
+      double quarantineUntil=GlobalVariableGet(unknownKey);
+      if(quarantineUntil>(double)TimeLocal())
+        {
+         Print("STB PENDING SUBMIT BLOCK: prior request unresolved symbol=",symbol,
+               " type=",EnumToString(orderType),
+               " quarantineUntil=",DoubleToString(quarantineUntil,0));
+         return true;
+        }
+      GlobalVariableDel(unknownKey);
+     }
+
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
       ulong ticket=OrderGetTicket(i);
