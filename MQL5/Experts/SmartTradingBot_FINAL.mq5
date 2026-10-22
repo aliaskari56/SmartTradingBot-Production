@@ -4796,6 +4796,100 @@ bool STB_ResolveManualPendingEntry(const string symbol,
    return false;
   }
 
+string STB_PendingSubmitUnknownKey(const string symbol,
+                                      const ulong magic,
+                                      const ENUM_ORDER_TYPE orderType)
+  {
+   string safeSymbol=StringSubstr(symbol,0,24);
+   StringReplace(safeSymbol,".","_");
+   StringReplace(safeSymbol,"#","_");
+   StringReplace(safeSymbol," ","_");
+   return "STB_U_"+IntegerToString((int)magic)+"_"+
+          IntegerToString((int)orderType)+"_"+safeSymbol;
+  }
+
+void STB_MarkPendingSubmitUnknown(const string symbol,
+                                  const ulong magic,
+                                  const ENUM_ORDER_TYPE orderType,
+                                  const string source,
+                                  const uint retcode)
+  {
+   string key=STB_PendingSubmitUnknownKey(symbol,magic,orderType);
+   // A bounded quarantine prevents repeated submissions while a delayed server
+   // order/transaction may still be propagating to the terminal's order pool.
+   if(!GlobalVariableCheck(key))
+      GlobalVariableTemp(key);
+   GlobalVariableSet(key,(double)(TimeLocal()+90));
+   Print("STB PENDING SUBMIT UNKNOWN: quarantined symbol=",symbol,
+         " type=",EnumToString(orderType),
+         " magic=",IntegerToString((int)magic),
+         " source=",source,
+         " retcode=",IntegerToString((int)retcode),
+         " quarantineSec=90");
+  }
+
+bool STB_ReconcilePendingSubmit(const string symbol,
+                                const ENUM_ORDER_TYPE orderType,
+                                const ulong magic,
+                                const double volume,
+                                const double entry,
+                                const double sl,
+                                const double tp,
+                                const string comment,
+                                ulong &matchedTicket)
+  {
+   matchedTicket=0;
+   double volStep=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
+   double priceStep=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(priceStep<=0.0)
+      priceStep=SymbolInfoDouble(symbol,SYMBOL_POINT);
+   if(volStep<=0.0 || priceStep<=0.0)
+      return false;
+
+   int matches=0;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL)!=symbol ||
+         (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE)!=orderType ||
+         (ulong)OrderGetInteger(ORDER_MAGIC)!=magic ||
+         OrderGetString(ORDER_COMMENT)!=comment)
+         continue;
+
+      if(MathAbs(OrderGetDouble(ORDER_VOLUME_INITIAL)-volume)>volStep*0.25 ||
+         MathAbs(OrderGetDouble(ORDER_PRICE_OPEN)-entry)>priceStep*0.51 ||
+         MathAbs(OrderGetDouble(ORDER_SL)-sl)>priceStep*0.51 ||
+         MathAbs(OrderGetDouble(ORDER_TP)-tp)>priceStep*0.51)
+         continue;
+
+      matches++;
+      matchedTicket=ticket;
+     }
+
+   if(matches==1)
+     {
+      Print("STB PENDING SUBMIT RECONCILED symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " ticket=",IntegerToString((int)matchedTicket),
+            " result=ACTIVE_ORDER_MATCH");
+      return true;
+     }
+
+   if(matches>1)
+     {
+      matchedTicket=0;
+      Print("STB PENDING SUBMIT AMBIGUOUS: multiple matching orders symbol=",symbol,
+            " type=",EnumToString(orderType),
+            " matches=",IntegerToString(matches));
+     }
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool OneClickHedge()
   {
    if(!MQLInfoInteger(MQL_TESTER))
