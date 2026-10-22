@@ -314,11 +314,13 @@ def main() -> int:
               "MathIsValidNumber(tick.bid)", "MathIsValidNumber(tick.ask)",
               "tick.ask<tick.bid", "TimeTradeServer()", "ageSeconds < -2",
               "REJECT_FUTURE_QUOTE", "REJECT_STALE_DATA"))),
-         ("scanner quote age input is bounded and enforced without a hidden 30-second floor",
+         ("scanner quote age input is bounded and enforced consistently in eligibility and freshness scoring",
           "InpScannerMaxQuoteAgeSec<1" in source and
           "InpScannerMaxQuoteAgeSec>3600" in source and
           "ageSeconds>(long)InpScannerMaxQuoteAgeSec" in quote_validator and
-          "MathMax(30,InpScannerMaxQuoteAgeSec)" not in quote_validator),
+          "age>(long)InpScannerMaxQuoteAgeSec" in market_quality and
+          "(double)age/(double)InpScannerMaxQuoteAgeSec" in market_quality and
+          "MathMax(30,InpScannerMaxQuoteAgeSec)" not in source),
          ("scanner eligibility and market-quality gates both use shared quote validation",
           "STB_ScannerQuoteValid(tick,reason)" in scanner_data and
           "STB_ScannerQuoteValid(tick,quoteReason)" in market_quality),
