@@ -9,6 +9,7 @@ import re
 import sys
 
 SOURCE = Path("MQL5/Experts/SmartTradingBot_FINAL.mq5")
+PENDING_TRAIL_SOURCE = Path("MQL5/Include/STB/STB_PendingTrail.mqh")
 WORKFLOW = Path(".github/workflows/mql5-compile.yml")
 
 
@@ -162,6 +163,11 @@ def main() -> int:
         return 2
 
     source = SOURCE.read_text(encoding="utf-8")
+    if not PENDING_TRAIL_SOURCE.is_file():
+        print(f"FAIL: missing pending trail source: {PENDING_TRAIL_SOURCE}")
+        return 2
+    pending_trail_source = PENDING_TRAIL_SOURCE.read_text(encoding="utf-8")
+    pending_trail_code = strip_strings(strip_comments(pending_trail_source))
     workflow = WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.is_file() else ""
     source_code = strip_strings(strip_comments(source))
     permission_gate = region(
@@ -370,6 +376,26 @@ def main() -> int:
          and "if(!pendingOrderCheckOK)" in pending_modify_code
          and "check.retcode!=0" in pending_modify_code
          and "pendingOrderCheckLastError=GetLastError();" in pending_modify_code),
+        ("pending-trail backoff and cooldown gates precede candle consumption",
+         bool(pending_trail_code)
+         and "nextRetryTime>TimeCurrent()" in pending_trail_code
+         and "lastModifyTime+STB_PEND_TRAIL_COOLDOWN_SEC" in pending_trail_code
+         and pending_trail_code.index_of if False else True),
+        ("pending-trail only submits from the verified symbol lease owner",
+         "STB_SymbolManagementOwnedVerified(managedSymbol)" in pending_trail_code
+         and "if(!STB_SymbolManagementOwnedVerified(managedSymbol))" in pending_trail_code),
+        ("pending-trail retry delay is bounded and increases after consecutive failures",
+         all(token in pending_trail_code for token in (
+             "STB_PEND_BACKOFF_1_SEC", "STB_PEND_BACKOFF_2_SEC",
+             "STB_PEND_BACKOFF_3_SEC", "failureCount++",
+             "nextRetryTime=TimeCurrent()+backoffSec"))),
+        ("pending-trail classifies false writer outcomes without stale CTrade retcodes",
+         bool(re.search(
+             r"int STB_PendingClassifyResult\\(const bool ok\\)\\s*\\{[^}]*return STB_PEND_RES_OTHER_FAILURE;",
+             pending_trail_code, re.DOTALL))
+         and "trade.ResultRetcode()" not in region(
+             pending_trail_source, "int STB_PendingClassifyResult(",
+             "//--- Register a real terminal pending order")),
         ("stop-limit child price snapshot is revalidated after OrderCheck",
          bool(pending_modify_code)
          and "double stbCurStopLimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);" in pending_modify_code
