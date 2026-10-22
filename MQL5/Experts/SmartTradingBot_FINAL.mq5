@@ -2143,7 +2143,8 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
    double stbCurTP=OrderGetDouble(ORDER_TP);
    double stbPoint=SymbolInfoDouble(symbol,SYMBOL_POINT);
 
-   if(!IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
+   if(!STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry) ||
+      !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL))
       return false;
 
    if(!STB_PendingEntryDirectionOK(stbOt,stbCurEntry,newEntry,stbPoint*0.5))
@@ -2299,7 +2300,10 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       MathAbs(latestStopLimit-stbCurStopLimit)>latestTolerance)
       return false;
 
+   // Recheck the broker entry boundary with a fresh quote after OrderCheck;
+   // quote movement during preflight must not make this request stale.
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
+      !STB_IsPendingEntryBrokerValid(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
       !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
@@ -7214,6 +7218,45 @@ bool IsValidSLForPendingOrder(const string symbol,
       return (sl>=entry+minDist && sl>=tick.ask+minDist);
 
    return false;
+  }
+
+// Validate pending entry placement against the current live quote and broker
+// stop/freeze distance. Directional monotonicity alone does not guarantee that
+// a previously valid order remains outside the broker's current rejection zone.
+bool STB_IsPendingEntryBrokerValid(const string symbol,
+                                   const ENUM_ORDER_TYPE orderType,
+                                   const double entry)
+  {
+   if(symbol=="" || entry<=0.0)
+      return false;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+      return false;
+
+   double minDist=TradeMinDistance(symbol);
+   if(minDist<=0.0)
+      return false;
+
+   switch(orderType)
+     {
+      case ORDER_TYPE_BUY_STOP:
+      case ORDER_TYPE_BUY_STOP_LIMIT:
+         return entry>tick.ask+minDist;
+
+      case ORDER_TYPE_SELL_STOP:
+      case ORDER_TYPE_SELL_STOP_LIMIT:
+         return entry<tick.bid-minDist;
+
+      case ORDER_TYPE_BUY_LIMIT:
+         return entry<tick.bid-minDist;
+
+      case ORDER_TYPE_SELL_LIMIT:
+         return entry>tick.ask+minDist;
+
+      default:
+         return false;
+     }
   }
 
 bool CalculateInitialPendingProtectionSL(const string symbol,
