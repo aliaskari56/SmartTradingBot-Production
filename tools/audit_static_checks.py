@@ -303,7 +303,8 @@ def main() -> int:
         ("actionable M5 candle remains retryable after resolver/server failure and commits only after a confirmed write or deliberate skip",
          "actionableClosedBar=closedBar;" in trail_source and
          "Retry with the same bounded 5/15/60s policy." in trail_source and
-         "if(candleStop && step>0.0 &&" in trail_source and
+         "if(step>0.0 &&" in trail_source and
+         "if(candleStop && actionableClosedBar>0)" in trail_source and
          "if(committed)\n   {\n      if(candleStop && actionableClosedBar>0)" in trail_source),
         ("empty managed-symbol list means universal exposure management",
          "if(StringLen(InpScannerSymbols)==0)\n      return true;" in source),
