@@ -169,7 +169,7 @@ def main() -> int:
     place_setup = source_region(
         source, "bool PlaceSetup(", "// MANUAL PENDING COMMANDS")
     on_trade_transaction = source_region(
-        source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge")
+        source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)")
     trade_intake = source_region(
         source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
     management_cycle = source_region(
@@ -570,14 +570,14 @@ def main() -> int:
         ("partial exits preserve SL-lock state; full close and reversal clear it before magic filtering",
          (lambda body: bool(body) and
           body.find("if(entryType==DEAL_ENTRY_OUT") >= 0 and
-          body.find("if(entryType==DEAL_ENTRY_OUT") < body.find("if(magic!=(long)InpMagic)") and
+          body.find("if(entryType==DEAL_ENTRY_OUT") < body.find("if(magic!=(long)InpMagic &&") and
           "bool positionRemains=PositionSelectByTicket(closedTicket);" in body and
           "bool exposureReversed=(entryType==DEAL_ENTRY_INOUT);" in body and
           "if(exposureReversed || !positionRemains)" in body and
           body.find("if(exposureReversed || !positionRemains)") <
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
-              body.find("if(magic!=(long)InpMagic)"))
-          (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && !isHedge"))),
+              body.find("if(magic!=(long)InpMagic &&"))
+          (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)"))),
         ("resolver enforces price-move profit-lock floor and deterministic no-SL fallback",
          all(token in source for token in (
              "decisionPriceMovePips=STB_PositionPriceMovePips(ticket);",
@@ -735,7 +735,7 @@ def main() -> int:
         ("transaction intake runs before deal-magic filtering so manual and foreign-magic fills enter protection",
          "STB_TradeIntakeFromTransaction(trans);" in on_trade_transaction and
          on_trade_transaction.index("STB_TradeIntakeFromTransaction(trans);") <
-         on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+         on_trade_transaction.index("if(magic!=(long)InpMagic &&")),
         ("pending-order intake records actual server geometry before registering pending trail state",
          "if(trans.type==TRADE_TRANSACTION_ORDER_ADD" in trade_intake and
          trade_intake.index("STB_GeomStore(trans.order,false,") <
@@ -809,7 +809,7 @@ def main() -> int:
           "if(exposureReversed || !positionRemains)" in on_trade_transaction and
           "GlobalVariableDel(TicketLockName(closedTicket));" in on_trade_transaction and
           on_trade_transaction.index("if(exposureReversed || !positionRemains)") <
-              on_trade_transaction.index("if(magic!=(long)InpMagic)")),
+              on_trade_transaction.index("if(magic!=(long)InpMagic &&")),
          ("pending trail fill transition is attempted before immediate position handoff",
           "STB_PendingTrailOnOrderFilled(trans.order);" in trade_intake and
           trade_intake.index("STB_PendingTrailOnOrderFilled(trans.order);") <
