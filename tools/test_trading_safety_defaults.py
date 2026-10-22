@@ -537,6 +537,21 @@ def main() -> int:
          and "if(!ok || !TradeRetcodePlacementSucceeded())" in hedge_placement_code
          and "VerifyPendingInitialSL(hedgeOrder)" in hedge_placement_code
          and "STB_RequestOrderDelete(hedgeOrder,STB_DEL_AUTO_ROLLBACK," in hedge_placement_code),
+        ("hedge rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(hedge_placement_code)
+         and "OneClickHedgeFinal" in hedge_placement_code
+         and hedge_placement_code.rfind("STB_DirectionVolumeWithinLimit") > hedge_placement_code.find("STB_ScannerQuoteValid")
+         and hedge_placement_code.rfind("STB_DirectionVolumeWithinLimit") < hedge_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("manual stop rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(manual_stop_placement_code)
+         and "PlaceManualPendingDirectionFinal" in manual_stop_placement_code
+         and manual_stop_placement_code.rfind("STB_DirectionVolumeWithinLimit") > manual_stop_placement_code.find("STB_ScannerQuoteValid")
+         and manual_stop_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_stop_placement_code.find("STB_CheckPendingOrderRequest")),
+        ("manual limit rechecks directional volume after fresh-quote validation and before OrderCheck",
+         bool(manual_limit_placement_code)
+         and "PlaceManualLimitDirectionFinal" in manual_limit_placement_code
+         and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") > manual_limit_placement_code.find("STB_ScannerQuoteValid")
+         and manual_limit_placement_code.rfind("STB_DirectionVolumeWithinLimit") < manual_limit_placement_code.find("STB_CheckPendingOrderRequest")),
         ("manual stop placement preflights the exact pending type before broker submission",
          bool(manual_stop_placement_code)
          and "STB_CheckPendingOrderRequest(_Symbol,manualStopType,volume,entry,sl,0.0" in manual_stop_placement_code
