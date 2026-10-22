@@ -11562,9 +11562,10 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
-// Cancel this EA's pending orders when the daily equity guard trips.
-// Existing open positions are NOT force-closed by this guard; their SL/TP
-// and protection logic remain responsible for position management.
+// Enforce the daily equity guard by attempting to close positions opened
+// with this EA's magic and cancel eligible EA-owned pending orders.
+// Broker rejection, gaps, slippage, or a failed close can exceed the configured
+// percentage; this is a guardrail, not a guaranteed maximum-loss boundary.
 void STB_EnforceDailyRiskGuard()
   {
    if(!STB_DailyLossLimitHit())
