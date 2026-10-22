@@ -2171,7 +2171,14 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
          return false;
 
       double stopLimitOffset=stopLimit-stbCurEntry;
-      stopLimit=NormalizePrice(symbol,newEntry+stopLimitOffset);
+      // Stop-limit child prices must obey the symbol's trade tick size too.
+      // Keep the child on the safe side of the trigger after moving it:
+      // BUY_STOP_LIMIT child limit below trigger -> round down;
+      // SELL_STOP_LIMIT child limit above trigger -> round up.
+      double rawStopLimit=newEntry+stopLimitOffset;
+      stopLimit=STB_TickAlignPriceDirectional(
+                   symbol,rawStopLimit,
+                   stbOt==ORDER_TYPE_SELL_STOP_LIMIT);
 
       bool offsetValid=(stopLimit>0.0 &&
                         ((stbOt==ORDER_TYPE_BUY_STOP_LIMIT && stopLimit<newEntry) ||
