@@ -4050,12 +4050,38 @@ bool STB_SumClosedLifecyclePnlFromHistory(const ulong positionId,
    if(positionId==0 || !HistorySelectByPosition(positionId))
       return false;
 
-   bool foundClose=false;
    int deals=HistoryDealsTotal();
+   ulong lastReversalDeal=0;
+   long lastReversalTimeMsc=0;
+
+   // Position identifiers may span a netting reversal. Only count OUT/OUT_BY
+   // deals belonging to the latest lifecycle, not exits from its predecessor.
    for(int i=0;i<deals;i++)
      {
       ulong deal=HistoryDealGetTicket(i);
+      if(deal==0 ||
+         HistoryDealGetInteger(deal,DEAL_ENTRY)!=DEAL_ENTRY_INOUT)
+         continue;
+
+      long timeMsc=HistoryDealGetInteger(deal,DEAL_TIME_MSC);
+      if(timeMsc>lastReversalTimeMsc ||
+         (timeMsc==lastReversalTimeMsc && deal>lastReversalDeal))
+        {
+         lastReversalTimeMsc=timeMsc;
+         lastReversalDeal=deal;
+        }
+     }
+
+   bool foundClose=false;
+   for(int j=0;j<deals;j++)
+     {
+      ulong deal=HistoryDealGetTicket(j);
       if(deal==0)
+         continue;
+
+      long timeMsc=HistoryDealGetInteger(deal,DEAL_TIME_MSC);
+      if(timeMsc<lastReversalTimeMsc ||
+         (timeMsc==lastReversalTimeMsc && deal<=lastReversalDeal))
          continue;
 
       long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
