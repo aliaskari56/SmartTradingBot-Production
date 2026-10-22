@@ -11306,8 +11306,7 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
    // CTrade::OrderDelete returning true only confirms the local request
    // structure. Require both a server-success retcode and disappearance of
    // this active ticket before treating deletion as complete.
-   if(!requestOK ||
-      (ret!=TRADE_RETCODE_DONE && ret!=TRADE_RETCODE_DONE_PARTIAL))
+   if(!requestOK || ret!=TRADE_RETCODE_DONE)
      {
       Print("STB DELETE REJECTED ticket=",IntegerToString((int)ticket),
             " reason=",IntegerToString((int)reason),
