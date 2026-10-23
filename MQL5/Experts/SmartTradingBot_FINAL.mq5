@@ -2605,16 +2605,20 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
    MqlTick tick;
 
    if(!SymbolInfoTick(s.symbol,tick))
+     {
       failureReason="SYMBOL_TICK_UNAVAILABLE";
       return false;
+     }
 
    double point=SymbolInfoDouble(s.symbol,SYMBOL_POINT);
    int digits=(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS);
    double minDist=TradeMinDistance(s.symbol);
 
    if(point<=0.0)
+     {
       failureReason="INVALID_SYMBOL_POINT";
       return false;
+     }
 
    if(minDist<=0.0)
       minDist=point;
@@ -2682,8 +2686,10 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+        {
          failureReason="BUY_SWING_DATA_UNAVAILABLE";
          return false;
+        }
 
       double risk=s.entry-s.sl;
       double target=DBL_MAX;
@@ -2767,8 +2773,10 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
       SwingPoint highs[];
       SwingPoint lows[];
       if(CollectSwings(s.symbol,PERIOD_M15,InpLookbackM15,highs,lows)<=0)
+        {
          failureReason="SELL_SWING_DATA_UNAVAILABLE";
          return false;
+        }
 
       double risk=s.sl-s.entry;
       double target=-DBL_MAX;
@@ -2807,8 +2815,10 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
    double reward=MathAbs(s.tp-s.entry);
 
    if(risk<=0.0 || reward<=0.0)
+     {
       failureReason="NONPOSITIVE_NORMALIZED_RISK_OR_REWARD";
       return false;
+     }
 
    if(InpMaxInitialSLPips>0.0 &&
       risk>InpMaxInitialSLPips*PipSize(s.symbol))
