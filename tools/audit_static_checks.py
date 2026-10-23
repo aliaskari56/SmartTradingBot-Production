@@ -234,8 +234,8 @@ def main() -> int:
          "if(!STB_InitRunNamespace())" in on_init),
         ("tester AUTO override is confined to tester initialization; live input-off remains authoritative",
          "if(MQLInfoInteger(MQL_TESTER))" in on_init and
-         "g_autoTrading=(InpAutoTrading||InpTesterForceAutoTrading);" in re.sub(r"\\s+", "", on_init) and
-         "}elseif(!InpAutoTrading){" in re.sub(r"\\s+", "", on_init)),
+         "g_autoTrading=(InpAutoTrading||InpTesterForceAutoTrading);" in re.sub(r"\s+", "", on_init) and
+         "}elseif(!InpAutoTrading){" in re.sub(r"\s+", "", on_init)),
         ("BUY STOP/SELL STOP initial SL anchors to closed M5 structure and validates broker geometry",
          "if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)" in initial_pending_sl and
          "iLow(symbol,PERIOD_M5,1)" in initial_pending_sl and
