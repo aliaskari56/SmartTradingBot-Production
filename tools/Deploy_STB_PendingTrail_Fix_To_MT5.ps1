@@ -7,11 +7,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $Repo = 'aliaskari56/SmartTradingBot-Production'
-$Commit = 'c39584f0b6f83851eb8f2a9a542994b252cd6444'
+$Commit = '2ba8ec04a8471091aeb22f6da9c15af3e1be3bf0'
 $ExpertPath = Join-Path $DataRoot 'MQL5\Experts\SmartTradingBot_FINAL.mq5'
 $Mql5Root = Join-Path $DataRoot 'MQL5'
 $Files = @(
-    [pscustomobject]@{ Relative='MQL5\Experts\SmartTradingBot_FINAL.mq5'; RepoPath='MQL5/Experts/SmartTradingBot_FINAL.mq5'; BlobSha='b8b3757b8061c4b5bff51b33955e05fa49af83d0' },
+    [pscustomobject]@{ Relative='MQL5\Experts\SmartTradingBot_FINAL.mq5'; RepoPath='MQL5/Experts/SmartTradingBot_FINAL.mq5'; BlobSha='0bba0788717bfb6e4bd0c4d3c32100687c2b994a' },
     [pscustomobject]@{ Relative='MQL5\Include\STB\STB_PendingTrail.mqh'; RepoPath='MQL5/Include/STB/STB_PendingTrail.mqh'; BlobSha='c92ff30492932f101d2edc4a6c250d859427a6eb' },
     [pscustomobject]@{ Relative='MQL5\Include\STB\STB_PendingDistanceResolver.mqh'; RepoPath='MQL5/Include/STB/STB_PendingDistanceResolver.mqh'; BlobSha='73c746cf7b79e8fe4c14cc025c40ecdfa6e6165a' }
 )
@@ -35,7 +35,7 @@ foreach ($item in $Files) {
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$backupRoot = Join-Path $env:LOCALAPPDATA "SmartTradingBot\Backups\Deploy_PendingTrail_Fix_$stamp"
+$backupRoot = Join-Path $env:LOCALAPPDATA "SmartTradingBot\Backups\Deploy_UI_Control_Fix_$stamp"
 $stageRoot = Join-Path $backupRoot 'staged'
 $sourceBackupRoot = Join-Path $backupRoot 'original_sources'
 New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
@@ -110,7 +110,7 @@ try {
     Write-Host "EA_SHA256=$eaSha"
     Write-Host "EX5_SHA256=$ex5Sha"
     Write-Host "BACKUP=$backupRoot"
-    Write-Host 'NEXT: Reattach/reinitialize SmartTradingBot_FINAL in MT5. First validate STOP trailing in Strategy Tester/demo.'
+    Write-Host 'NEXT: Reattach/reinitialize SmartTradingBot_FINAL in MT5. Verify STB UI BUTTONS SUMMARY shows ready=8, then test clicks ONLY in Strategy Tester/demo; watch for STB UI OBJECT_CLICK and STB UI CLICK RECEIVED logs.'
 }
 catch {
     Write-Host "DEPLOYMENT_FAILED=$($_.Exception.Message)" -ForegroundColor Red
