@@ -18,7 +18,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = true;
+input bool    InpAutoTrading            = false;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -11602,15 +11602,26 @@ int OnInit()
    if(STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
-// The input determines startup AUTO state in both tester and terminal runtime.
-// The chart button may override it while the EA is running; a later reinit
-// restores the configured input instead of inheriting a stale OFF terminal flag.
-   g_autoTrading=(InpAutoTrading ||
-                  (MQLInfoInteger(MQL_TESTER) && InpTesterForceAutoTrading));
-   if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0)
-      Print("STB INIT WARNING: unable to persist AUTO state err=",GetLastError());
-   if(MQLInfoInteger(MQL_TESTER) && g_autoTrading)
-      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: tester AUTO reset only
+// Tester reproducibility override is isolated from normal terminal runtime.
+   if(MQLInfoInteger(MQL_TESTER))
+     {
+      g_autoTrading=(InpAutoTrading||InpTesterForceAutoTrading);
+      if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0)
+         Print("STB INIT WARNING: unable to persist tester AUTO state err=",GetLastError());
+      if(g_autoTrading)
+         STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: tester AUTO reset only
+     }
+   else if(!InpAutoTrading)
+     {
+      g_autoTrading=false;
+      GlobalVariableSet(g_autoStateName,0.0);
+     }
+   else
+     {
+      g_autoTrading=true;
+      if(GlobalVariableSet(g_autoStateName,1.0)<=0)
+         Print("STB INIT WARNING: unable to persist explicit AUTO input err=",GetLastError());
+     }
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetAsyncMode(false);
@@ -12688,7 +12699,8 @@ void OnChartEvent(const int id,
      }
    if(sparam==trailName)
      {
-      int moved=TrailAllPendingOrdersNow();       STB_SetControlStatus("PENDING TRAIL MOVED "+
+      int moved=TrailAllPendingOrdersNow();
+      STB_SetControlStatus("PENDING TRAIL MOVED "+
                             IntegerToString(moved)+" ORDER(S)");
       Print("STB PEND TRAIL button moved=",IntegerToString(moved),
             " pending=",IntegerToString(CountManagedPendingOrders()));
