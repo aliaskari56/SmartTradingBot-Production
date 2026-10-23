@@ -25,6 +25,9 @@ def region(source: str, start: str, end: str) -> str:
 
 
 def compact(source: str) -> str:
+    # Inline comments are removed before whitespace so comments do not make
+    # the contract assertions sensitive to explanatory prose.
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
     return re.sub(r"\s+", "", source)
 
 
