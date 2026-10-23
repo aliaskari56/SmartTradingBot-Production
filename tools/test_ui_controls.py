@@ -29,7 +29,8 @@ def main() -> int:
     button = region(source, "void CreateButton(", "// Repair stale same-named non-button objects")
     ensure = region(source, "void STB_EnsureControlButtons()", "void STB_RenderControlStatus()")
     status = region(source, "void STB_RenderControlStatus()", "void STB_SetControlStatus(")
-    handler = region(source, "void OnChartEvent(", "//+------------------------------------------------------------------+\n//|                                                                  |\n//+------------------------------------------------------------------+\nvoid OnTick")
+    handler_start = source.find("void OnChartEvent(")
+    handler = source[handler_start:] if handler_start >= 0 else ""
     init = region(source, "int OnInit()", "//==================================================================\n// DEINIT")
 
     check(
