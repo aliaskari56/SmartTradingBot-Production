@@ -18,16 +18,16 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 //==================================================================
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
-input bool    InpAutoTrading            = false;
+input bool    InpAutoTrading            = true;
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
-input bool    InpOneSetupPerSymbol      = true;
+input bool    InpOneSetupPerSymbol      = false;
 input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
-input double  InpScannerMinQuality        = 45.0;
-input double  InpScannerMinScore          = 55.0;
-input double  InpScannerMinTopGap         = 3.0;
+input double  InpScannerMinQuality        = 0.0;
+input double  InpScannerMinScore          = 0.0;
+input double  InpScannerMinTopGap         = 0.0;
 input int     InpScannerMaxWatchlist      = 50;
 input int     InpScannerTopN              = 10;
 input int     InpScannerMaxQuoteAgeSec    = 60;   // reject stale scanner quotes after one minute
@@ -50,9 +50,9 @@ input double  InpRSIWeight                  = 7.0;
 input double  InpCCIWeight                  = 8.0;
 input bool    InpOscillatorHardFilter       = false;
 input double  InpMaxSpreadPips         = 0.0;   // 0 = disabled; optional absolute symbol-specific cap
-input double  InpMaxRelativeSpreadPct   = 10.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
-input int     InpSetupCooldownMinutes  = 15;
-input int     InpMaxSetupAgeBars       = 4;     // maximum age of the M15 structure break before entry; 0 disables
+input double  InpMaxRelativeSpreadPct   = 0.0;  // hard scanner gate: spread as % of M15 ATR; 0 disables
+input int     InpSetupCooldownMinutes  = 0;
+input int     InpMaxSetupAgeBars       = 0;     // maximum age of the M15 structure break before entry; 0 disables
 input bool    InpUseRiskSizing         = true;  // default to bounded equity-risk sizing; requires valid SL geometry
 input double  InpRiskPercent           = 0.25;  // target equity risk per setup; validation hard-caps at 1.0%
 input double  InpMaxRiskVolume         = 0.0;   // 0 = broker max only
@@ -96,12 +96,12 @@ input double  InpMinimumRR              = 1.0;
 input int     InpMaxPendingBars         = 4;
 
 input group "=== FVG / OB ==="
-input bool    InpRequireFVG             = true;   // hard gate: missing local M15 FVG rejects the setup
-input bool    InpRequireOB              = true;   // hard gate: missing local M15 Order Block rejects the setup
+input bool    InpRequireFVG             = false;   // hard gate: missing local M15 FVG rejects the setup
+input bool    InpRequireOB              = false;   // hard gate: missing local M15 Order Block rejects the setup
 input bool    InpStrictPatternFilters   = false;  // legacy compatibility; true forces both local pattern gates
 input int     InpPatternWindowBars      = 12;
-input bool    InpRequireH4TrendAlignment = true;  // reject missing/contrary H4 directional context
-input bool    InpRequireHTFConfluence   = true;   // require valid higher-timeframe FVG + Order Block confluence
+input bool    InpRequireH4TrendAlignment = false;  // reject missing/contrary H4 directional context
+input bool    InpRequireHTFConfluence   = false;   // require valid higher-timeframe FVG + Order Block confluence
 input ENUM_TIMEFRAMES InpHTFPatternTF   = PERIOD_H1;
 input int     InpHTFLookbackBars        = 120;
 input int     InpHTFMaxZoneAgeBars      = 48;
@@ -11690,6 +11690,20 @@ bool ValidateInputs()
 
 int OnInit()
   {
+   // Normal terminal operation is restricted to a broker-confirmed REAL account.
+   // Strategy Tester stays isolated and does not qualify as live terminal execution.
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      long accountMode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
+      if(accountMode!=ACCOUNT_TRADE_MODE_REAL)
+        {
+         Print("STB INIT FAILED: REAL ACCOUNT REQUIRED; accountMode=",
+               IntegerToString((int)accountMode),
+               " (DEMO/CONTEST accounts are not allowed).");
+         return INIT_FAILED;
+        }
+     }
+
    if(!STB_InitRunNamespace())
      {
       Print("STB INIT FAILED: risk namespace unavailable; refusing initialization.");
