@@ -19,6 +19,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
 input bool    InpAutoTrading            = false;
+input bool    InpEnableNewPendingOrders = false; // Master safety latch: no new pending orders unless explicitly enabled.
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -997,8 +998,7 @@ int STB_AP_SelectProfile(const string symbol,
 
          if(attempts+1e-9 < (double)InpAdaptiveWarmupPerProfile)
             return STB_AP_FindLeastSampled(symbol,direction);
-        }
-     }
+        }     }
 
    double totalOutcomeSamples=0.0;
    double totalAttempts=0.0;
@@ -1997,8 +1997,7 @@ bool IsSymbolTradable(const string symbol)
    long tradeMode=SymbolInfoInteger(symbol,SYMBOL_TRADE_MODE);
 
    if(tradeMode == SYMBOL_TRADE_MODE_DISABLED ||
-      tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
-      return false;
+      tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)      return false;
 
    MqlTick tick;
 
@@ -2998,7 +2997,6 @@ bool GetOscillatorState(const string symbol,OscillatorState &o)
 
    bool cciCrossBuy=(o.cci2<=0.0 && o.cci1>0.0);
    bool cciCrossSell=(o.cci2>=0.0 && o.cci1<0.0);
-
 // Strong confirmation = regime level + momentum confirmation,
 // while a zero-line/50 cross is accepted as a fresh transition.
    o.buyConfirmed=(rsiBuy && cciBuy) ||
@@ -3997,8 +3995,7 @@ bool BuildSetup(const string symbol,
       long expiration=SymbolInfoInteger(symbol,SYMBOL_EXPIRATION_MODE);
 
       Print("STB CONTRACT REJECT symbol=",symbol,
-            " dir=",(direction>0 ? "BUY":"SELL"),
-            " tradeMode=",tradeMode,
+            " dir=",(direction>0 ? "BUY":"SELL"),            " tradeMode=",tradeMode,
             " orderMode=",orderMode,
             " stopsPts=",stops,
             " freezePts=",freeze,
@@ -4997,8 +4994,7 @@ bool OneClickHedge()
       return false;
      }
 
-   string symbol=_Symbol;
-   if(!STB_SymbolManagementOwnedVerified(symbol))
+   string symbol=_Symbol;   if(!STB_SymbolManagementOwnedVerified(symbol))
      {
       Print("STB HEDGE REJECTED: symbol writer lease not owned symbol=",symbol);
       return false;
@@ -5997,8 +5993,7 @@ bool STB_ResolvePositionSL(const ulong ticket,STBSLProposal &props[],const int c
          if(!found || c>finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
            { finalSL=c; finalSource=props[i].source; found=true; }
         }
-      else if(side==POSITION_TYPE_SELL)
-        {
+      else if(side==POSITION_TYPE_SELL)        {
          if(!found || c<finalSL || (MathAbs(c-finalSL)<=tieTolerance && props[i].source<finalSource))
            { finalSL=c; finalSource=props[i].source; found=true; }
         }
@@ -6997,8 +6992,7 @@ bool STB_CalculateStructuralTrailSL(const ulong ticket,
      }
 
    double atr=LocalATR(rates,1,14);
-   atrOut=atr;
-   if(atr<=0.0 || !MathIsValidNumber(atr))
+   atrOut=atr;   if(atr<=0.0 || !MathIsValidNumber(atr))
      {
       reason="TRAIL_ATR_UNAVAILABLE";
       return false;
@@ -7997,8 +7991,7 @@ bool STB_CalculatePositionTPFromStructure(const string symbol,
    // Use absolute entry-to-current-stop geometry for a conservative fallback.
    double risk=MathAbs(entry-sl);
    double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
-   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);
-   if(tickSize<=0.0) tickSize=point;
+   double tickSize=SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_SIZE);   if(tickSize<=0.0) tickSize=point;
    double minDist=TradeMinDistance(symbol);
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick) || risk<=0.0 ||
@@ -8502,6 +8495,16 @@ bool STB_CheckPendingOrderRequest(const string symbol,
                                     const string comment,
                                     const string context)
   {
+   // Master safety latch: this shared gate is called by scanner, manual stop/limit,
+   // and hedge entry paths immediately before a pending order can be submitted.
+   if(!InpEnableNewPendingOrders)
+     {
+      Print("STB ORDER SUBMISSION BLOCKED context=",context,
+            " reason=MASTER_SAFETY_LATCH_OFF",
+            " input=InpEnableNewPendingOrders");
+      return false;
+     }
+
    if(symbol=="" || volume<=0.0 || price<=0.0 ||
       !MathIsValidNumber(volume) || !MathIsValidNumber(price) ||
       !MathIsValidNumber(sl) || !MathIsValidNumber(tp))
@@ -8998,7 +9001,6 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
          " SL=",DoubleToString(s.sl,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
          " TP=",DoubleToString(s.tp,(int)SymbolInfoInteger(s.symbol,SYMBOL_DIGITS)),
          " RR=",DoubleToString(s.rr,2));
-
    return true;
   }
 
@@ -9997,8 +9999,7 @@ bool STB_ScannerDataEligible(const string symbol,string &reason)
 
    // A newly selected symbol can be temporarily unsynchronized while its
    // M15/H4 history is still being downloaded or built. Do not reject it
-   // before requesting that history: otherwise the scanner can repeatedly
-   // skip the symbol without ever starting the series request.
+   // before requesting that history: otherwise the scanner can repeatedly   // skip the symbol without ever starting the series request.
    int needM15=MathMax(InpLookbackM15,40);
    int needH4=MathMax(InpLookbackH4,40);
    if(!SymbolIsSynchronized(symbol) ||
@@ -10997,8 +10998,7 @@ void STB_ScannerRun()
    ulong elapsed=(ulong)GetTickCount()-(ulong)started;
 
    Print("STB SCANNER SUMMARY",
-         " universe=",IntegerToString(g_scannerUniverseCount),
-         " eligible=",IntegerToString(g_scannerEligibleCount),
+         " universe=",IntegerToString(g_scannerUniverseCount),         " eligible=",IntegerToString(g_scannerEligibleCount),
          " quality=",IntegerToString(g_scannerQualityCount),
          " regime=",IntegerToString(g_scannerRegimeCount),
          " buyCandidates=",IntegerToString(g_scannerBuyCount),
@@ -11997,8 +11997,7 @@ bool STB_ExecuteOrderDelete(const ulong ticket,
       authorized=knownCreator && stbComment && creatorCommentMatches &&
                  setupTime>0 && setupTime<=TimeCurrent()+5 &&
                  TimeCurrent()-setupTime<=120;
-     }
-   else if(reason==STB_DEL_SERVER_EXPIRATION)
+     }   else if(reason==STB_DEL_SERVER_EXPIRATION)
      {
       // Expiry deletion is only valid through the owned pending manager.
       // Recheck scope and lease at the final writer boundary, not only in
