@@ -701,7 +701,7 @@ def main() -> int:
          source.index("STB_FlushPositionSLProposals();", source.index("void ManagePositions()")) <
          source.index("EnsureInitialTPForPosition(ticket)", source.index("void ManagePositions()"))),
         ("pending structural TP modification uses the central pending geometry writer",
-         "STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,false)" in source),
+         "STB_ModifyPendingOrderGeometry(ticket,entry,sl,tp,writerFailureReason,false)" in source),
         ("structural TP calculation includes RR floor, swing target, quote buffer and RR fallback",
          "bool STB_CalculatePositionTPFromStructure(" in source and
          "bool STB_CalculatePendingTPFromStructure(" in source and
