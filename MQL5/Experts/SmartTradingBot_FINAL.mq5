@@ -9434,9 +9434,16 @@ bool PlaceManualPendingDirection(const int direction)
       return false;
      }
 
-   if((direction!=1 && direction!=-1) ||
-      !STB_TradeEnvironmentAllowed())
+   if(direction!=1 && direction!=-1)
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","INVALID_DIRECTION");
       return false;
+     }
+   if(!STB_TradeEnvironmentAllowed())
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","TRADE_ENVIRONMENT_BLOCKED");
+      return false;
+     }
 
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
      {
@@ -9449,32 +9456,52 @@ bool PlaceManualPendingDirection(const int direction)
       tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
       (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
       (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","SYMBOL_TRADE_MODE_BLOCK",
+                           "tradeMode="+IntegerToString((int)tradeMode));
       return false;
+     }
 
    MqlTick tick;
+   ResetLastError();
    if(!SymbolInfoTick(_Symbol,tick))
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","TICK_UNAVAILABLE",
+                           "err="+IntegerToString(GetLastError()));
       return false;
-
+     }
    double pip=PipSize(_Symbol);
    if(pip<=0.0)
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","INVALID_PIP_SIZE",
+                           "pip="+DoubleToString(pip,10));
       return false;
+     }
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
    if((orderModes&SYMBOL_ORDER_STOP)!=SYMBOL_ORDER_STOP ||
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","BROKER_ORDER_MODE_BLOCK",
+                           "orderModes="+IntegerToString(orderModes));
       return false;
+     }
 
    int expirationModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_EXPIRATION_MODE);
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
 
    if((expirationModes&SYMBOL_EXPIRATION_GTC)!=SYMBOL_EXPIRATION_GTC)
-     {
-      if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
-         typeTime=ORDER_TIME_DAY;
-      else
-         return false;
-     }
+      {
+       if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
+          typeTime=ORDER_TIME_DAY;
+       else
+         {
+          STB_LogControlReject("BUY_STOP/SELL_STOP","NO_SUPPORTED_EXPIRATION",
+                               "expirationModes="+IntegerToString(expirationModes));
+          return false;
+         }
+      }
 
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_STOP
                                           : ORDER_TYPE_SELL_STOP);
@@ -9482,11 +9509,19 @@ bool PlaceManualPendingDirection(const int direction)
                                       : tick.bid-InpManualPendingGapPips*pip);
    double entry=0.0;
    if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","ENTRY_GEOMETRY_REJECT",
+                           "requested="+DoubleToString(requestedEntry,_Digits));
       return false;
+     }
 
    double sl=0.0;
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
+     {
+      STB_LogControlReject("BUY_STOP/SELL_STOP","INITIAL_SL_CALCULATION_FAILED",
+                           "entry="+DoubleToString(entry,_Digits));
       return false;
+     }
 
    // Manual pending entries obey the same equity-risk sizing policy as scanner setups.
    double volume=0.0;
@@ -9603,9 +9638,16 @@ bool PlaceManualLimitDirection(const int direction)
       return false;
      }
 
-   if((direction!=1 && direction!=-1) ||
-      !STB_TradeEnvironmentAllowed())
+   if(direction!=1 && direction!=-1)
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","INVALID_DIRECTION");
       return false;
+     }
+   if(!STB_TradeEnvironmentAllowed())
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","TRADE_ENVIRONMENT_BLOCKED");
+      return false;
+     }
 
    if(!STB_SymbolManagementOwnedVerified(_Symbol))
      {
@@ -9618,32 +9660,52 @@ bool PlaceManualLimitDirection(const int direction)
       tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY ||
       (direction>0 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) ||
       (direction<0 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY))
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","SYMBOL_TRADE_MODE_BLOCK",
+                           "tradeMode="+IntegerToString((int)tradeMode));
       return false;
+     }
 
    MqlTick tick;
+   ResetLastError();
    if(!SymbolInfoTick(_Symbol,tick))
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","TICK_UNAVAILABLE",
+                           "err="+IntegerToString(GetLastError()));
       return false;
-
+     }
    double pip=PipSize(_Symbol);
    if(pip<=0.0)
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","INVALID_PIP_SIZE",
+                           "pip="+DoubleToString(pip,10));
       return false;
+     }
 
    int orderModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_ORDER_MODE);
    if((orderModes&SYMBOL_ORDER_LIMIT)!=SYMBOL_ORDER_LIMIT ||
       (orderModes&SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","BROKER_ORDER_MODE_BLOCK",
+                           "orderModes="+IntegerToString(orderModes));
       return false;
+     }
 
    int expirationModes=(int)SymbolInfoInteger(_Symbol,SYMBOL_EXPIRATION_MODE);
    ENUM_ORDER_TYPE_TIME typeTime=ORDER_TIME_GTC;
    datetime expiration=0;
 
    if((expirationModes&SYMBOL_EXPIRATION_GTC)!=SYMBOL_EXPIRATION_GTC)
-     {
-      if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
-         typeTime=ORDER_TIME_DAY;
-      else
-         return false;
-     }
+      {
+       if((expirationModes&SYMBOL_EXPIRATION_DAY)==SYMBOL_EXPIRATION_DAY)
+          typeTime=ORDER_TIME_DAY;
+       else
+         {
+          STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","NO_SUPPORTED_EXPIRATION",
+                               "expirationModes="+IntegerToString(expirationModes));
+          return false;
+         }
+      }
 
    ENUM_ORDER_TYPE orderType=(direction>0 ? ORDER_TYPE_BUY_LIMIT
                                           : ORDER_TYPE_SELL_LIMIT);
@@ -9651,11 +9713,19 @@ bool PlaceManualLimitDirection(const int direction)
                                       : tick.ask+InpManualPendingGapPips*pip);
    double entry=0.0;
    if(!STB_ResolveManualPendingEntry(_Symbol,orderType,requestedEntry,tick,entry))
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","ENTRY_GEOMETRY_REJECT",
+                           "requested="+DoubleToString(requestedEntry,_Digits));
       return false;
+     }
    double sl=0.0;
 
    if(!CalculateInitialPendingProtectionSL(_Symbol,orderType,entry,sl))
+     {
+      STB_LogControlReject("BUY_LIMIT/SELL_LIMIT","INITIAL_SL_CALCULATION_FAILED",
+                           "entry="+DoubleToString(entry,_Digits));
       return false;
+     }
 
    // Manual limit entries obey the same equity-risk sizing policy as scanner setups.
    double volume=0.0;
