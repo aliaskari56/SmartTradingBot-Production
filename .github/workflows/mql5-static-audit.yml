@@ -29,3 +29,6 @@ jobs:
 
       - name: Run pending STOP trailing direction regressions
         run: python tools/test_pending_trail_direction.py
+
+      - name: Run chart-control UI regressions
+        run: python tools/test_ui_controls.py
