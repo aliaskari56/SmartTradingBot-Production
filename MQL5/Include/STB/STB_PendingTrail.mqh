@@ -20,9 +20,9 @@ double STB_ParsePendingEntryBufferPips(const string comment,const double fallbac
 //|   BUY STOP / SELL STOP / BUY LIMIT / SELL LIMIT /                |
 //|   BUY STOP-LIMIT / SELL STOP-LIMIT.                              |
 //|   - ticket-based state (never symbol-only state)                 |
-//|   - BUY STOP: each closed M5 low is tested as a favorable extreme|
-//|   - SELL STOP: each closed M5 high is tested as a favorable extreme|
-//|   - other pending types retain live Bid/Ask extreme trailing     |
+//|   - BUY STOP / BUY STOP-LIMIT: closed M5 highs ratchet entries up|
+//|   - SELL STOP / SELL STOP-LIMIT: closed M5 lows ratchet entries down|
+//|   - LIMIT orders retain live Bid/Ask pullback-style trailing      |
 //|   - broker validation via STB_PendingDistanceResolver            |
 //|   - restart recovery (state rebuilt from terminal orders)        |
 //|   - multi-ticket isolation                                       |
@@ -160,7 +160,8 @@ bool STB_PendingTrailIsManagedType(const long orderType)
           orderType==(long)ORDER_TYPE_SELL_STOP_LIMIT;
 }
 
-// +1 => BUY side (anchor = live Bid low), -1 => SELL side (anchor = live Ask high).
+// +1 => BUY side, -1 => SELL side. STOP-kind orders use breakout-direction
+// comparisons on closed M5 highs/lows; LIMIT orders retain pullback semantics.
 int STB_PendingTrailDirection(const long orderType)
 {
    ENUM_ORDER_TYPE t=(ENUM_ORDER_TYPE)orderType;
@@ -225,9 +226,10 @@ int STB_PendingClassifyResult(const bool ok)
 }
 
 //--- Register a real terminal pending order --------------------------
-// Called ONLY after the terminal confirmed the ticket. BUY STOP / SELL STOP
-// state anchors use the latest closed M5 candle; other pending types retain
-// their existing geometry/live-quote anchor and one-way trailing path.
+// Called ONLY after the terminal confirmed the ticket. Initial trackedExtreme
+// is reconstructed from actual order geometry and its stored entry offset.
+// Management uses closed M5 highs/lows for STOP-kind orders and live Bid/Ask
+// extremes for LIMIT orders.
 // Universal intake: EA-created, manual/mobile, other-EA and restart-recovered
 // tickets all register through this single entry point.
 bool STB_PendingTrailRegister(const ulong ticket,const string source)
@@ -591,7 +593,9 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // including orders created or edited manually/from mobile. Manual-override
    // metadata is not a permanent opt-out from protective trailing.
    bool candleStop=(orderType==(long)ORDER_TYPE_BUY_STOP ||
-                    orderType==(long)ORDER_TYPE_SELL_STOP);
+                    orderType==(long)ORDER_TYPE_SELL_STOP ||
+                    orderType==(long)ORDER_TYPE_BUY_STOP_LIMIT ||
+                    orderType==(long)ORDER_TYPE_SELL_STOP_LIMIT);
 
    if(!STB_PendingTrailIsManagedType(orderType))
    {
@@ -640,10 +644,11 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return true;
      }
 
-   // 1) STOP orders use closed M5 structure, never the forming candle.
-   // BUY STOP evaluates each closed candle's low; SELL STOP its high.
-   // Candle body color is deliberately irrelevant: a wick can create the
-   // favorable extreme. Other pending types retain live Bid/Ask behavior.
+   // 1) STOP-kind orders use closed M5 structure, never the forming candle.
+   // BUY STOP evaluates each closed candle's HIGH and ratchets its entry up;
+   // SELL STOP evaluates each closed candle's LOW and ratchets its entry down.
+   // STOP-LIMIT triggers follow the same direction. Candle color is irrelevant;
+   // a wick can create a valid favorable extreme. LIMIT orders use live quotes.
    double extreme=0.0;
    datetime actionableClosedBar=0;
    if(candleStop)
@@ -687,13 +692,12 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
          return true;
         }
 
-      // Candle color is not a trailing criterion: a wick can set a valid
-      // favorable extreme on either candle body color. The monotonic extreme
-      // gate below decides whether the closed bar can improve the proposal.
+      // Candle color is not a trailing criterion: either wick may improve the
+      // anchor. BUY-side STOP kinds track highs; SELL-side STOP kinds track lows.
       // Commit this bar only after a no-change decision or confirmed write;
       // resolver/writer failures leave it retryable under bounded backoff.
       actionableClosedBar=closedBar;
-      extreme=(orderType==(long)ORDER_TYPE_BUY_STOP ? barLow:barHigh);
+      extreme=(STB_PendingIsBuySide((ENUM_ORDER_TYPE)orderType) ? barHigh:barLow);
      }
    else
      {
@@ -717,10 +721,19 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return true;
      }
 
-   // P4 monotonic trackedExtreme: BUY side only moves down, SELL side only up.
+   // Monotonic anchor policy is type-specific:
+   // STOP kinds follow breakout direction (BUY high up, SELL low down).
+   // LIMIT kinds retain pullback direction (BUY low down, SELL high up).
    bool isNewExtreme=false;
 
-   if(direction>0)
+   if(candleStop)
+     {
+      if(direction>0)
+         isNewExtreme=(extreme > g_stbPendingTrail[idx].trackedExtreme+point*0.5);
+      else
+         isNewExtreme=(extreme < g_stbPendingTrail[idx].trackedExtreme-point*0.5);
+     }
+   else if(direction>0)
       isNewExtreme=(extreme < g_stbPendingTrail[idx].trackedExtreme-point*0.5);
    else
       isNewExtreme=(extreme > g_stbPendingTrail[idx].trackedExtreme+point*0.5);
@@ -900,8 +913,19 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       if(candleStop && actionableClosedBar>0)
          g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
 
-      // P4: trackedExtreme advances only in the favorable direction.
-      if(direction>0)
+      // Advance the anchor only in the type's favorable direction.
+      // STOP-kind: BUY high watermark increases; SELL low watermark decreases.
+      // LIMIT-kind: BUY low watermark decreases; SELL high watermark increases.
+      if(candleStop)
+        {
+         if(direction>0)
+            g_stbPendingTrail[idx].trackedExtreme=
+               MathMax(g_stbPendingTrail[idx].trackedExtreme,extreme);
+         else
+            g_stbPendingTrail[idx].trackedExtreme=
+               MathMin(g_stbPendingTrail[idx].trackedExtreme,extreme);
+        }
+      else if(direction>0)
          g_stbPendingTrail[idx].trackedExtreme=
             MathMin(g_stbPendingTrail[idx].trackedExtreme,extreme);
       else
