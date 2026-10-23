@@ -11694,20 +11694,6 @@ bool ValidateInputs()
 
 int OnInit()
   {
-   // Normal terminal operation is restricted to a broker-confirmed REAL account.
-   // Strategy Tester stays isolated and does not qualify as live terminal execution.
-   if(!MQLInfoInteger(MQL_TESTER))
-     {
-      long accountMode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
-      if(accountMode!=ACCOUNT_TRADE_MODE_REAL)
-        {
-         Print("STB INIT FAILED: REAL ACCOUNT REQUIRED; accountMode=",
-               IntegerToString((int)accountMode),
-               " (DEMO/CONTEST accounts are not allowed).");
-         return INIT_FAILED;
-        }
-     }
-
    if(!STB_InitRunNamespace())
      {
       Print("STB INIT FAILED: risk namespace unavailable; refusing initialization.");
