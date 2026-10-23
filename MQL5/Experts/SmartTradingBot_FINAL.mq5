@@ -10656,6 +10656,7 @@ void STB_ScannerRun()
    int scanRegimeEvalRejects=0;
    int scanUnstableRegimeRejects=0;
    string scanQualityReasonTally="";
+   string scanBuildSetupReasonTally="";
    int scanDirectionGateRejects=0;
    int scanBuildSetupRejects=0;
    int scanSetupAgeRejects=0;
@@ -10720,6 +10721,8 @@ void STB_ScannerRun()
          if(!BuildSetup(symbol,direction,setup,true))
            {
             scanBuildSetupRejects++;
+            STB_TallyAdd(scanBuildSetupReasonTally,
+                         g_lastBuildRejectReason);
             continue;
            }
 
@@ -11034,6 +11037,7 @@ void STB_ScannerRun()
          " candidates=",IntegerToString(g_scannerCandidateCount),
          " directionGateRejects=",IntegerToString(scanDirectionGateRejects),
          " buildSetupRejects=",IntegerToString(scanBuildSetupRejects),
+         " buildSetupReasons=",STB_TallyReport(scanBuildSetupReasonTally),
          " setupAgeRejects=",IntegerToString(scanSetupAgeRejects),
          " scoreRejects=",IntegerToString(scanScoreRejects),
          " minScore=",DoubleToString(InpScannerMinScore,1),
@@ -11050,6 +11054,7 @@ void STB_ScannerRun()
           " unstableRegimeRejects=",IntegerToString(scanUnstableRegimeRejects),
           " directionGateRejects=",IntegerToString(scanDirectionGateRejects),
           " buildSetupRejects=",IntegerToString(scanBuildSetupRejects),
+          " buildSetupReasons=",STB_TallyReport(scanBuildSetupReasonTally),
           " setupAgeRejects=",IntegerToString(scanSetupAgeRejects),
           " scoreRejects=",IntegerToString(scanScoreRejects),
           " check=discovery_stage_only; universe=dataRejects+eligible;",
