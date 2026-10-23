@@ -2063,6 +2063,16 @@ bool STB_TradeEnvironmentAllowed()
    return true;
   }
 
+void STB_LogControlReject(const string action,
+                          const string reason,
+                          const string detail="")
+  {
+   Print("STB CONTROL REJECT action=",action,
+         " symbol=",_Symbol,
+         " reason=",reason,
+         (detail=="" ? "" : " detail="),detail);
+  }
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -4970,9 +4980,22 @@ bool OneClickHedge()
       return false;
      }
 
-   if(!InpAllowOneClickHedge || !IsHedgingAccount() ||
-      !STB_TradeEnvironmentAllowed())
+   if(!InpAllowOneClickHedge)
+     {
+      STB_LogControlReject("HEDGE","INPUT_DISABLED",
+                           "InpAllowOneClickHedge is false");
       return false;
+     }
+   if(!IsHedgingAccount())
+     {
+      STB_LogControlReject("HEDGE","ACCOUNT_IS_NOT_HEDGING_MODE");
+      return false;
+     }
+   if(!STB_TradeEnvironmentAllowed())
+     {
+      STB_LogControlReject("HEDGE","TRADE_ENVIRONMENT_BLOCKED");
+      return false;
+     }
 
    string symbol=_Symbol;
    if(!STB_SymbolManagementOwnedVerified(symbol))
@@ -5001,7 +5024,10 @@ bool OneClickHedge()
      }
 
    if(sourceTicket==0 || sourceVolume<=0.0)
+     {
+      STB_LogControlReject("HEDGE","NO_MANAGED_POSITION_ON_CHART_SYMBOL");
       return false;
+     }
 
    long hedgeType=(sourceType==POSITION_TYPE_BUY) ? POSITION_TYPE_SELL
                                                   : POSITION_TYPE_BUY;
@@ -11027,9 +11053,14 @@ void CreateButton(const string name,
                   const color bgColor)
   {
    ObjectDelete(0,name);
+   ResetLastError();
 
    if(!ObjectCreate(0,name,OBJ_BUTTON,0,0,0))
+     {
+      Print("STB UI BUTTON CREATE FAILED name=",name,
+            " err=",GetLastError());
       return;
+     }
 
    ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_LOWER);
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
@@ -11046,6 +11077,65 @@ void CreateButton(const string name,
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
    ObjectSetInteger(0,name,OBJPROP_ZORDER,100000);
+  }
+
+void STB_EnsureControlButtons()
+  {
+   if(ObjectFind(0,g_prefix+"BUY_STOP")<0)
+      CreateButton(g_prefix+"BUY_STOP","BUY STOP",7,28,82,19,clrSeaGreen);
+   if(ObjectFind(0,g_prefix+"SELL_STOP")<0)
+      CreateButton(g_prefix+"SELL_STOP","SELL STOP",7,28,82,19,clrTomato);
+   if(ObjectFind(0,g_prefix+"AUTO")<0)
+      CreateButton(g_prefix+"AUTO","AUTO",7,28,82,19,clrFireBrick);
+   if(ObjectFind(0,g_prefix+"SAVE20")<0)
+      CreateButton(g_prefix+"SAVE20","SAVE +20",7,28,82,19,clrRoyalBlue);
+   if(ObjectFind(0,g_prefix+"HEDGE")<0)
+      CreateButton(g_prefix+"HEDGE","HEDGE",7,28,82,19,clrDarkOrange);
+   if(ObjectFind(0,g_prefix+"SELL_LIMIT")<0)
+      CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",7,28,82,19,clrTomato);
+   if(ObjectFind(0,g_prefix+"BUY_LIMIT")<0)
+      CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",7,28,82,19,clrSeaGreen);
+   if(ObjectFind(0,g_prefix+"PEND_TRAIL")<0)
+      CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",7,28,82,19,clrSlateBlue);
+  }
+
+void STB_RenderControlStatus()
+  {
+   string name=g_prefix+"CONTROL_STATUS";
+   if(ObjectFind(0,name)<0)
+     {
+      ResetLastError();
+      if(!ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0))
+        {
+         Print("STB UI STATUS CREATE FAILED err=",GetLastError());
+         return;
+        }
+     }
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,8);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,22);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,570);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,22);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrBlack);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrYellow);
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,100001);
+   ObjectSetString(0,name,OBJPROP_TEXT,g_dashboardLastAction);
+   ObjectSetString(0,name,OBJPROP_TOOLTIP,
+                   "Latest SmartTradingBot control result. See Experts log for details.");
+  }
+
+void STB_SetControlStatus(const string message)
+  {
+   g_dashboardLastAction=message;
+   Print("STB UI STATUS: ",message);
+   STB_RenderControlStatus();
+   ChartRedraw(0);
   }
 
 //+------------------------------------------------------------------+
@@ -11135,6 +11225,7 @@ void STB_UpdateControlBarLayout()
 //+------------------------------------------------------------------+
 void UpdateButtons()
   {
+   STB_EnsureControlButtons();
    STB_UpdateControlBarLayout();
 
    string buyName=g_prefix+"BUY_STOP";
@@ -11170,6 +11261,7 @@ void UpdateButtons()
                    IntegerToString(CountManagedPendingOrders()));
    ObjectSetInteger(0,trailName,OBJPROP_BGCOLOR,clrSlateBlue);
    ObjectSetInteger(0,trailName,OBJPROP_COLOR,clrWhite);
+   STB_RenderControlStatus();
   }
 
 //==================================================================
@@ -11531,6 +11623,10 @@ int OnInit()
          " warmup=",IntegerToString(InpAdaptiveWarmupPerProfile),
          " UCB=",DoubleToString(InpAdaptiveUCBExploration,2));
    STB_LogSizingConfig();
+   if(InpMaxRelativeSpreadPct>0.0)
+      Print("STB CONFIG HARD GATE relativeSpreadPct=",
+            DoubleToString(InpMaxRelativeSpreadPct,1),
+            "% formula=(ask-bid)/M15_ATR14*100. Symbols above this cap are rejected before candidate ranking; inspect STB SCANNER DISCOVERY REJECT BREAKDOWN for qualityReasons=REJECT_RELATIVE_SPREAD.");
    Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
 
 // Keep the six dedicated EA controls in the upper-right, away from
@@ -11545,6 +11641,7 @@ int OnInit()
    CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",8,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
 
+   g_dashboardLastAction="CONTROL BAR READY - click results appear here; rejection details are in Experts.";
    UpdateButtons();
     ResetLastError();
     if(!EventSetTimer(MathMax(1,InpScanSeconds)))
@@ -11677,6 +11774,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0,g_prefix+"SELL_LIMIT");
    ObjectDelete(0,g_prefix+"BUY_LIMIT");
    ObjectDelete(0,g_prefix+"PEND_TRAIL");
+   ObjectDelete(0,g_prefix+"CONTROL_STATUS");
    ObjectDelete(0,g_prefix+"H4_TRENDLINE");
    ObjectDelete(0,g_prefix+"TF_TREND_BASE");
    ObjectDelete(0,g_prefix+"TF_TREND_EXT");
@@ -12408,19 +12506,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 void STB_ToggleDashboard()
   {
    g_dashHidden=!g_dashHidden;
-
    if(g_dashHidden)
-     {
-      g_dashboardLastAction="DASHBOARD HIDDEN";
       STB_DashDeleteAll();
-     }
    else
-     {
-      g_dashboardLastAction="DASHBOARD SHOWN";
       UpdatePanel();
-     }
 
-   ChartRedraw(0);
+   // The large dashboard painter is disabled in this source. Acknowledge D
+   // visibly instead of swallowing the keyboard event with no feedback.
+   STB_SetControlStatus(g_dashHidden ?
+                        "D KEY RECEIVED - dashboard hidden; control buttons remain active." :
+                        "D KEY RECEIVED - dashboard rendering is disabled in this build.");
   }
 
 //+------------------------------------------------------------------+
@@ -12463,11 +12558,23 @@ void OnChartEvent(const int id,
    string buyLimitName=g_prefix+"BUY_LIMIT";
    string trailName=g_prefix+"PEND_TRAIL";
 
+   if(sparam!=buyName && sparam!=sellName && sparam!=autoName &&
+      sparam!=saveName && sparam!=hedgeName && sparam!=sellLimitName &&
+      sparam!=buyLimitName && sparam!=trailName)
+      return;
+
+   if(ObjectFind(0,sparam)>=0)
+      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+
+   Print("STB UI CLICK RECEIVED object=",sparam,
+         " chart=",IntegerToString((int)ChartID()));
+   STB_SetControlStatus("PROCESSING "+sparam+" - see Experts for result.");
+
    if(sparam==buyName)
      {
       bool ok=PlaceManualPendingDirection(1);
-      g_dashboardLastAction=(ok ? "BUY STOP ACCEPTED" :
-                             "BUY STOP REJECTED");
+      STB_SetControlStatus(ok ? "BUY STOP ACCEPTED" :
+                                 "BUY STOP REJECTED - see Experts log.");
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12477,8 +12584,8 @@ void OnChartEvent(const int id,
    if(sparam==sellName)
      {
       bool ok=PlaceManualPendingDirection(-1);
-      g_dashboardLastAction=(ok ? "SELL STOP ACCEPTED" :
-                             "SELL STOP REJECTED");
+      STB_SetControlStatus(ok ? "SELL STOP ACCEPTED" :
+                                 "SELL STOP REJECTED - see Experts log.");
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12495,9 +12602,9 @@ void OnChartEvent(const int id,
       if(g_autoTrading)
          STB_ManualOverrideClearAll();
 
-      g_dashboardLastAction=(g_autoTrading ?
-                             "AUTO TRADING ENABLED" :
-                             "AUTO TRADING DISABLED");
+      STB_SetControlStatus(g_autoTrading ?
+                           "AUTO TRADING ENABLED" :
+                           "AUTO TRADING DISABLED");
 
       UpdateButtons();
       UpdatePanel();
@@ -12510,7 +12617,7 @@ void OnChartEvent(const int id,
    if(sparam==saveName)
      {
       ManualSavePlus20();
-      g_dashboardLastAction="SAVE +20 PIPS COMMAND SENT";
+      STB_SetControlStatus("SAVE +20 PROCESSED - only eligible managed positions change; see Experts log.");
       UpdateButtons();
       UpdatePanel();
       return;
@@ -12519,8 +12626,8 @@ void OnChartEvent(const int id,
    if(sparam==hedgeName)
      {
       bool ok=OneClickHedge();
-      g_dashboardLastAction=(ok ? "HEDGE ACCEPTED" :
-                             "HEDGE REJECTED");
+      STB_SetControlStatus(ok ? "HEDGE ACCEPTED" :
+                                 "HEDGE REJECTED - see Experts log; check input, account mode and open position.");
       UpdateButtons();
       UpdatePanel();
       return;
@@ -12529,8 +12636,8 @@ void OnChartEvent(const int id,
    if(sparam==sellLimitName)
      {
       bool ok=PlaceManualLimitDirection(-1);
-      g_dashboardLastAction=(ok ? "SELL LIMIT ACCEPTED" :
-                             "SELL LIMIT REJECTED");
+      STB_SetControlStatus(ok ? "SELL LIMIT ACCEPTED" :
+                                 "SELL LIMIT REJECTED - see Experts log.");
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12540,8 +12647,8 @@ void OnChartEvent(const int id,
    if(sparam==buyLimitName)
      {
       bool ok=PlaceManualLimitDirection(1);
-      g_dashboardLastAction=(ok ? "BUY LIMIT ACCEPTED" :
-                             "BUY LIMIT REJECTED");
+      STB_SetControlStatus(ok ? "BUY LIMIT ACCEPTED" :
+                                 "BUY LIMIT REJECTED - see Experts log.");
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12549,9 +12656,8 @@ void OnChartEvent(const int id,
      }
    if(sparam==trailName)
      {
-      int moved=TrailAllPendingOrdersNow();
-      g_dashboardLastAction="PENDING TRAIL MOVED "+
-                            IntegerToString(moved)+" ORDER(S)";
+      int moved=TrailAllPendingOrdersNow();       STB_SetControlStatus("PENDING TRAIL MOVED "+
+                            IntegerToString(moved)+" ORDER(S)");
       Print("STB PEND TRAIL button moved=",IntegerToString(moved),
             " pending=",IntegerToString(CountManagedPendingOrders()));
       UpdateButtons();
