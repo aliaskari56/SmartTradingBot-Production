@@ -296,11 +296,12 @@ bool STB_ResolvePendingDistance(const string symbol,
       return false;
      }
 
-   // Test the FINAL aligned price, not rawEntry: alignment can erase a small
-   // improvement or round the entry back into an invalid direction.
+   // Test the FINAL tick-aligned price. A STOP trigger must improve in the
+   // breakout direction: BUY STOP rises; SELL STOP falls. STOP-LIMIT triggers
+   // obey the same monotonic direction. Tick alignment can erase small moves.
    if((orderType==ORDER_TYPE_BUY_STOP ||
        orderType==ORDER_TYPE_BUY_STOP_LIMIT) &&
-      currentEntry>0.0 && entry>=currentEntry-entryTolerance)
+      currentEntry>0.0 && entry<=currentEntry+entryTolerance)
      {
       r.reason="BUY_STOP_NO_FAVORABLE_VALID_ENTRY";
       return false;
@@ -308,7 +309,7 @@ bool STB_ResolvePendingDistance(const string symbol,
 
    if((orderType==ORDER_TYPE_SELL_STOP ||
        orderType==ORDER_TYPE_SELL_STOP_LIMIT) &&
-      currentEntry>0.0 && entry<=currentEntry+entryTolerance)
+      currentEntry>0.0 && entry>=currentEntry-entryTolerance)
      {
       r.reason="SELL_STOP_NO_FAVORABLE_VALID_ENTRY";
       return false;
