@@ -11228,29 +11228,101 @@ void CreateButton(const string name,
    ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bgColor);
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_STATE,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-   ObjectSetInteger(0,name,OBJPROP_ZORDER,100000);
+   // Keep actionable buttons above the non-interactive status panel.
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,200000);
+  }
+
+// Repair stale same-named non-button objects left by an older UI version.
+// ObjectFind() alone cannot prove that the object will emit a button click.
+bool STB_ControlButtonNeedsRepair(const string name)
+  {
+   if(ObjectFind(0,name)<0)
+      return true;
+
+   long type=ObjectGetInteger(0,name,OBJPROP_TYPE);
+   if(type!=(long)OBJ_BUTTON)
+     {
+      Print("STB UI CONTROL REPAIR name=",name,
+            " reason=WRONG_OBJECT_TYPE",
+            " type=",IntegerToString((int)type));
+      ObjectDelete(0,name);
+      return true;
+     }
+
+   return false;
+  }
+
+void STB_LogControlButtonHealth()
+  {
+   string names[8]=
+     {
+      g_prefix+"BUY_STOP",g_prefix+"SELL_STOP",g_prefix+"AUTO",
+      g_prefix+"SAVE20",g_prefix+"HEDGE",g_prefix+"SELL_LIMIT",
+      g_prefix+"BUY_LIMIT",g_prefix+"PEND_TRAIL"
+     };
+
+   int ready=0;
+   for(int i=0;i<ArraySize(names);i++)
+     {
+      string name=names[i];
+      if(ObjectFind(0,name)<0)
+        {
+         Print("STB UI BUTTON HEALTH name=",name," state=MISSING");
+         continue;
+        }
+
+      long type=ObjectGetInteger(0,name,OBJPROP_TYPE);
+      long x=ObjectGetInteger(0,name,OBJPROP_XDISTANCE);
+      long y=ObjectGetInteger(0,name,OBJPROP_YDISTANCE);
+      long width=ObjectGetInteger(0,name,OBJPROP_XSIZE);
+      long height=ObjectGetInteger(0,name,OBJPROP_YSIZE);
+      long zorder=ObjectGetInteger(0,name,OBJPROP_ZORDER);
+      bool selectable=(ObjectGetInteger(0,name,OBJPROP_SELECTABLE)!=0);
+      bool hidden=(ObjectGetInteger(0,name,OBJPROP_HIDDEN)!=0);
+      bool valid=(type==(long)OBJ_BUTTON && selectable && !hidden &&
+                  width>0 && height>0);
+      if(valid)
+         ready++;
+
+      Print("STB UI BUTTON HEALTH name=",name,
+            " state=",valid ? "READY":"INVALID",
+            " type=",IntegerToString((int)type),
+            " x=",IntegerToString((int)x),
+            " y=",IntegerToString((int)y),
+            " width=",IntegerToString((int)width),
+            " height=",IntegerToString((int)height),
+            " zorder=",IntegerToString((int)zorder),
+            " selectable=",selectable ? "YES":"NO",
+            " hidden=",hidden ? "YES":"NO");
+     }
+
+   Print("STB UI BUTTONS SUMMARY ready=",IntegerToString(ready),
+         " expected=",IntegerToString(ArraySize(names)),
+         " chart=",(string)ChartID());
   }
 
 void STB_EnsureControlButtons()
   {
-   if(ObjectFind(0,g_prefix+"BUY_STOP")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"BUY_STOP"))
       CreateButton(g_prefix+"BUY_STOP","BUY STOP",7,28,82,19,clrSeaGreen);
-   if(ObjectFind(0,g_prefix+"SELL_STOP")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"SELL_STOP"))
       CreateButton(g_prefix+"SELL_STOP","SELL STOP",7,28,82,19,clrTomato);
-   if(ObjectFind(0,g_prefix+"AUTO")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"AUTO"))
       CreateButton(g_prefix+"AUTO","AUTO",7,28,82,19,clrFireBrick);
-   if(ObjectFind(0,g_prefix+"SAVE20")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"SAVE20"))
       CreateButton(g_prefix+"SAVE20","SAVE +20",7,28,82,19,clrRoyalBlue);
-   if(ObjectFind(0,g_prefix+"HEDGE")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"HEDGE"))
       CreateButton(g_prefix+"HEDGE","HEDGE",7,28,82,19,clrDarkOrange);
-   if(ObjectFind(0,g_prefix+"SELL_LIMIT")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"SELL_LIMIT"))
       CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",7,28,82,19,clrTomato);
-   if(ObjectFind(0,g_prefix+"BUY_LIMIT")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"BUY_LIMIT"))
       CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",7,28,82,19,clrSeaGreen);
-   if(ObjectFind(0,g_prefix+"PEND_TRAIL")<0)
+   if(STB_ControlButtonNeedsRepair(g_prefix+"PEND_TRAIL"))
       CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",7,28,82,19,clrSlateBlue);
   }
 
@@ -11279,7 +11351,8 @@ void STB_RenderControlStatus()
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-   ObjectSetInteger(0,name,OBJPROP_ZORDER,100001);
+   // Status must never win click priority over the trading-control buttons.
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,1);
    ObjectSetString(0,name,OBJPROP_TEXT,g_dashboardLastAction);
    ObjectSetString(0,name,OBJPROP_TOOLTIP,
                    "Latest SmartTradingBot control result. See Experts log for details.");
@@ -11417,6 +11490,7 @@ void UpdateButtons()
    ObjectSetInteger(0,trailName,OBJPROP_BGCOLOR,clrSlateBlue);
    ObjectSetInteger(0,trailName,OBJPROP_COLOR,clrWhite);
    STB_RenderControlStatus();
+   ChartRedraw(0);
   }
 
 //==================================================================
@@ -11809,7 +11883,8 @@ int OnInit()
 
    g_dashboardLastAction="CONTROL BAR READY - click results appear here; rejection details are in Experts.";
    UpdateButtons();
-    ResetLastError();
+   STB_LogControlButtonHealth();
+   ResetLastError();
     if(!EventSetTimer(MathMax(1,InpScanSeconds)))
       {
        Print("STB INIT FAILED: EventSetTimer failed err=",GetLastError());
@@ -12694,11 +12769,31 @@ void OnChartEvent(const int id,
   {
    if(id==CHARTEVENT_KEYDOWN)
      {
+      Print("STB UI KEY EVENT keyCode=",IntegerToString((int)lparam),
+            " repeat=",DoubleToString(dparam,0),
+            " keyMask=",sparam,
+            " chart=",(string)ChartID());
+
       if(lparam==68 || lparam==100)
         {
          STB_ToggleDashboard();
          return;
         }
+     }
+
+   // Trace a named control event before name filtering. This separates a UI
+   // dispatch defect from a rejected trading request in the Experts log.
+   if(id==CHARTEVENT_OBJECT_CLICK && StringFind(sparam,g_prefix)==0)
+     {
+      long objectType=-1;
+      if(ObjectFind(0,sparam)>=0)
+         objectType=ObjectGetInteger(0,sparam,OBJPROP_TYPE);
+
+      Print("STB UI OBJECT_CLICK event received name=",sparam,
+            " objectType=",IntegerToString((int)objectType),
+            " x=",IntegerToString((int)lparam),
+            " y=",DoubleToString(dparam,0),
+            " chart=",(string)ChartID());
      }
 
    if(id==CHARTEVENT_CHART_CHANGE) return; // P6 STB-CLEANUP: no rebuild/redraw on chart change
@@ -12727,10 +12822,20 @@ void OnChartEvent(const int id,
    if(sparam!=buyName && sparam!=sellName && sparam!=autoName &&
       sparam!=saveName && sparam!=hedgeName && sparam!=sellLimitName &&
       sparam!=buyLimitName && sparam!=trailName)
+     {
+      if(StringFind(sparam,g_prefix)==0)
+         Print("STB UI CLICK NOT ROUTED name=",sparam,
+               " reason=UNRECOGNIZED_CONTROL_NAME",
+               " expectedPrefix=",g_prefix,
+               " chart=",(string)ChartID());
       return;
+     }
 
    if(ObjectFind(0,sparam)>=0)
+     {
       ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
+      ChartRedraw(0);
+     }
 
    Print("STB UI CLICK RECEIVED object=",sparam,
          " chart=",IntegerToString((int)ChartID()));
