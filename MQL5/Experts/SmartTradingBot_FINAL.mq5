@@ -10721,8 +10721,11 @@ void STB_ScannerRun()
          if(!BuildSetup(symbol,direction,setup,true))
            {
             scanBuildSetupRejects++;
-            STB_TallyAdd(scanBuildSetupReasonTally,
-                         g_lastBuildRejectReason);
+            string buildRejectReason=(g_lastBuildRejectReason=="" ?
+                                      "UNKNOWN":g_lastBuildRejectReason);
+            string buildRejectKey=(direction>0 ? "BUY:":"SELL:")+
+                                  buildRejectReason;
+            STB_TallyAdd(scanBuildSetupReasonTally,buildRejectKey);
             continue;
            }
 
