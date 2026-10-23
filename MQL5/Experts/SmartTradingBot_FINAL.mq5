@@ -1127,6 +1127,10 @@ int STB_EffectivePatternWindow()
 //+------------------------------------------------------------------+
 int STB_EffectiveMaxSetupAgeBars()
   {
+   // An explicit zero disables the setup-age gate globally, including adaptive profiles.
+   if(InpMaxSetupAgeBars<=0)
+      return 0;
+
    if(g_activeAdaptiveProfileValid)
       return g_activeAdaptiveProfile.maxSetupAgeBars;
 
