@@ -19,6 +19,7 @@ bool STB_ScannerQuoteValid(const MqlTick &tick,string &reason);
 input group "=== CORE ==="
 input ulong   InpMagic                  = 26093001;
 input bool    InpAutoTrading            = false;
+input bool    InpEnableNewPendingOrders = false; // Master safety latch: no new pending orders unless explicitly enabled.
 input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = true;
@@ -8502,6 +8503,16 @@ bool STB_CheckPendingOrderRequest(const string symbol,
                                     const string comment,
                                     const string context)
   {
+   // Master safety latch: this shared gate is called by scanner, manual stop/limit,
+   // and hedge entry paths immediately before a pending order can be submitted.
+   if(!InpEnableNewPendingOrders)
+     {
+      Print("STB ORDER SUBMISSION BLOCKED context=",context,
+            " reason=MASTER_SAFETY_LATCH_OFF",
+            " input=InpEnableNewPendingOrders");
+      return false;
+     }
+
    if(symbol=="" || volume<=0.0 || price<=0.0 ||
       !MathIsValidNumber(volume) || !MathIsValidNumber(price) ||
       !MathIsValidNumber(sl) || !MathIsValidNumber(tp))
