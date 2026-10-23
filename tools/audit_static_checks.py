@@ -204,8 +204,8 @@ def main() -> int:
         source, "bool STB_ResolvePositionSL(",
         "bool STB_SubmitPositionSL(")
     checks: list[tuple[str, bool]] = [
-        ("live automatic trading remains opt-in by default",
-         "input bool    InpAutoTrading            = false;" in source),
+        ("live automatic trading defaults on",
+         "input bool    InpAutoTrading            = true;" in source),
         ("scanner session gate falls back to a valid clock and includes previous-weekday overnight sessions",
          bool(scanner_session) and
          "datetime serverNow=TimeTradeServer();" in scanner_session and
@@ -224,9 +224,12 @@ def main() -> int:
          "GetRates(symbol,PERIOD_H4,needH4,warmH4)" in scanner_data and
          scanner_data.index("GetRates(symbol,PERIOD_M15,needM15,warmM15)") <
          scanner_data.index("MqlTick tick;")),
-        ("bounded equity-risk sizing is enabled by default while live AUTO remains off",
+        ("bounded equity-risk sizing stays enabled with live AUTO on",
          "input bool    InpUseRiskSizing         = true;" in source and
-         "input bool    InpAutoTrading            = false;" in source),
+         "input double  InpRiskPercent           = 0.25;" in source and
+         "input double  InpMaxDailyLossPercent   = 2.0;" in source and
+         "input bool    InpAutoTrading            = true;" in source and
+         "InpRiskPercent>1.0" in source),
         ("tester adaptive and daily-risk state are namespaced per initialization",
          "bool STB_InitRunNamespace()" in source and
          "g_stbRunNamespace=" in source and
@@ -616,8 +619,8 @@ def main() -> int:
           (source_region(source, "void STB_FlushPositionSLProposals()", "// APPLY PROFIT LOCK"))),
         ("trail success log is not emitted for queued proposals",
          'if(result && !g_stbCollectingSLProposals)' in source),
-        ("H4 trend alignment is a configurable hard entry gate",
-         "InpRequireH4TrendAlignment = true" in source and
+        ("H4 trend alignment remains available but is optional by default",
+         "InpRequireH4TrendAlignment = false" in source and
          "if(InpRequireH4TrendAlignment && (!ti.valid || !aligned))" in source),
         ("required local M15 FVG and Order Block are hard rejection gates",
          "if((InpRequireFVG || InpStrictPatternFilters) && !hasFVG)" in source and
@@ -682,8 +685,11 @@ def main() -> int:
          "if(hasValidRiskSample && MathIsValidNumber(rMultiple))" in source),
         ("closed-trade learning reports whether initial monetary risk was captured",
          source.count("riskMoney>0.0 && MathIsValidNumber(riskMoney)") >= 2),
-        ("default M15 setup age is bounded rather than unlimited",
-         "InpMaxSetupAgeBars       = 4;" in source),
+        ("zero setup-age setting disables the age gate across adaptive profiles",
+         "InpMaxSetupAgeBars       = 0;" in source and
+         "int STB_EffectiveMaxSetupAgeBars()" in source and
+         "if(InpMaxSetupAgeBars<=0)" in source and
+         "if(effectiveMaxAge>0 && c.setupAgeBars>effectiveMaxAge)" in source),
         ("only one direct PositionModify call exists in the shared verified broker writer",
          source.count("trade.PositionModify(") == 1 and
          "bool STB_PositionModifyBrokerVerified(" in source),
@@ -712,9 +718,19 @@ def main() -> int:
         ("managed positions and pending orders select their symbols before market-data management",
          "SymbolSelect(symbol,true)" in source[source.index("void ManagePositions()"):source.index("void ManagePendingOrders()")] and
          "SymbolSelect(symbol,true)" in source[source.index("void ManagePendingOrders()"):source.index("double DirectionExposureVolume(")]),
-        ("scanner rejects excessive spread relative to M15 ATR before score ranking",
-         "InpMaxRelativeSpreadPct   = 10.0" in source and
+        ("entry-selection gates are disabled by default",
+         "input double  InpScannerMinQuality        = 0.0;" in source and
+         "input double  InpScannerMinScore          = 0.0;" in source and
+         "input double  InpScannerMinTopGap         = 0.0;" in source and
+         "input int     InpSetupCooldownMinutes  = 0;" in source and
+         "input bool    InpOneSetupPerSymbol      = false;" in source and
+         "InpRequireFVG             = false" in source and
+         "InpRequireOB              = false" in source and
+         "InpRequireHTFConfluence   = false" in source),
+        ("relative-spread gate remains available but is disabled by default",
+         "InpMaxRelativeSpreadPct   = 0.0" in source and
          'q.reason="REJECT_RELATIVE_SPREAD";' in source and
+         "InpMaxRelativeSpreadPct>0.0" in source and
          "q.relativeSpread>InpMaxRelativeSpreadPct" in source and
          "!MathIsValidNumber(InpMaxRelativeSpreadPct)" in source),
         ("scanner logs final revalidation, age and score rejection reasons instead of silently dropping candidates",
