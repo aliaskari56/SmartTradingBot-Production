@@ -477,7 +477,8 @@ def main() -> int:
          and "STB DAILY RISK STATE CORRUPT/DATE REGRESSION: entries blocked." in daily_risk_guard),
         ("daily equity enforcement fails closed and scopes forced closes to this EA magic",
          bool(daily_risk_enforcer_code)
-         and "if(!STB_DailyLossLimitHit())" in daily_risk_enforcer_code
+         and "bool riskBlocked=STB_DailyLossLimitHit();" in daily_risk_enforcer_code
+         and "if(!riskBlocked)" in daily_risk_enforcer_code
          and "POSITION_MAGIC)!=(long)InpMagic" in daily_risk_enforcer_code
          and "orderMagic==(long)InpMagic" in daily_risk_enforcer_code
          and "STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD" in daily_risk_enforcer_code),
