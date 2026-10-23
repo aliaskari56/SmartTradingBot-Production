@@ -9539,12 +9539,28 @@ bool PlaceManualPendingDirection(const int direction)
                                      typeTime,expiration,0,comment,"MANUAL_STOP"))
        return false;
 
+    ResetLastError();
     bool ok=(direction>0)
            ? trade.BuyStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
            : trade.SellStop(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
-   if(!ok || !TradeRetcodePlacementSucceeded())
-      return false;
+    uint sendRetcode=trade.ResultRetcode();
+    string sendDescription=trade.ResultRetcodeDescription();
+    int sendError=GetLastError();
+    if(!ok || !TradeRetcodePlacementSucceeded())
+      {
+       Print("STB MANUAL STOP SEND REJECTED direction=",
+             (direction>0 ? "BUY":"SELL"),
+             " symbol=",_Symbol,
+             " requestOK=",ok ? "YES":"NO",
+             " retcode=",IntegerToString((int)sendRetcode),
+             " description=",sendDescription,
+             " error=",IntegerToString(sendError),
+             " volume=",DoubleToString(volume,3),
+             " entry=",DoubleToString(entry,_Digits),
+             " SL=",DoubleToString(sl,_Digits));
+       return false;
+      }
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
@@ -9693,12 +9709,28 @@ bool PlaceManualLimitDirection(const int direction)
                                      typeTime,expiration,0,comment,"MANUAL_LIMIT"))
        return false;
 
-    bool ok=(direction>0)
-           ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
-           : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
+    ResetLastError();
+   bool ok=(direction>0)
+          ? trade.BuyLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment)
+          : trade.SellLimit(volume,entry,_Symbol,sl,0.0,typeTime,expiration,comment);
 
+   uint sendRetcode=trade.ResultRetcode();
+   string sendDescription=trade.ResultRetcodeDescription();
+   int sendError=GetLastError();
    if(!ok || !TradeRetcodePlacementSucceeded())
+     {
+      Print("STB MANUAL LIMIT SEND REJECTED direction=",
+            (direction>0 ? "BUY":"SELL"),
+            " symbol=",_Symbol,
+            " requestOK=",ok ? "YES":"NO",
+            " retcode=",IntegerToString((int)sendRetcode),
+            " description=",sendDescription,
+            " error=",IntegerToString(sendError),
+            " volume=",DoubleToString(volume,3),
+            " entry=",DoubleToString(entry,_Digits),
+            " SL=",DoubleToString(sl,_Digits));
       return false;
+     }
 
    ulong ticket=trade.ResultOrder();
    if(ticket==0 || !VerifyPendingInitialSL(ticket))
