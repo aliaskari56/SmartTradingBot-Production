@@ -312,14 +312,14 @@ def main() -> int:
          region_ignores_comment_and_string_signatures),
         ("region extraction fails closed when a boundary is missing",
          region_fails_closed_when_boundary_missing),
-        ("live auto-trading is opt-in by default",
-         input_default("InpAutoTrading", source_code) == "false"),
+        ("live automatic trading defaults on",
+         input_default("InpAutoTrading", source_code) == "true"),
         ("bounded equity-risk sizing is enabled by default",
          input_default("InpUseRiskSizing", source_code) == "true"),
-        ("build provenance manifest matches actual AUTO and risk-sizing defaults",
-         input_default("InpAutoTrading", source_code) == "false"
+        ("build provenance manifest matches AUTO and risk-sizing defaults",
+         input_default("InpAutoTrading", source_code) == "true"
          and input_default("InpUseRiskSizing", source_code) == "true"
-         and "liveAutoTradingDefault = $false" in workflow
+         and "liveAutoTradingDefault = $true" in workflow
          and "riskSizingDefault = $true" in workflow
          and "riskSizingDefault = $false" not in workflow),
         ("scanner rejects stale quotes after one minute by default",

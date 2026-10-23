@@ -81,7 +81,7 @@ jobs:
             metaEditorVersion = $metaEditorVersion
             sourceCommit = '${{ github.sha }}'
             compiledUtc = [DateTime]::UtcNow.ToString('o')
-            liveAutoTradingDefault = $false
+            liveAutoTradingDefault = $true
             riskSizingDefault = $true
           }
           $manifest | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR 'provenance.json') -Encoding utf8
