@@ -2258,13 +2258,26 @@ bool STB_ValidatePendingGeometry(const string symbol,
 //|                                                                  |
 //+------------------------------------------------------------------+
 //--- P4: pending geometry policy helpers (single source of truth) ---
-// Entry direction per pending type: never one generic rule for all types.
+// Entry direction is type-specific: +1 means favorable entry moves UP,
+// -1 means favorable entry moves DOWN. STOP kinds follow breakouts; LIMIT
+// kinds follow pullbacks. This is the final broker-writer monotonic barrier.
 int STB_PendingEntryImproveSign(const long orderType)
   {
-   if(STB_PendingIsBuySide((ENUM_ORDER_TYPE)orderType))
-      return 1;
-   if(STB_PendingIsSellSide((ENUM_ORDER_TYPE)orderType))
-      return -1;
+   ENUM_ORDER_TYPE type=(ENUM_ORDER_TYPE)orderType;
+   bool isBuy=STB_PendingIsBuySide(type);
+   bool isSell=STB_PendingIsSellSide(type);
+
+   if(STB_PendingIsStopKind(type))
+     {
+      if(isBuy)  return 1;  // BUY STOP / BUY STOP-LIMIT: ratchet up
+      if(isSell) return -1; // SELL STOP / SELL STOP-LIMIT: ratchet down
+     }
+   else
+     {
+      if(isBuy)  return -1; // BUY LIMIT: pullback entry moves down
+      if(isSell) return 1;  // SELL LIMIT: pullback entry moves up
+     }
+
    return 0;
   }
 
@@ -2277,9 +2290,9 @@ bool STB_PendingEntryDirectionOK(const long orderType,const double curEntry,
    int sign=STB_PendingEntryImproveSign(orderType);
 
    if(sign>0)
-      return (newEntry<=curEntry+tolerance);   // BUY_* : entry may only move down
+      return (newEntry>=curEntry-tolerance);   // favorable direction is UP
    if(sign<0)
-      return (newEntry>=curEntry-tolerance);   // SELL_*: entry may only move up
+      return (newEntry<=curEntry+tolerance);   // favorable direction is DOWN
 
    return false;
   }
