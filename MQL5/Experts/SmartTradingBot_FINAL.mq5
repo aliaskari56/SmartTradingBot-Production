@@ -1854,6 +1854,8 @@ double STB_AdaptiveTesterCriterion()
 string g_prefix = "STB_";
 string g_autoStateName = "";
 bool   g_autoTrading = false;
+bool   g_stbOriginalMouseMoveEvents = false;
+bool   g_stbMouseMoveEventsCaptured = false;
 datetime g_lastM15Bar = 0;
 STBIndicatorCache g_indicatorCache[];
 datetime g_lastChartBar = 0;
@@ -11832,6 +11834,13 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
      }
 
+   // Mouse-move events let the UI release a selected line that would otherwise
+   // capture a drag gesture over a button in MT5.
+   g_stbOriginalMouseMoveEvents=(ChartGetInteger(0,CHART_EVENT_MOUSE_MOVE)!=0);
+   g_stbMouseMoveEventsCaptured=true;
+   if(!ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true))
+      Print("STB UI WARNING: unable to enable mouse-move event fallback err=",GetLastError());
+
    // Establish the initial daily equity baseline; it rolls over on server-date changes.
    if(STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
@@ -12040,6 +12049,13 @@ double OnTester()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+
+   if(g_stbMouseMoveEventsCaptured)
+     {
+      if(!ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,g_stbOriginalMouseMoveEvents))
+         Print("STB UI WARNING: unable to restore mouse-move event setting err=",GetLastError());
+      g_stbMouseMoveEventsCaptured=false;
+     }
 
    // Keep the daily baseline through ordinary EA reinitializations, but clear
    // tester-agent state when this instance is finally unloaded. This prevents
@@ -12855,11 +12871,115 @@ string STB_ControlAtChartXY(const long mouseX,const long mouseY)
    return "";
   }
 
+// If a user-selected horizontal/vertical/trend line overlaps a button, MT5 may
+// treat a 1-pixel mouse movement as a drag and suppress the button click. Release
+// only selected line objects that intersect the cursor while it is over an EA control.
+void STB_ReleaseSelectedLineOverControl(const long mouseX,
+                                        const long mouseY,
+                                        const string controlName)
+  {
+   int x=(int)mouseX;
+   int y=(int)mouseY;
+   if(x<0 || y<0 || controlName=="")
+      return;
+
+   int subUp=0,subDown=0,subLeft=0,subRight=0;
+   datetime timeUp=0,timeDown=0,timeLeft=0,timeRight=0;
+   double priceUp=0.0,priceDown=0.0,priceLeft=0.0,priceRight=0.0;
+   bool havePriceBand=(y>=3 &&
+      ChartXYToTimePrice(0,x,y-3,subUp,timeUp,priceUp) &&
+      ChartXYToTimePrice(0,x,y+3,subDown,timeDown,priceDown) &&
+      subUp==0 && subDown==0);
+   bool haveTimeBand=(x>=3 &&
+      ChartXYToTimePrice(0,x-3,y,subLeft,timeLeft,priceLeft) &&
+      ChartXYToTimePrice(0,x+3,y,subRight,timeRight,priceRight) &&
+      subLeft==0 && subRight==0);
+
+   double lowPrice=MathMin(priceUp,priceDown);
+   double highPrice=MathMax(priceUp,priceDown);
+   datetime lowTime=(timeLeft<timeRight ? timeLeft:timeRight);
+   datetime highTime=(timeLeft>timeRight ? timeLeft:timeRight);
+   int released=0;
+   int total=ObjectsTotal(0,-1,-1);
+
+   for(int i=total-1;i>=0;i--)
+     {
+      string name=ObjectName(0,i,-1,-1);
+      if(name=="" || name==controlName)
+         continue;
+      if(ObjectGetInteger(0,name,OBJPROP_SELECTED)==0)
+         continue;
+
+      long type=ObjectGetInteger(0,name,OBJPROP_TYPE);
+      bool intersects=false;
+      if(type==(long)OBJ_HLINE && havePriceBand)
+        {
+         double linePrice=ObjectGetDouble(0,name,OBJPROP_PRICE,0);
+         intersects=(linePrice>=lowPrice && linePrice<=highPrice);
+        }
+      else if(type==(long)OBJ_VLINE && haveTimeBand)
+        {
+         datetime lineTime=(datetime)ObjectGetInteger(0,name,OBJPROP_TIME,0);
+         intersects=(lineTime>=lowTime && lineTime<=highTime);
+        }
+      else if(type==(long)OBJ_TREND)
+        {
+         datetime t0=(datetime)ObjectGetInteger(0,name,OBJPROP_TIME,0);
+         datetime t1=(datetime)ObjectGetInteger(0,name,OBJPROP_TIME,1);
+         double p0=ObjectGetDouble(0,name,OBJPROP_PRICE,0);
+         double p1=ObjectGetDouble(0,name,OBJPROP_PRICE,1);
+         int x0=0,y0=0,x1=0,y1=0;
+         if(ChartTimePriceToXY(0,0,t0,p0,x0,y0) &&
+            ChartTimePriceToXY(0,0,t1,p1,x1,y1))
+           {
+            double dx=(double)(x1-x0);
+            double dy=(double)(y1-y0);
+            double len2=dx*dx+dy*dy;
+            if(len2>0.0)
+              {
+               double u=((mouseX-x0)*dx+(mouseY-y0)*dy)/len2;
+               if(u<0.0) u=0.0;
+               if(u>1.0) u=1.0;
+               double px=x0+u*dx;
+               double py=y0+u*dy;
+               double ex=mouseX-px;
+               double ey=mouseY-py;
+               intersects=(ex*ex+ey*ey)<=25.0;
+              }
+           }
+        }
+
+      if(intersects)
+        {
+         if(ObjectSetInteger(0,name,OBJPROP_SELECTED,false))
+           {
+            released++;
+            Print("STB UI OVERLAY LINE RELEASED name=",name,
+                  " type=",IntegerToString((int)type),
+                  " overControl=",controlName,
+                  " x=",IntegerToString(x),
+                  " y=",IntegerToString(y));
+           }
+        }
+     }
+
+   if(released>0)
+      ChartRedraw(0);
+  }
+
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
                   const string &sparam)
   {
+   if(id==CHARTEVENT_MOUSE_MOVE)
+     {
+      string hoveredControl=STB_ControlAtChartXY(lparam,(long)dparam);
+      if(hoveredControl!="")
+         STB_ReleaseSelectedLineOverControl(lparam,(long)dparam,hoveredControl);
+      return;
+     }
+
    if(id==CHARTEVENT_KEYDOWN)
      {
       Print("STB UI KEY EVENT keyCode=",IntegerToString((int)lparam),
