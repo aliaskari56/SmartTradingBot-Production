@@ -12982,7 +12982,7 @@ void OnChartEvent(const int id,
          " sourceEvent=",IntegerToString(id),
          " x=",IntegerToString((int)lparam),
          " y=",IntegerToString((int)clickY),
-         " chart=",(string)ChartID());
+         " chart=",IntegerToString(ChartID()));
    STB_SetControlStatus("PROCESSING "+clickName+" - see Experts for result.");
 
    if(clickName==buyName)
