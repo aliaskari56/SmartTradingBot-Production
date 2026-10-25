@@ -11229,7 +11229,7 @@ void CreateButton(const string name,
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bgColor);
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_STATE,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
@@ -11237,8 +11237,8 @@ void CreateButton(const string name,
    ObjectSetInteger(0,name,OBJPROP_ZORDER,200000);
   }
 
-// Repair stale same-named non-button objects left by an older UI version.
-// ObjectFind() alone cannot prove that the object will emit a button click.
+// Repair stale control objects without treating drag-selectability as click readiness.
+// OBJPROP_SELECTABLE controls object selection/movement; button clicks are routed by OnChartEvent.
 bool STB_ControlButtonNeedsRepair(const string name)
   {
    if(ObjectFind(0,name)<0)
@@ -11253,6 +11253,32 @@ bool STB_ControlButtonNeedsRepair(const string name)
       ObjectDelete(0,name);
       return true;
      }
+
+   long width=ObjectGetInteger(0,name,OBJPROP_XSIZE);
+   long height=ObjectGetInteger(0,name,OBJPROP_YSIZE);
+   if(width<=0 || height<=0)
+     {
+      Print("STB UI CONTROL REPAIR name=",name,
+            " reason=UNRECOVERABLE_GEOMETRY",
+            " width=",IntegerToString((int)width),
+            " height=",IntegerToString((int)height));
+      ObjectDelete(0,name);
+      return true;
+     }
+
+   ResetLastError();
+   bool normalized=true;
+   if(!ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false))
+      normalized=false;
+   if(!ObjectSetInteger(0,name,OBJPROP_SELECTED,false))
+      normalized=false;
+   if(!ObjectSetInteger(0,name,OBJPROP_STATE,false))
+      normalized=false;
+   if(!ObjectSetInteger(0,name,OBJPROP_HIDDEN,false))
+      normalized=false;
+   if(!normalized)
+      Print("STB UI CONTROL NORMALIZE FAILED name=",name,
+            " err=",GetLastError());
 
    return false;
   }
@@ -11283,8 +11309,10 @@ void STB_LogControlButtonHealth()
       long height=ObjectGetInteger(0,name,OBJPROP_YSIZE);
       long zorder=ObjectGetInteger(0,name,OBJPROP_ZORDER);
       bool selectable=(ObjectGetInteger(0,name,OBJPROP_SELECTABLE)!=0);
+      bool selected=(ObjectGetInteger(0,name,OBJPROP_SELECTED)!=0);
+      bool pressed=(ObjectGetInteger(0,name,OBJPROP_STATE)!=0);
       bool hidden=(ObjectGetInteger(0,name,OBJPROP_HIDDEN)!=0);
-      bool valid=(type==(long)OBJ_BUTTON && selectable && !hidden &&
+      bool valid=(type==(long)OBJ_BUTTON && !selected && !pressed && !hidden &&
                   width>0 && height>0);
       if(valid)
          ready++;
@@ -11298,6 +11326,8 @@ void STB_LogControlButtonHealth()
             " height=",IntegerToString((int)height),
             " zorder=",IntegerToString((int)zorder),
             " selectable=",selectable ? "YES":"NO",
+            " selected=",selected ? "YES":"NO",
+            " pressed=",pressed ? "YES":"NO",
             " hidden=",hidden ? "YES":"NO");
      }
 
@@ -11364,6 +11394,13 @@ void STB_SetControlStatus(const string message)
    Print("STB UI STATUS: ",message);
    STB_RenderControlStatus();
    ChartRedraw(0);
+  }
+
+string STB_ControlRejectSuffix()
+  {
+   if(g_stbDailyLossThresholdReached)
+      return " - DAILY_LOSS_LIMIT_ACTIVE; risk guard blocked this action";
+   return " - see Experts log for the exact rejection reason";
   }
 
 //+------------------------------------------------------------------+
@@ -12838,14 +12875,14 @@ void OnChartEvent(const int id,
      }
 
    Print("STB UI CLICK RECEIVED object=",sparam,
-         " chart=",IntegerToString((int)ChartID()));
+         " chart=",IntegerToString(ChartID()));
    STB_SetControlStatus("PROCESSING "+sparam+" - see Experts for result.");
 
    if(sparam==buyName)
      {
       bool ok=PlaceManualPendingDirection(1);
       STB_SetControlStatus(ok ? "BUY STOP ACCEPTED" :
-                                 "BUY STOP REJECTED - see Experts log.");
+                                 "BUY STOP REJECTED"+STB_ControlRejectSuffix());
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12856,7 +12893,7 @@ void OnChartEvent(const int id,
      {
       bool ok=PlaceManualPendingDirection(-1);
       STB_SetControlStatus(ok ? "SELL STOP ACCEPTED" :
-                                 "SELL STOP REJECTED - see Experts log.");
+                                 "SELL STOP REJECTED"+STB_ControlRejectSuffix());
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12898,7 +12935,7 @@ void OnChartEvent(const int id,
      {
       bool ok=OneClickHedge();
       STB_SetControlStatus(ok ? "HEDGE ACCEPTED" :
-                                 "HEDGE REJECTED - see Experts log; check input, account mode and open position.");
+                                 "HEDGE REJECTED"+STB_ControlRejectSuffix());
       UpdateButtons();
       UpdatePanel();
       return;
@@ -12908,7 +12945,7 @@ void OnChartEvent(const int id,
      {
       bool ok=PlaceManualLimitDirection(-1);
       STB_SetControlStatus(ok ? "SELL LIMIT ACCEPTED" :
-                                 "SELL LIMIT REJECTED - see Experts log.");
+                                 "SELL LIMIT REJECTED"+STB_ControlRejectSuffix());
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);
@@ -12919,7 +12956,7 @@ void OnChartEvent(const int id,
      {
       bool ok=PlaceManualLimitDirection(1);
       STB_SetControlStatus(ok ? "BUY LIMIT ACCEPTED" :
-                                 "BUY LIMIT REJECTED - see Experts log.");
+                                 "BUY LIMIT REJECTED"+STB_ControlRejectSuffix());
       UpdateButtons();
       UpdatePanel();
       ChartRedraw(0);

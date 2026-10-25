@@ -37,7 +37,8 @@ def main() -> int:
         "buttons are interactive OBJ_BUTTON objects with a released state",
         bool(button) and all(token in button for token in (
             "ObjectCreate(0,name,OBJ_BUTTON,0,0,0)",
-            "OBJPROP_SELECTABLE,true",
+            "OBJPROP_SELECTABLE,false",
+            "OBJPROP_SELECTED,false",
             "OBJPROP_STATE,false",
             "OBJPROP_HIDDEN,false",
             "OBJPROP_BACK,false",
@@ -46,6 +47,22 @@ def main() -> int:
     check(
         "button click priority is above the status panel",
         "OBJPROP_ZORDER,200000" in button and "OBJPROP_ZORDER,1" in status,
+    )
+    repair = region(source, "bool STB_ControlButtonNeedsRepair(", "void STB_LogControlButtonHealth()")
+    health = region(source, "void STB_LogControlButtonHealth()", "void STB_EnsureControlButtons()")
+    check(
+        "same-type controls normalize flags in place and rebuild only for wrong type or invalid geometry",
+        bool(repair) and all(token in repair for token in (
+            "OBJPROP_SELECTABLE,false", "OBJPROP_SELECTED,false",
+            "OBJPROP_STATE,false", "OBJPROP_HIDDEN,false",
+            "width<=0 || height<=0", "reason=UNRECOVERABLE_GEOMETRY",
+        )),
+    )
+    check(
+        "health report treats selectability as movement state, not click readiness",
+        bool(health) and
+        "type==(long)OBJ_BUTTON && !selected && !pressed && !hidden" in health and
+        "selectable &&" not in health,
     )
     check(
         "stale same-named non-button chart objects are detected and rebuilt",
@@ -81,6 +98,20 @@ def main() -> int:
         "keyboard events are logged and D remains the only built-in hotkey",
         "STB UI KEY EVENT keyCode=" in handler
         and "if(lparam==68 || lparam==100)" in handler,
+    )
+
+    check(
+        "click-router chart ID is logged without 32-bit truncation",
+        "IntegerToString(ChartID())" in handler
+        and "IntegerToString((int)ChartID())" not in handler,
+    )
+    check(
+        "daily-loss guard rejection is shown on the chart without re-running or weakening the guard",
+        "string STB_ControlRejectSuffix()" in source
+        and "if(g_stbDailyLossThresholdReached)" in source
+        and "DAILY_LOSS_LIMIT_ACTIVE" in source
+        and '"BUY STOP REJECTED"+STB_ControlRejectSuffix()' in handler
+        and '"SELL STOP REJECTED"+STB_ControlRejectSuffix()' in handler,
     )
 
     failed = 0
