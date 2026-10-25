@@ -26,7 +26,7 @@ def main() -> int:
     def check(label: str, result: bool) -> None:
         checks.append((label, bool(result)))
 
-    button = region(source, "void CreateButton(", "// Repair stale same-named non-button objects")
+    button = region(source, "void CreateButton(", "// Repair stale control objects")
     ensure = region(source, "void STB_EnsureControlButtons()", "void STB_RenderControlStatus()")
     status = region(source, "void STB_RenderControlStatus()", "void STB_SetControlStatus(")
     handler_start = source.find("void OnChartEvent(")
