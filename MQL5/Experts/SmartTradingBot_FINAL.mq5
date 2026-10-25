@@ -12900,38 +12900,6 @@ void OnChartEvent(const int id,
 
 
 
-   if(id!=CHARTEVENT_OBJECT_CLICK)
-      return;
-
-   string buyName=g_prefix+"BUY_STOP";
-   string sellName=g_prefix+"SELL_STOP";
-   string autoName=g_prefix+"AUTO";
-   string saveName=g_prefix+"SAVE20";
-   string hedgeName=g_prefix+"HEDGE";
-   string sellLimitName=g_prefix+"SELL_LIMIT";
-   string buyLimitName=g_prefix+"BUY_LIMIT";
-   string trailName=g_prefix+"PEND_TRAIL";
-
-   if(sparam!=buyName && sparam!=sellName && sparam!=autoName &&
-      sparam!=saveName && sparam!=hedgeName && sparam!=sellLimitName &&
-      sparam!=buyLimitName && sparam!=trailName)
-     {
-      if(StringFind(sparam,g_prefix)==0)
-         Print("STB UI CLICK NOT ROUTED name=",sparam,
-               " reason=UNRECOGNIZED_CONTROL_NAME",
-               " expectedPrefix=",g_prefix,
-               " chart=",(string)ChartID());
-      return;
-     }
-
-   if(ObjectFind(0,sparam)>=0)
-     {
-      ObjectSetInteger(0,sparam,OBJPROP_STATE,false);
-      ChartRedraw(0);
-     }
-
-   Print("STB UI CLICK RECEIVED object=",sparam,
-         " chart=",IntegerToString(ChartID()));
    // Some MT5 chart objects can steal a mouse click even when a button has higher Z-order.
    // Accept both object-click and chart-click coordinates, then hit-test the visible EA controls.
    if(id!=CHARTEVENT_OBJECT_CLICK && id!=CHARTEVENT_CLICK)
@@ -12960,7 +12928,7 @@ void OnChartEvent(const int id,
                " originalObject=",sparam,
                " mappedControl=",hitName,
                " x=",IntegerToString((int)lparam),
-               " y=",IntegerToString((int)dparam),
+               " y=",DoubleToString(dparam,0),
                " chart=",(string)ChartID());
          clickName=hitName;
          recognizedControl=true;
@@ -12973,7 +12941,7 @@ void OnChartEvent(const int id,
          Print("STB UI CLICK NOT ROUTED name=",sparam,
                " reason=UNRECOGNIZED_CONTROL_NAME",
                " x=",IntegerToString((int)lparam),
-               " y=",IntegerToString((int)dparam),
+               " y=",DoubleToString(dparam,0),
                " expectedPrefix=",g_prefix,
                " chart=",(string)ChartID());
       return;
