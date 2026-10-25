@@ -340,13 +340,16 @@ def main() -> int:
          "PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic" in source_code
          and "trade.PositionClose(ticket)" in source_code
          and "closeRetcode!=TRADE_RETCODE_DONE" in source_code),
-        ("live initialization forces AUTO off when input is false",
-         "if(!InpAutoTrading){g_autoTrading=false;GlobalVariableSet(g_autoStateName,0.0);}"
-         in live_auto_branch_compact),
+        ("live initialization forces AUTO on even when input is false",
+         "if(!InpAutoTrading){g_autoTrading=true;" in live_auto_branch_compact
+         and "GlobalVariableSet(g_autoStateName,1.0)" in live_auto_branch_compact
+         and "g_autoTrading=false" not in live_auto_branch_compact),
         ("tester AUTO branch is located inside OnInit",
          bool(on_init) and bool(tester_auto_branch)),
-        ("tester AUTO override is isolated from live initialization",
-         "g_autoTrading=(InpAutoTrading||InpTesterForceAutoTrading);" in tester_auto_branch_compact
+        ("tester startup AUTO is forced on despite stale .set inputs",
+         "if(MQLInfoInteger(MQL_TESTER)){g_autoTrading=true;" in tester_auto_branch_compact
+         and "GlobalVariableSet(g_autoStateName,1.0)" in tester_auto_branch_compact
+         and "g_autoTrading=false" not in tester_auto_branch_compact
          and "}elseif(!InpAutoTrading){" in on_init_compact
          and bool(live_auto_branch)
          and "InpTesterForceAutoTrading" not in live_auto_branch_compact),
