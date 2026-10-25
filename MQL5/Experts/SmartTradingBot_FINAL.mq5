@@ -4,7 +4,7 @@
 //|                                       http://www.companyname.net |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.134"
+#property version   "1.135"
 #property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
 #include <Trade/Trade.mqh>
 
@@ -23,6 +23,7 @@ input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = false;
 input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
+input string  InpScannerExcludedSymbols  = "EURUSD+"; // exact broker symbols excluded from automatic scanner candidates only; manual controls and position protection remain available
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 0.0;
@@ -10525,6 +10526,40 @@ void STB_ScannerAllocationAbort(const string stage,string &symbols[],bool &wasSe
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Match configured scanner exclusions by exact broker symbol name, case-insensitively.
+bool STB_ScannerSymbolExcluded(const string symbol)
+  {
+   if(symbol=="" || StringLen(InpScannerExcludedSymbols)==0)
+      return false;
+
+   string cfg=InpScannerExcludedSymbols;
+   StringReplace(cfg,";",",");
+   string parts[];
+   ushort separator=StringGetCharacter(",",0);
+   int count=StringSplit(cfg,separator,parts);
+
+   string candidate=symbol;
+   StringToUpper(candidate);
+
+   for(int i=0;i<count;i++)
+     {
+      string excluded=parts[i];
+      StringTrimLeft(excluded);
+      StringTrimRight(excluded);
+      if(excluded=="")
+         continue;
+
+      StringToUpper(excluded);
+      if(excluded==candidate)
+         return true;
+     }
+
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void STB_ScannerRun()
   {
    datetime cycleBar=iTime(_Symbol,PERIOD_M15,1);
@@ -10671,6 +10706,7 @@ void STB_ScannerRun()
    bool candidateAllocationFailed=false;
    // Per-cycle counters expose silent discovery-stage exits in the summary.
    int scanDataRejects=0;
+   int scanExcludedSymbols=0;
    int scanQualityRejects=0;
    int scanRegimeEvalRejects=0;
    int scanUnstableRegimeRejects=0;
@@ -10684,6 +10720,14 @@ void STB_ScannerRun()
    for(int i=0;i<ArraySize(symbols);i++)
      {
       string symbol=symbols[i];
+
+      if(STB_ScannerSymbolExcluded(symbol))
+        {
+         scanExcludedSymbols++;
+         Print("STB SCANNER EXCLUDED symbol=",symbol,
+               " input=InpScannerExcludedSymbols");
+         continue;
+        }
 
       string reason="";
        if(!STB_ScannerDataEligible(symbol,reason))
@@ -11051,6 +11095,7 @@ void STB_ScannerRun()
 
    Print("STB SCANNER SUMMARY",
          " universe=",IntegerToString(g_scannerUniverseCount),
+         " excluded=",IntegerToString(scanExcludedSymbols),
          " eligible=",IntegerToString(g_scannerEligibleCount),
          " quality=",IntegerToString(g_scannerQualityCount),
          " regime=",IntegerToString(g_scannerRegimeCount),
@@ -11079,7 +11124,7 @@ void STB_ScannerRun()
           " buildSetupReasons=",STB_TallyReport(scanBuildSetupReasonTally),
           " setupAgeRejects=",IntegerToString(scanSetupAgeRejects),
           " scoreRejects=",IntegerToString(scanScoreRejects),
-          " check=discovery_stage_only; universe=dataRejects+eligible;",
+          " check=discovery_stage_only; universe=excluded+dataRejects+eligible;",
           " eligible=qualityRejects+quality; quality=regimeEval+unstable+regime",
           " countsPerDirection=direction/build/age/score");
   }
