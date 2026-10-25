@@ -23,7 +23,7 @@ input int     InpScanSeconds            = 10;
 input bool    InpAllowUniversal         = true;
 input bool    InpOneSetupPerSymbol      = false;
 input string  InpScannerSymbols         = "";   // empty = universal exposure management; explicit list scopes managed symbols
-input string  InpScannerExcludedSymbols  = "EURUSD+"; // exact broker symbols excluded from automatic scanner candidates only; manual controls and position protection remain available
+input string  InpScannerExcludedSymbols  = ""; // exact broker symbols excluded from automatic scanner candidates only; manual controls and position protection remain available
 
 input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 0.0;
