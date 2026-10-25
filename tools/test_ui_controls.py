@@ -77,11 +77,33 @@ def main() -> int:
         and 'expected=",IntegerToString(ArraySize(names))' in source,
     )
     check(
-        "raw object-click diagnostics run before exact-name routing filters",
+        "raw object-click diagnostics run before exact-name or hit-test routing",
         bool(handler)
         and "STB UI OBJECT_CLICK event received name=" in handler
         and handler.index("STB UI OBJECT_CLICK event received name=")
-            < handler.index("if(sparam!=buyName"),
+            < handler.index("bool recognizedControl="),
+    )
+    hit_test = region(source, "string STB_ControlAtChartXY(", "void OnChartEvent(")
+    check(
+        "missed or intercepted clicks recover by chart-coordinate hit testing",
+        bool(hit_test)
+        and "CHART_WIDTH_IN_PIXELS" in hit_test
+        and "CHART_HEIGHT_IN_PIXELS" in hit_test
+        and "OBJPROP_CORNER" in hit_test
+        and "OBJPROP_XSIZE" in hit_test
+        and "OBJPROP_YSIZE" in hit_test
+        and "STB_ControlAtChartXY(lparam,(long)dparam)" in handler
+        and "STB UI HITTEST FALLBACK" in handler
+        and "id!=CHARTEVENT_OBJECT_CLICK && id!=CHARTEVENT_CLICK" in handler,
+    )
+    check(
+        "same-control duplicate events from one physical click are suppressed",
+        "GetMicrosecondCount()" in handler
+        and "lastControlDispatchName==clickName" in handler
+        and "lastControlDispatchX==lparam" in handler
+        and "lastControlDispatchY==clickY" in handler
+        and "nowUs-lastControlDispatchUs<350000" in handler
+        and "STB UI DUPLICATE CLICK SUPPRESSED" in handler,
     )
     check(
         "unknown prefixed controls are reported instead of silently ignored",
@@ -90,9 +112,12 @@ def main() -> int:
     )
     check(
         "recognized UI controls reset pressed state and report dispatch",
-        "ObjectSetInteger(0,sparam,OBJPROP_STATE,false);" in handler
-        and 'Print("STB UI CLICK RECEIVED object=",sparam' in handler
-        and 'STB_SetControlStatus("PROCESSING "+sparam' in handler,
+        "ObjectSetInteger(0,clickName,OBJPROP_STATE,false);" in handler
+        and 'Print("STB UI CLICK RECEIVED object=",clickName' in handler
+        and 'STB_SetControlStatus("PROCESSING "+clickName' in handler
+        and "if(clickName==buyName)" in handler
+        and "if(clickName==sellName)" in handler
+        and "if(clickName==autoName)" in handler,
     )
     check(
         "keyboard events are logged and D remains the only built-in hotkey",
