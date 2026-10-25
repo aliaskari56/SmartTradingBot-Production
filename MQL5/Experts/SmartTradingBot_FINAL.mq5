@@ -11837,24 +11837,32 @@ int OnInit()
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
 // Tester reproducibility override is isolated from normal terminal runtime.
+   // Startup AUTO policy: do not let stale .set files silently leave the EA off.
+   // The on-chart AUTO button remains the explicit runtime toggle. Trade permission,
+   // quote validation, exposure checks, and daily-risk guards remain unchanged.
    if(MQLInfoInteger(MQL_TESTER))
      {
-      g_autoTrading=(InpAutoTrading||InpTesterForceAutoTrading);
-      if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0)
-         Print("STB INIT WARNING: unable to persist tester AUTO state err=",GetLastError());
-      if(g_autoTrading)
-         STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: tester AUTO reset only
+      g_autoTrading=true;
+      if(GlobalVariableSet(g_autoStateName,1.0)<=0)
+         Print("STB INIT WARNING: unable to persist forced tester AUTO state err=",GetLastError());
+      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: startup AUTO policy is forced ON
+      if(!InpAutoTrading || !InpTesterForceAutoTrading)
+         Print("STB INIT AUTO OVERRIDE: forced ON despite tester inputs autoInput=",
+               InpAutoTrading ? "ON":"OFF",
+               " testerForceAuto=",InpTesterForceAutoTrading ? "ON":"OFF");
      }
    else if(!InpAutoTrading)
      {
-      g_autoTrading=false;
-      GlobalVariableSet(g_autoStateName,0.0);
+      g_autoTrading=true;
+      if(GlobalVariableSet(g_autoStateName,1.0)<=0)
+         Print("STB INIT WARNING: unable to persist forced AUTO state err=",GetLastError());
+      Print("STB INIT AUTO OVERRIDE: forced ON despite InpAutoTrading=OFF.");
      }
    else
      {
       g_autoTrading=true;
       if(GlobalVariableSet(g_autoStateName,1.0)<=0)
-         Print("STB INIT WARNING: unable to persist explicit AUTO input err=",GetLastError());
+         Print("STB INIT WARNING: unable to persist explicit AUTO state err=",GetLastError());
      }
 
    trade.SetExpertMagicNumber(InpMagic);
