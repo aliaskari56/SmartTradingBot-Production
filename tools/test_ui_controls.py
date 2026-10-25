@@ -105,6 +105,18 @@ def main() -> int:
         and "nowUs-lastControlDispatchUs<350000" in handler
         and "STB UI DUPLICATE CLICK SUPPRESSED" in handler,
     )
+    overlay = region(source, "void STB_ReleaseSelectedLineOverControl(", "void OnChartEvent(")
+    check(
+        "selected overlapping chart lines are released during button hover to prevent drag capture",
+        bool(overlay)
+        and "OBJPROP_SELECTED,false" in overlay
+        and "(long)OBJ_HLINE" in overlay
+        and "(long)OBJ_VLINE" in overlay
+        and "(long)OBJ_TREND" in overlay
+        and "STB_ReleaseSelectedLineOverControl(lparam,(long)dparam,hoveredControl)" in handler
+        and "ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true)" in source
+        and "ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,g_stbOriginalMouseMoveEvents)" in source,
+    )
     check(
         "unknown prefixed controls are reported instead of silently ignored",
         "STB UI CLICK NOT ROUTED name=" in handler
