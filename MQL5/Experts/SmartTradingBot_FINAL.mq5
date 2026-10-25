@@ -12807,6 +12807,54 @@ void STB_ToggleDashboard()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// Recover a control click when MT5 routes the mouse event to an overlapping chart object
+// (for example, a selected line underneath a button). Coordinates are chart-pixel coordinates.
+string STB_ControlAtChartXY(const long mouseX,const long mouseY)
+  {
+   if(mouseX<0 || mouseY<0)
+      return "";
+
+   long chartWidth=ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+   long chartHeight=ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(chartWidth<=0 || chartHeight<=0)
+      return "";
+
+   string names[8]=
+     {
+      g_prefix+"BUY_STOP",g_prefix+"SELL_STOP",g_prefix+"AUTO",
+      g_prefix+"SAVE20",g_prefix+"HEDGE",g_prefix+"SELL_LIMIT",
+      g_prefix+"BUY_LIMIT",g_prefix+"PEND_TRAIL"
+     };
+
+   for(int i=0;i<ArraySize(names);i++)
+     {
+      string name=names[i];
+      if(ObjectFind(0,name)<0)
+         continue;
+      if(ObjectGetInteger(0,name,OBJPROP_TYPE)!=(long)OBJ_BUTTON)
+         continue;
+
+      long xdist=ObjectGetInteger(0,name,OBJPROP_XDISTANCE);
+      long ydist=ObjectGetInteger(0,name,OBJPROP_YDISTANCE);
+      long width=ObjectGetInteger(0,name,OBJPROP_XSIZE);
+      long height=ObjectGetInteger(0,name,OBJPROP_YSIZE);
+      long corner=ObjectGetInteger(0,name,OBJPROP_CORNER);
+      if(width<=0 || height<=0)
+         continue;
+
+      bool fromRight=(corner==CORNER_RIGHT_UPPER || corner==CORNER_RIGHT_LOWER);
+      bool fromBottom=(corner==CORNER_LEFT_LOWER || corner==CORNER_RIGHT_LOWER);
+      long left=fromRight ? chartWidth-xdist-width : xdist;
+      long top=fromBottom ? chartHeight-ydist-height : ydist;
+
+      if(mouseX>=left && mouseX<left+width &&
+         mouseY>=top && mouseY<top+height)
+         return name;
+     }
+
+   return "";
+  }
+
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
@@ -12884,9 +12932,92 @@ void OnChartEvent(const int id,
 
    Print("STB UI CLICK RECEIVED object=",sparam,
          " chart=",IntegerToString(ChartID()));
-   STB_SetControlStatus("PROCESSING "+sparam+" - see Experts for result.");
+   // Some MT5 chart objects can steal a mouse click even when a button has higher Z-order.
+   // Accept both object-click and chart-click coordinates, then hit-test the visible EA controls.
+   if(id!=CHARTEVENT_OBJECT_CLICK && id!=CHARTEVENT_CLICK)
+      return;
 
-   if(sparam==buyName)
+   string clickName=sparam;
+   string buyName=g_prefix+"BUY_STOP";
+   string sellName=g_prefix+"SELL_STOP";
+   string autoName=g_prefix+"AUTO";
+   string saveName=g_prefix+"SAVE20";
+   string hedgeName=g_prefix+"HEDGE";
+   string sellLimitName=g_prefix+"SELL_LIMIT";
+   string buyLimitName=g_prefix+"BUY_LIMIT";
+   string trailName=g_prefix+"PEND_TRAIL";
+
+   bool recognizedControl=(clickName==buyName || clickName==sellName ||
+                           clickName==autoName || clickName==saveName ||
+                           clickName==hedgeName || clickName==sellLimitName ||
+                           clickName==buyLimitName || clickName==trailName);
+   if(!recognizedControl)
+     {
+      string hitName=STB_ControlAtChartXY(lparam,(long)dparam);
+      if(hitName!="")
+        {
+         Print("STB UI HITTEST FALLBACK eventId=",IntegerToString(id),
+               " originalObject=",sparam,
+               " mappedControl=",hitName,
+               " x=",IntegerToString((int)lparam),
+               " y=",IntegerToString((int)dparam),
+               " chart=",(string)ChartID());
+         clickName=hitName;
+         recognizedControl=true;
+        }
+     }
+
+   if(!recognizedControl)
+     {
+      if(id==CHARTEVENT_OBJECT_CLICK && StringFind(sparam,g_prefix)==0)
+         Print("STB UI CLICK NOT ROUTED name=",sparam,
+               " reason=UNRECOGNIZED_CONTROL_NAME",
+               " x=",IntegerToString((int)lparam),
+               " y=",IntegerToString((int)dparam),
+               " expectedPrefix=",g_prefix,
+               " chart=",(string)ChartID());
+      return;
+     }
+
+   if(ObjectFind(0,clickName)>=0)
+     {
+      ObjectSetInteger(0,clickName,OBJPROP_STATE,false);
+      ChartRedraw(0);
+     }
+
+   // A single physical click can surface through both event paths on some chart layouts.
+   // Suppress only an immediate duplicate for the same control and pixel.
+   static ulong lastControlDispatchUs=0;
+   static string lastControlDispatchName="";
+   static long lastControlDispatchX=-1;
+   static long lastControlDispatchY=-1;
+   ulong nowUs=GetMicrosecondCount();
+   long clickY=(long)dparam;
+   if(lastControlDispatchName==clickName &&
+      lastControlDispatchX==lparam &&
+      lastControlDispatchY==clickY &&
+      nowUs>=lastControlDispatchUs &&
+      nowUs-lastControlDispatchUs<350000)
+     {
+      Print("STB UI DUPLICATE CLICK SUPPRESSED object=",clickName,
+            " x=",IntegerToString((int)lparam),
+            " y=",IntegerToString((int)clickY),
+            " chart=",(string)ChartID());
+      return;
+     }
+   lastControlDispatchUs=nowUs;
+   lastControlDispatchName=clickName;
+   lastControlDispatchX=lparam;
+   lastControlDispatchY=clickY;
+
+   Print("STB UI CLICK RECEIVED object=",clickName,
+         " sourceEvent=",IntegerToString(id),
+         " x=",IntegerToString((int)lparam),
+         " y=",IntegerToString((int)clickY),
+         " chart=",(string)ChartID());
+   STB_SetControlStatus("PROCESSING "+clickName+" - see Experts for result.");
+
+   if(clickName==buyName)
      {
       bool ok=PlaceManualPendingDirection(1);
       STB_SetControlStatus(ok ? "BUY STOP ACCEPTED" :
@@ -12897,7 +13028,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==sellName)
+   if(clickName==sellName)
      {
       bool ok=PlaceManualPendingDirection(-1);
       STB_SetControlStatus(ok ? "SELL STOP ACCEPTED" :
@@ -12908,7 +13039,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==autoName)
+   if(clickName==autoName)
      {
       g_autoTrading=!g_autoTrading;
       GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
@@ -12930,7 +13061,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==saveName)
+   if(clickName==saveName)
      {
       ManualSavePlus20();
       STB_SetControlStatus("SAVE +20 PROCESSED - only eligible managed positions change; see Experts log.");
@@ -12939,7 +13070,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==hedgeName)
+   if(clickName==hedgeName)
      {
       bool ok=OneClickHedge();
       STB_SetControlStatus(ok ? "HEDGE ACCEPTED" :
@@ -12949,7 +13080,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==sellLimitName)
+   if(clickName==sellLimitName)
      {
       bool ok=PlaceManualLimitDirection(-1);
       STB_SetControlStatus(ok ? "SELL LIMIT ACCEPTED" :
@@ -12960,7 +13091,7 @@ void OnChartEvent(const int id,
       return;
      }
 
-   if(sparam==buyLimitName)
+   if(clickName==buyLimitName)
      {
       bool ok=PlaceManualLimitDirection(1);
       STB_SetControlStatus(ok ? "BUY LIMIT ACCEPTED" :
@@ -12970,7 +13101,7 @@ void OnChartEvent(const int id,
       ChartRedraw(0);
       return;
      }
-   if(sparam==trailName)
+   if(clickName==trailName)
      {
       int moved=TrailAllPendingOrdersNow();
       STB_SetControlStatus("PENDING TRAIL MOVED "+
