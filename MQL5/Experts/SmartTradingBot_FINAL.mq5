@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.144"
+#property version   "1.145"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -13080,6 +13080,26 @@ bool STB_FinalAutoGate(const Setup &s,string &reason)
 //+------------------------------------------------------------------+
 void STB_ExecuteTopCandidate()
   {
+   // Preflight the daily guard before ranking/dispatching candidates. PlaceSetup
+   // retains its own final check to close the race between scan and submission.
+   // Throttle this summary so a blocked scanner does not flood the Experts log.
+   static datetime lastDailyGuardSkipLog=0;
+   if(STB_DailyLossLimitHit())
+     {
+      datetime now=TimeCurrent();
+      if(lastDailyGuardSkipLog<=0 || now<=0 || now-lastDailyGuardSkipLog>=60)
+        {
+         Print("STB EXECUTION SKIP reason=DAILY_EQUITY_LOSS_LIMIT",
+               " thresholdVerified=",g_stbDailyLossThresholdReached ? "YES":"NO",
+               " maxDailyLossPct=",DoubleToString(InpMaxDailyLossPercent,2),
+               " detail=",g_stbDailyLossThresholdReached ?
+                          "daily equity loss threshold reached or latched" :
+                          "daily risk state invalid or unavailable; fail-closed");
+         lastDailyGuardSkipLog=now;
+        }
+      return;
+     }
+
    if(g_scannerTop10Count<=0)
       {
        Print("STB EXECUTION SKIP reason=NO_TOP_CANDIDATE",
