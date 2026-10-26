@@ -11388,19 +11388,19 @@ void STB_EnsureControlButtons()
    if(STB_ControlButtonNeedsRepair(g_prefix+"BUY_STOP"))
       CreateButton(g_prefix+"BUY_STOP","BUY STOP",7,28,82,19,clrSeaGreen);
    if(STB_ControlButtonNeedsRepair(g_prefix+"SELL_STOP"))
-      CreateButton(g_prefix+"SELL_STOP","SELL STOP",7,28,82,19,clrTomato);
+      CreateButton(g_prefix+"SELL_STOP","SELL STOP",94,28,82,19,clrTomato);
    if(STB_ControlButtonNeedsRepair(g_prefix+"AUTO"))
-      CreateButton(g_prefix+"AUTO","AUTO",7,28,82,19,clrFireBrick);
+      CreateButton(g_prefix+"AUTO","AUTO",181,28,82,19,clrFireBrick);
    if(STB_ControlButtonNeedsRepair(g_prefix+"SAVE20"))
-      CreateButton(g_prefix+"SAVE20","SAVE +20",7,28,82,19,clrRoyalBlue);
+      CreateButton(g_prefix+"SAVE20","SAVE +20",268,28,82,19,clrRoyalBlue);
    if(STB_ControlButtonNeedsRepair(g_prefix+"HEDGE"))
-      CreateButton(g_prefix+"HEDGE","HEDGE",7,28,82,19,clrDarkOrange);
+      CreateButton(g_prefix+"HEDGE","HEDGE",355,28,82,19,clrDarkOrange);
    if(STB_ControlButtonNeedsRepair(g_prefix+"SELL_LIMIT"))
-      CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",7,28,82,19,clrTomato);
+      CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",442,28,82,19,clrTomato);
    if(STB_ControlButtonNeedsRepair(g_prefix+"BUY_LIMIT"))
-      CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",7,28,82,19,clrSeaGreen);
+      CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",529,28,82,19,clrSeaGreen);
    if(STB_ControlButtonNeedsRepair(g_prefix+"PEND_TRAIL"))
-      CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",7,28,82,19,clrSlateBlue);
+      CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",616,28,82,19,clrSlateBlue);
   }
 
 void STB_RenderControlStatus()
@@ -11968,17 +11968,17 @@ int OnInit()
             "% formula=(ask-bid)/M15_ATR14*100. Symbols above this cap are rejected before candidate ranking; inspect STB SCANNER DISCOVERY REJECT BREAKDOWN for qualityReasons=REJECT_RELATIVE_SPREAD.");
    Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
 
-// Keep the six dedicated EA controls in the upper-right, away from
+// Keep the eight dedicated EA controls in a non-overlapping row along the lower-left, away from
 // the native MT5 one-click panel. Button handlers only dispatch to
 // dedicated strategy/trade-management functions.
    CreateButton(g_prefix+"BUY_STOP","BUY STOP",8,8,88,26,clrSeaGreen);
-   CreateButton(g_prefix+"SELL_STOP","SELL STOP",8,8,88,26,clrTomato);
-   CreateButton(g_prefix+"AUTO","AUTO",8,8,80,26,clrFireBrick);
-   CreateButton(g_prefix+"SAVE20","SAVE +20",8,8,88,26,clrRoyalBlue);
-   CreateButton(g_prefix+"HEDGE","HEDGE",8,8,84,26,clrDarkOrange);
-   CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",8,8,88,26,clrTomato);
-   CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",8,8,88,26,clrSeaGreen);
-   CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",8,8,96,26,clrSlateBlue);
+   CreateButton(g_prefix+"SELL_STOP","SELL STOP",100,8,88,26,clrTomato);
+   CreateButton(g_prefix+"AUTO","AUTO",192,8,80,26,clrFireBrick);
+   CreateButton(g_prefix+"SAVE20","SAVE +20",276,8,88,26,clrRoyalBlue);
+   CreateButton(g_prefix+"HEDGE","HEDGE",368,8,84,26,clrDarkOrange);
+   CreateButton(g_prefix+"SELL_LIMIT","SELL LIMIT",456,8,88,26,clrTomato);
+   CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",548,8,88,26,clrSeaGreen);
+   CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",640,8,96,26,clrSlateBlue);
 
    g_dashboardLastAction="CONTROL BAR READY - click results appear here; rejection details are in Experts.";
    UpdateButtons();
