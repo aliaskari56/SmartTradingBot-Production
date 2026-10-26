@@ -12477,13 +12477,23 @@ double CalculateOrderVolumeByRisk(const Setup &s,
       return 0.0;
      }
 
-   lossForOneLot=MathAbs(lossForOneLot);
-   g_stbVolumeDiag.lossForOneLot=lossForOneLot;
-   if(lossForOneLot<=0.0 || !MathIsValidNumber(lossForOneLot))
+   // OrderCalcProfit must confirm that the configured SL produces a
+   // loss for one lot. Never hide an unexpected positive result with fabs().
+   if(!MathIsValidNumber(lossForOneLot) || lossForOneLot>=-1e-8)
      {
-      g_stbVolumeDiag.rejectCause="LOSS_FOR_ONE_LOT_INVALID";
+      g_stbVolumeDiag.lossForOneLot=0.0;
+      g_stbVolumeDiag.rejectCause="SL_DOES_NOT_PRODUCE_VALID_LOSS";
+      Print("STB risk sizing rejected non-loss SL calculation",
+            " symbol=",s.symbol,
+            " direction=",s.direction,
+            " entry=",DoubleToString(s.entry,10),
+            " sl=",DoubleToString(s.sl,10),
+            " orderCalcProfit=",DoubleToString(lossForOneLot,8));
       return 0.0;
      }
+
+   lossForOneLot=-lossForOneLot;
+   g_stbVolumeDiag.lossForOneLot=lossForOneLot;
 
    double raw=riskMoney/lossForOneLot;
    g_stbVolumeDiag.rawVolume=raw;
