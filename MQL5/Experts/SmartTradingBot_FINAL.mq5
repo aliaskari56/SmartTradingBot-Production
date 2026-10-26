@@ -4112,55 +4112,23 @@ bool STB_DailyLossLimitHit()
    if(InpMaxDailyLossPercent<=0.0)
       return false;
 
-   // Calculate today's P/L only from this EA's deals. Account-wide equity
-   // changes caused by unrelated manual trades or other EAs are excluded.
-   MqlDateTime dayParts=nowParts;
-   dayParts.hour=0;
-   dayParts.min=0;
-   dayParts.sec=0;
-   datetime dayStart=StructToTime(dayParts);
-   if(dayStart<=0 || !HistorySelect(dayStart,now))
+   // Use the persisted start-of-day account-equity baseline and current
+   // account equity. Summing today's closed deals with the FULL floating P/L
+   // of open positions double-counts or misattributes overnight exposure:
+   // an overnight position's entire floating loss is not necessarily today's
+   // loss. Equity delta is internally consistent and fails conservatively:
+   // losses from any account activity can block new EA entries, but cannot
+   // be omitted merely because a deal/position ownership tag is missing.
+   if(!MathIsValidNumber(g_stbDailyStartEquity) ||
+      g_stbDailyStartEquity<=0.0 ||
+      !MathIsValidNumber(equity) || equity<=0.0)
      {
-      Print("STB DAILY RISK HISTORY UNAVAILABLE; entries remain blocked.");
-      return true; // fail closed, but do not mark a verified loss breach
+      Print("STB DAILY RISK EQUITY BASELINE INVALID; entries remain blocked.");
+      return true;
      }
 
-   double eaRealizedNetToday=0.0;
-   int dealCount=HistoryDealsTotal();
-   for(int i=0;i<dealCount;i++)
-     {
-      ulong dealTicket=HistoryDealGetTicket(i);
-      if(dealTicket==0 || !STB_DailyGuardDealIsEAOwned(dealTicket))
-         continue;
-
-      eaRealizedNetToday+=HistoryDealGetDouble(dealTicket,DEAL_PROFIT)
-                          +HistoryDealGetDouble(dealTicket,DEAL_COMMISSION)
-                          +HistoryDealGetDouble(dealTicket,DEAL_SWAP)
-                          +HistoryDealGetDouble(dealTicket,DEAL_FEE);
-     }
-
-   // Add current floating P/L only for positions owned by this EA or created
-   // through its UI-manual command. Other open positions are ignored.
-   double eaFloatingNet=0.0;
-   for(int i=PositionsTotal()-1;i>=0;i--)
-     {
-      ulong positionTicket=PositionGetTicket(i);
-      if(positionTicket==0 || !PositionSelectByTicket(positionTicket))
-         continue;
-
-      long positionMagic=PositionGetInteger(POSITION_MAGIC);
-      string positionComment=PositionGetString(POSITION_COMMENT);
-      bool eaOwned=(positionMagic==(long)InpMagic);
-      bool eaUiManual=(StringFind(positionComment,"STB|M|")==0);
-      if(!eaOwned && !eaUiManual)
-         continue;
-
-      eaFloatingNet+=PositionGetDouble(POSITION_PROFIT)
-                     +PositionGetDouble(POSITION_SWAP);
-     }
-
-   double eaNetToday=eaRealizedNetToday+eaFloatingNet;
-   double lossMoney=MathMax(0.0,-eaNetToday);
+   double accountEquityChange=equity-g_stbDailyStartEquity;
+   double lossMoney=MathMax(0.0,-accountEquityChange);
    double lossPct=lossMoney/g_stbDailyStartEquity*100.0;
 
    if(lossPct+1e-9>=InpMaxDailyLossPercent)
@@ -4173,12 +4141,11 @@ bool STB_DailyLossLimitHit()
             return true;
          Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
             " startEquityReference=",DoubleToString(g_stbDailyStartEquity,2),
-            " eaRealizedNetToday=",DoubleToString(eaRealizedNetToday,2),
-            " eaFloatingNet=",DoubleToString(eaFloatingNet,2),
-            " eaNetToday=",DoubleToString(eaNetToday,2),
+            " currentAccountEquity=",DoubleToString(equity,2),
+            " accountEquityChange=",DoubleToString(accountEquityChange,2),
             " lossPct=",DoubleToString(lossPct,2),
             " limitPct=",DoubleToString(InpMaxDailyLossPercent,2),
-            " scope=EA_TRADES_ONLY action=BLOCK_NEW_SETUPS");
+            " scope=ACCOUNT_EQUITY action=BLOCK_NEW_SETUPS");
         }
       return true;
      }
