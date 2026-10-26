@@ -15101,31 +15101,38 @@ void STB_EnsureControlButtons()
 
 void STB_RenderControlStatus()
   {
+   // Render status as text only. The former rectangle-label could leave a
+   // conspicuous white block on some MT5 chart themes/builds.
+   // Keep the same object name so existing status updates and cleanup remain valid.
    string name=g_prefix+"CONTROL_STATUS";
+   if(ObjectFind(0,name)>=0)
+     {
+      long type=ObjectGetInteger(0,name,OBJPROP_TYPE);
+      if(type!=(long)OBJ_LABEL)
+         ObjectDelete(0,name);
+     }
    if(ObjectFind(0,name)<0)
      {
       ResetLastError();
-      if(!ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0))
+      if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0))
         {
          Print("STB UI STATUS CREATE FAILED err=",GetLastError());
          return;
         }
      }
    ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,8);
    ObjectSetInteger(0,name,OBJPROP_YDISTANCE,22);
-   ObjectSetInteger(0,name,OBJPROP_XSIZE,570);
-   ObjectSetInteger(0,name,OBJPROP_YSIZE,22);
-   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrBlack);
-   ObjectSetInteger(0,name,OBJPROP_COLOR,clrYellow);
-   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrYellow);
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-   // Status must never win click priority over the trading-control buttons.
+   // Status text is informational and must never intercept trading-button clicks.
    ObjectSetInteger(0,name,OBJPROP_ZORDER,1);
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
    ObjectSetString(0,name,OBJPROP_TEXT,g_controlLastAction);
    ObjectSetString(0,name,OBJPROP_TOOLTIP,
                    "Latest SmartTradingBot control result. See Experts log for details.");
