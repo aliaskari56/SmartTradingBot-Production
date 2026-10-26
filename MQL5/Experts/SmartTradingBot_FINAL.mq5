@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.142"
+#property version   "1.143"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -8746,11 +8746,9 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   if(STB_DailyLossLimitHit())
-     {
-      Print("STB HEDGE REJECTED: daily equity loss limit active.");
-      return false;
-     }
+   // Manual HEDGE is intentionally exempt from the automatic-entry daily loss gate.
+   // Trade permissions, account mode, symbol ownership, and broker checks still apply.
+   Print("STB MANUAL HEDGE: daily loss entry gate bypassed by explicit user action.");
 
    if(!InpAllowOneClickHedge)
      {
@@ -13249,11 +13247,9 @@ void STB_ExecuteTopCandidate()
 //+------------------------------------------------------------------+
 bool PlaceManualPendingDirection(const int direction)
   {
-   if(STB_DailyLossLimitHit())
-     {
-      Print("STB MANUAL PENDING REJECTED: daily equity loss limit active.");
-      return false;
-     }
+   // Explicit manual pending orders bypass the automatic-entry daily loss gate.
+   // All other trade-environment, volume, price, stop, and broker checks remain active.
+   Print("STB MANUAL PENDING: daily loss entry gate bypassed by explicit user action.");
 
    if(direction!=1 && direction!=-1)
      {
@@ -13452,11 +13448,9 @@ bool PlaceManualPendingDirection(const int direction)
 //+------------------------------------------------------------------+
 bool PlaceManualLimitDirection(const int direction)
   {
-   if(STB_DailyLossLimitHit())
-     {
-      Print("STB MANUAL LIMIT REJECTED: daily equity loss limit active.");
-      return false;
-     }
+   // Explicit manual limit orders bypass the automatic-entry daily loss gate.
+   // All other trade-environment, volume, price, stop, and broker checks remain active.
+   Print("STB MANUAL LIMIT: daily loss entry gate bypassed by explicit user action.");
 
    if(direction!=1 && direction!=-1)
      {
@@ -17691,9 +17685,9 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
-// Enforce the daily equity guard. Tester mode retains forced closing for EA-owned
-// positions; terminal/demo/live mode blocks new entries and cancels eligible EA
-// pending orders while normal position protection continues. Broker rejection,
+// Enforce the daily equity guard for automatic entries. Explicit UI-manual
+// pending orders and manual button actions bypass this entry gate; automatic EA
+// pending orders are canceled while normal position protection continues. Broker rejection,
 // gaps, and slippage mean this guard is not a guaranteed maximum-loss boundary.
 void STB_EnforceDailyRiskGuard()
   {
@@ -17759,7 +17753,9 @@ void STB_EnforceDailyRiskGuard()
       bool eaOwned=(orderMagic==(long)InpMagic);
       bool eaUiManual=(orderMagic==0 &&
                        StringFind(orderComment,"STB|M|")==0);
-      if(!eaOwned && !eaUiManual)
+      // Daily loss guard cancels only automatic EA pending entries.
+      // Explicitly placed UI-manual pending orders are left untouched.
+      if(!eaOwned || eaUiManual)
          continue;
       if(!IsManagedOrder(ticket))
          continue;
