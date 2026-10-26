@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.143"
+#property version   "1.144"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -8746,9 +8746,14 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   // Manual HEDGE is intentionally exempt from the automatic-entry daily loss gate.
-   // Trade permissions, account mode, symbol ownership, and broker checks still apply.
-   Print("STB MANUAL HEDGE: daily loss entry gate bypassed by explicit user action.");
+   // Reject before submitting a hedge if the daily loss guard is active.
+   // This prevents the guard from immediately cancelling an accepted hedge order.
+   if(STB_DailyLossLimitHit())
+     {
+      STB_LogControlReject("HEDGE","DAILY_LOSS_LIMIT_ACTIVE",
+                           "daily risk guard blocked hedge before order placement");
+      return false;
+     }
 
    if(!InpAllowOneClickHedge)
      {
@@ -18394,9 +18399,9 @@ void OnChartEvent(const int id,
    if(id==CHARTEVENT_CHART_CHANGE) return; // P6 STB-CLEANUP: no rebuild/redraw on chart change
 
 
-   // Some MT5 chart objects can steal a mouse click even when a button has higher Z-order.
-   // Accept both object-click and chart-click coordinates, then hit-test the visible EA controls.
-   if(id!=CHARTEVENT_OBJECT_CLICK && id!=CHARTEVENT_CLICK)
+   // Route only named object-click events to avoid dispatching one physical click twice.
+   // Keep hit-test rescue below for OBJECT_CLICK events intercepted by another chart object.
+   if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
 
    string clickName=sparam;
