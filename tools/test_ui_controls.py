@@ -44,7 +44,7 @@ def main() -> int:
     ensure_layout = [
         (name, int(x), int(width))
         for name, x, width in __import__("re").findall(
-            r'CreateButton\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\d+),28,(\d+),19,',
+            r'CreateButton\(g_prefix\+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\d+),28,(\d+),19,',
             ensure,
         )
     ]
