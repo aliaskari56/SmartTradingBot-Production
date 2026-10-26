@@ -15849,34 +15849,44 @@ double OnTester()
    double recovery=TesterStatistics(STAT_RECOVERY_FACTOR);
    double initial=TesterStatistics(STAT_INITIAL_DEPOSIT);
 
-// Persist the final tester statistics in the terminal-wide Common\\Files
-// directory. The baseline runner reads this machine-readable snapshot,
-// avoiding dependence on the presentation/HTML template.
-   int mh=FileOpen("SmartTradingBot_TesterMetrics.csv",
-                   FILE_WRITE|FILE_CSV|FILE_COMMON,
-                   ',');
-   if(mh!=INVALID_HANDLE)
+// The canonical FILE_COMMON snapshot is consumed by the single-run
+// regression harness. During optimization, multiple tester agents can write
+// the same filename concurrently and silently associate another pass's
+// statistics with this pass. Keep the stable filename for ordinary single
+// tests; optimization statistics remain available in each pass's tester log
+// and through this function's returned criterion.
+   if(!MQLInfoInteger(MQL_OPTIMIZATION))
      {
-      FileWrite(mh,
-                "profit","trades","profit_factor","expected_payoff",
-                "equity_dd","equity_dd_percent","sharpe",
-                "recovery_factor","initial_deposit");
-      FileWrite(mh,
-                DoubleToString(profit,10),
-                DoubleToString(trades,0),
-                DoubleToString(pf,10),
-                DoubleToString(expected,10),
-                DoubleToString(ddAbs,10),
-                DoubleToString(ddMax,10),
-                DoubleToString(sharpe,10),
-                DoubleToString(recovery,10),
-                DoubleToString(initial,10));
-      FileFlush(mh);
-      FileClose(mh);
+      int mh=FileOpen("SmartTradingBot_TesterMetrics.csv",
+                      FILE_WRITE|FILE_CSV|FILE_COMMON,
+                      ',');
+      if(mh!=INVALID_HANDLE)
+        {
+         FileWrite(mh,
+                   "profit","trades","profit_factor","expected_payoff",
+                   "equity_dd","equity_dd_percent","sharpe",
+                   "recovery_factor","initial_deposit");
+         FileWrite(mh,
+                   DoubleToString(profit,10),
+                   DoubleToString(trades,0),
+                   DoubleToString(pf,10),
+                   DoubleToString(expected,10),
+                   DoubleToString(ddAbs,10),
+                   DoubleToString(ddMax,10),
+                   DoubleToString(sharpe,10),
+                   DoubleToString(recovery,10),
+                   DoubleToString(initial,10));
+         FileFlush(mh);
+         FileClose(mh);
+        }
+      else
+        {
+         Print("STB TESTER METRICS CSV OPEN FAILED err=",GetLastError());
+        }
      }
    else
      {
-      Print("STB TESTER METRICS CSV OPEN FAILED err=",GetLastError());
+      Print("STB TESTER METRICS CSV SKIPPED during optimization to prevent shared FILE_COMMON collisions; use per-pass tester log/criterion.");
      }
 
    Print("STB TESTER METRICS",
