@@ -17224,12 +17224,24 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       MathAbs(prop.entry-currentEntry)<step &&
       MathAbs(prop.sl-currentSL)<step)
      {
+      // The proposal is intentionally too small to send, but the candle's
+      // favorable extreme is still valid market information. Consume the bar
+      // AND advance the anchor together; otherwise the next candle can be
+      // resolved from a stale extreme that no longer matches the current
+      // pending entry, causing repeated NO_FAVORABLE_VALID_ENTRY deferrals.
       g_stbPendingTrail[idx].lastProcessedM5Bar=actionableClosedBar;
+      if(direction>0)
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMax(g_stbPendingTrail[idx].trackedExtreme,extreme);
+      else
+         g_stbPendingTrail[idx].trackedExtreme=
+            MathMin(g_stbPendingTrail[idx].trackedExtreme,extreme);
       Print("PENDING_TRAIL_WAIT ticket=",ticket," symbol=",symbol,
             " type=",STB_PendingTrailTypeName(orderType),
             " reason=STEP_GATE",
             " entryDelta=",DoubleToString(MathAbs(prop.entry-currentEntry)/pip,2),
             " slDelta=",DoubleToString(MathAbs(prop.sl-currentSL)/pip,2),
+            " trackedExtreme=",DoubleToString(g_stbPendingTrail[idx].trackedExtreme,digits),
             " stepPips=",DoubleToString(InpTrailStepPips,2));
       return true;
      }
