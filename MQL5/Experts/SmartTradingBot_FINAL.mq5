@@ -1808,40 +1808,51 @@ double STB_AdaptiveTesterCriterion()
 
    if(pf==DBL_MAX)
       pf=10.0;
-
    if(recovery==DBL_MAX)
       recovery=0.0;
 
-   if(trades<10.0)
+   // Do not let a low-trade-count or losing optimization pass outrank a
+   // candidate with a real positive edge. The previous multiplicative score
+   // could reward a negative-return pass when its stability multiplier was
+   // smaller (less negative score), which is the wrong optimization ordering.
+   if(trades<30.0)
       return -1.0e9+trades;
+
+   double returnPct=(profit/deposit)*100.0;
+   if(!MathIsValidNumber(returnPct))
+      return -1.0e12;
+
+   // Require both positive net profit and PF > 1 before applying secondary
+   // quality metrics. This is an optimizer ranking guard, not a live-trading
+   // filter and does not guarantee out-of-sample profitability.
+   if(profit<=0.0 || pf<=1.0 || expected<=0.0)
+      return -1.0e6+MathMax(-100.0,MathMin(0.0,returnPct));
 
    pf=MathMax(0.0,MathMin(5.0,pf));
    sharpe=MathMax(-5.0,MathMin(5.0,sharpe));
    dd=MathMax(0.0,dd);
    recovery=MathMax(-10.0,MathMin(10.0,recovery));
 
-// Normalize money-denominated metrics so the criterion remains
-// comparable across different tester deposit sizes.
-   double returnPct=(profit/deposit)*100.0;
    double payoffPct=(expected/deposit)*100.0;
+   if(!MathIsValidNumber(payoffPct))
+      return -1.0e12;
 
    returnPct=MathMax(-100.0,MathMin(100.0,returnPct));
    payoffPct=MathMax(-10.0,MathMin(10.0,payoffPct));
 
-   double confidence=MathMin(1.0,trades/50.0);
-
-   double stability=
+   // Keep profit as the primary objective; PF, Sharpe, payoff, recovery and
+   // equity drawdown are bounded secondary modifiers. All candidates passing
+   // the positive-edge gate therefore rank above rejected losing candidates.
+   double quality=
       1.0+
       pf*0.12+
-      sharpe*0.06+
+      MathMax(-5.0,MathMin(5.0,sharpe))*0.06+
       MathMax(-1.0,MathMin(1.0,payoffPct*0.10))*0.08+
       MathMax(-1.0,MathMin(1.0,recovery*0.10))*0.06;
 
-   double score=
-      returnPct*
-      stability*
-      confidence/
-      (1.0+dd*0.10);
+   quality=MathMax(0.25,quality);
+   double confidence=MathMin(1.0,trades/50.0);
+   double score=returnPct*quality*confidence/(1.0+dd*0.10);
 
    return MathIsValidNumber(score) ? score:-1.0e12;
   }
