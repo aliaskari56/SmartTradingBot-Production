@@ -166,9 +166,10 @@ def main() -> int:
         and "if(clickName==autoName)" in handler,
     )
     check(
-        "keyboard events are logged and D remains the only built-in hotkey",
-        "STB UI KEY EVENT keyCode=" in handler
-        and "if(lparam==68 || lparam==100)" in handler,
+        "removed dashboard hotkey is not left as a dead keyboard-event path",
+        "CHARTEVENT_KEYDOWN" not in handler
+        and "STB UI KEY EVENT keyCode=" not in handler
+        and "if(lparam==68 || lparam==100)" not in handler,
     )
 
     check(
