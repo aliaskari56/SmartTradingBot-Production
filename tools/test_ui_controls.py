@@ -33,6 +33,40 @@ def main() -> int:
     handler = source[handler_start:] if handler_start >= 0 else ""
     init = region(source, "int OnInit()", "//==================================================================\n// DEINIT")
 
+    init_buttons = region(source, "int OnInit()", "//==================================================================\\n// DEINIT")
+    init_layout = [
+        (name, int(x), int(width))
+        for name, x, width in __import__("re").findall(
+            r'CreateButton\\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\\d+),8,(\\d+),26,',
+            init_buttons,
+        )
+    ]
+    ensure_layout = [
+        (name, int(x), int(width))
+        for name, x, width in __import__("re").findall(
+            r'CreateButton\\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\\d+),28,(\\d+),19,',
+            ensure,
+        )
+    ]
+
+    def non_overlapping(layout: list[tuple[str, int, int]]) -> bool:
+        if len(layout) != 8 or len({name for name, _, _ in layout}) != 8:
+            return False
+        ordered = sorted(layout, key=lambda item: item[1])
+        return all(
+            left_x + left_width <= right_x
+            for (_, left_x, left_width), (_, right_x, _) in zip(ordered, ordered[1:])
+        )
+
+    check(
+        "all eight startup controls have separate non-overlapping hit areas",
+        non_overlapping(init_layout),
+    )
+    check(
+        "control-repair path preserves separate non-overlapping hit areas",
+        non_overlapping(ensure_layout),
+    )
+
     check(
         "buttons are interactive OBJ_BUTTON objects with a released state",
         bool(button) and all(token in button for token in (
