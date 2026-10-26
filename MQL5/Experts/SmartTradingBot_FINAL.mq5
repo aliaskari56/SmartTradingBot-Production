@@ -14080,17 +14080,9 @@ bool STB_CalcMarketQuality(const string symbol,STBMarketQuality &q)
       return false;
      }
 
-   if(q.activityRatio<0.10)
-     {
-      q.reason="REJECT_ACTIVITY";
-      return false;
-     }
-
-   if(q.volatilityRatio>4.0)
-     {
-      q.reason="REJECT_VOLATILITY";
-      return false;
-     }
+   // Activity and volatility extremes remain quality-score inputs, not
+   // absolute scanner vetoes. Valid market data can proceed to strategy
+   // validation; broker and execution safeguards remain enforced.
 
    if(q.score+1e-9<InpScannerMinQuality)
      {
@@ -14181,6 +14173,12 @@ bool STB_EvaluateRegime(const string symbol,STBRegimeState &r)
       return true;
      }
 
+   // Do not discard a data-valid setup solely because the regime
+   // classifier cannot confidently label it. Use a neutral transition
+   // classification; strategy and execution validation still apply.
+   r.regime=STB_REGIME_TRANSITION;
+   r.strength=50.0;
+   r.reason="MIXED_STRUCTURE_FALLBACK";
    return true;
   }
 
