@@ -6003,7 +6003,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
             " reason=",failureReason);
       return false;
      }
-   if(!STB_SymbolManagementOwnedVerified(symbol))
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
      {
       failureReason="SYMBOL_WRITER_OWNERSHIP_NOT_VERIFIED";
       return false;
@@ -6178,7 +6178,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
       return false;
      }
 
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
       !STB_StopLimitSLSideOK((ENUM_ORDER_TYPE)stbOt,stopLimit,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
@@ -8742,7 +8742,7 @@ bool OneClickHedge()
      }
 
    string symbol=_Symbol;
-   if(!STB_SymbolManagementOwnedVerified(symbol))
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
      {
       Print("STB HEDGE REJECTED: symbol writer lease not owned symbol=",symbol);
       return false;
@@ -8854,7 +8854,7 @@ bool OneClickHedge()
                   "|EB"+DoubleToString(hedgeEntryOffset,8);
 
    // Recheck writer authority and exposure immediately before broker submission.
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol) ||
       HasManagedPositionDirection(symbol,hedgeType) ||
       STB_HasManagedPendingDirection(symbol,hedgeType))
      {
@@ -9863,7 +9863,7 @@ bool STB_PositionModifyBrokerVerified(const ulong ticket,
      }
 
    string symbol=PositionGetString(POSITION_SYMBOL);
-   if(symbol=="" || !STB_SymbolManagementOwnedVerified(symbol))
+   if(symbol=="" || !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
        MqlTick positionWriteTick;
@@ -10010,7 +10010,7 @@ if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
       return false;
 
    string symbol=PositionGetString(POSITION_SYMBOL);
-   if(!STB_SymbolManagementOwnedVerified(symbol))
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
      {
       Print("STB MODIFY WAIT: symbol-management lease not owned ticket=",ticket,
             " symbol=",symbol," chart=",ChartID());
@@ -10083,7 +10083,7 @@ if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
        (latestType==POSITION_TYPE_SELL && newSL>=latestSL)))
       return true;
    if(!IsValidSLForPosition(symbol,latestType,newSL) ||
-      !STB_SymbolManagementOwnedVerified(symbol))
+      !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
    double targetTP=latestTP;
@@ -11843,7 +11843,7 @@ bool STB_ModifyPositionTP(const ulong ticket,const double newTP)
       !STB_IsProtectionPosition(ticket))
       return false;
    string symbol=PositionGetString(POSITION_SYMBOL);
-   if(symbol=="" || !STB_SymbolManagementOwnedVerified(symbol))
+   if(symbol=="" || !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
       return false;
 
    double entry=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -11893,7 +11893,7 @@ bool EnsureInitialTPForPosition(const ulong ticket)
    if(PositionGetDouble(POSITION_TP)>0.0)
       return true;
    string symbol=PositionGetString(POSITION_SYMBOL);
-   if(!STB_SymbolManagementOwnedVerified(symbol))
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
       return false;
    if(PositionGetDouble(POSITION_SL)<=0.0)
       return false;
@@ -11946,7 +11946,7 @@ bool EnsureInitialTPForPendingOrder(const ulong ticket)
       return false; // initial SL used this ticket's single-write budget this cycle
 
    string symbol=OrderGetString(ORDER_SYMBOL);
-   if(!STB_SymbolManagementOwnedVerified(symbol) ||
+   if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol) ||
       OrderGetDouble(ORDER_SL)<=0.0)
       return false;
 
@@ -12004,7 +12004,7 @@ void ManagePositions()
          continue;
       string symbol=PositionGetString(POSITION_SYMBOL);
       if(symbol=="" || !SymbolSelect(symbol,true) ||
-         !STB_SymbolManagementOwnedVerified(symbol))
+         !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          continue;
       EnsureInitialSL(ticket);
      }
@@ -12018,7 +12018,7 @@ void ManagePositions()
          continue;
       string symbol=PositionGetString(POSITION_SYMBOL);
       if(symbol=="" || !SymbolSelect(symbol,true) ||
-         !STB_SymbolManagementOwnedVerified(symbol))
+         !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          continue;
       STB_AdaptiveBreakEvenProtection(ticket);
       STB_AdaptiveProfitLockProtection(ticket);
@@ -12035,7 +12035,7 @@ void ManagePositions()
          continue;
       string symbol=PositionGetString(POSITION_SYMBOL);
       if(symbol=="" || !SymbolSelect(symbol,true) ||
-         !STB_SymbolManagementOwnedVerified(symbol))
+         !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          continue;
       STB_AdaptiveATRTrail(ticket);
       TrailPositionByLivePrice(ticket);
@@ -12053,7 +12053,7 @@ void ManagePositions()
          continue;
       string symbol=PositionGetString(POSITION_SYMBOL);
       if(symbol=="" || !SymbolSelect(symbol,true) ||
-         !STB_SymbolManagementOwnedVerified(symbol))
+         !STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          continue;
       if(PositionGetDouble(POSITION_SL)>0.0 &&
          PositionGetDouble(POSITION_TP)<=0.0)
@@ -12091,7 +12091,7 @@ void ManagePendingOrders()
       string symbol=OrderGetString(ORDER_SYMBOL);
       if(symbol=="" || !SymbolSelect(symbol,true))
          continue; // subscribe non-Watch symbols before reading their history/quotes
-      if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
+      if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
 
       // Protect every managed pending order with no SL, not only orders created
       // by this EA. Also recheck Stop-Limit SL geometry against the child LIMIT
@@ -17684,7 +17684,7 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
       if(symbol=="")
          return;
       SymbolSelect(symbol,true);
-      if(!STB_SymbolManagementOwnedVerified(symbol))
+      if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          return;
       STB_PendingTrailRegister(ticket,source);
       EnsureInitialSLForPendingOrder(ticket);
@@ -17701,7 +17701,7 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
       if(symbol=="")
          return;
       SymbolSelect(symbol,true);
-      if(!STB_SymbolManagementOwnedVerified(symbol))
+      if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          return;
       EnsureInitialSL(ticket);
       if(PositionSelectByTicket(ticket) &&
@@ -17749,7 +17749,7 @@ void STB_EnforceDailyRiskGuard()
          continue;
 
       string symbol=OrderGetString(ORDER_SYMBOL);
-      if(!STB_SymbolManagementOwnedVerified(symbol))
+      if(!STB_SymbolManagementOwned(symbol) || !STB_SymbolManagementOwnedVerified(symbol))
          continue;
       if(STB_RequestOrderDelete(ticket,STB_DEL_DAILY_RISK_GUARD,"DailyLossGuard"))
          Print("STB DAILY GUARD cancelled pending order=",ticket,
