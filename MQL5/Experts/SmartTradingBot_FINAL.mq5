@@ -12435,6 +12435,32 @@ double CalculateOrderVolumeByRisk(const Setup &s,
 
    double riskMoney=equity*(InpRiskPercent/100.0);
    g_stbVolumeDiag.riskBudget=riskMoney;
+
+   // Fail closed on malformed setup geometry before OrderCalcProfit. Using
+   // MathAbs() on a profit-producing SL (wrong side of entry) would otherwise
+   // disguise an invalid setup as a valid risk amount and could oversize a trade.
+   bool geometryFinite=(MathIsValidNumber(s.entry) &&
+                        MathIsValidNumber(s.sl));
+   bool geometryPositive=(s.entry>0.0 && s.sl>0.0);
+   bool directionValid=(s.direction==1 || s.direction==-1);
+   bool stopOnLossSide=(s.direction==1 ? s.sl<s.entry :
+                        s.direction==-1 ? s.sl>s.entry : false);
+   if(!geometryFinite || !geometryPositive ||
+      !directionValid || !stopOnLossSide)
+     {
+      g_stbVolumeDiag.rejectCause="INVALID_SETUP_GEOMETRY";
+      Print("STB risk sizing rejected invalid setup geometry",
+            " symbol=",s.symbol,
+            " direction=",s.direction,
+            " entry=",DoubleToString(s.entry,10),
+            " sl=",DoubleToString(s.sl,10),
+            " finite=",geometryFinite,
+            " positive=",geometryPositive,
+            " directionValid=",directionValid,
+            " stopOnLossSide=",stopOnLossSide);
+      return 0.0;
+     }
+
    ENUM_ORDER_TYPE orderType=(s.direction>0 ? ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    double lossForOneLot=0.0;
    ResetLastError();
