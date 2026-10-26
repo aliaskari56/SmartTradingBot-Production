@@ -668,7 +668,7 @@ bool               g_activeAdaptiveProfileValid=false;
 int                g_activeAdaptiveProfileId=0;
 string             g_lastBuildRejectReason="UNKNOWN";
 STBDiagnosticState g_diagnosticStates[];
-string             g_dashboardLastAction="EA INITIALIZED";
+string             g_controlLastAction="EA INITIALIZED";
 datetime           g_lastSignalScanBar=0;
 int                g_panelScanSymbols=0;
 int                g_panelScanTradable=0;
@@ -11160,13 +11160,13 @@ void STB_ScannerRun()
 //+------------------------------------------------------------------+
 
 //==================================================================
-// PANEL
+// LEGACY DASHBOARD CLEANUP
 //==================================================================
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-void STB_DashDeleteAll()
+void STB_DeleteStaleDashboardObjects()
   {
    int total=ObjectsTotal(0,-1,-1);
 
@@ -11201,7 +11201,7 @@ void STB_DashDeleteAll()
 // Marker taxonomy in FINAL:
 //   TRADING SIGNAL : entry / SL / TP lines for the chart symbol's MANAGED
 //                    exposures -> restored here (this function).
-//   DECORATIVE     : oscillator panel / legacy dashboard -> not rendered.
+//   DECORATIVE     : oscillator panel -> not rendered.
 //   DEBUG          : none active.
 //   LEGACY         : the old professional visual engine has 0 callers.
 // Only this EA's own objects (prefix TM_) are touched. This is a handful of
@@ -11257,7 +11257,7 @@ void STB_DrawTradingLevels()
 void UpdatePanel()
   {
 // Keep the chart clean by removing any stale dashboard objects left by older builds.
-   STB_DashDeleteAll();
+   STB_DeleteStaleDashboardObjects();
    STB_DrawTradingLevels();
   }
 
@@ -11454,14 +11454,14 @@ void STB_RenderControlStatus()
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
    // Status must never win click priority over the trading-control buttons.
    ObjectSetInteger(0,name,OBJPROP_ZORDER,1);
-   ObjectSetString(0,name,OBJPROP_TEXT,g_dashboardLastAction);
+   ObjectSetString(0,name,OBJPROP_TEXT,g_controlLastAction);
    ObjectSetString(0,name,OBJPROP_TOOLTIP,
                    "Latest SmartTradingBot control result. See Experts log for details.");
   }
 
 void STB_SetControlStatus(const string message)
   {
-   g_dashboardLastAction=message;
+   g_controlLastAction=message;
    Print("STB UI STATUS: ",message);
    STB_RenderControlStatus();
    ChartRedraw(0);
@@ -11992,9 +11992,9 @@ int OnInit()
             "% formula=(ask-bid)/M15_ATR14*100. Symbols above this cap are rejected before candidate ranking; inspect STB SCANNER DISCOVERY REJECT BREAKDOWN for qualityReasons=REJECT_RELATIVE_SPREAD.");
    Print("STB UNIVERSAL PROFIT LOCK POLICY ENFORCED: triggerPips=",DoubleToString(STB_ProfitLockTriggerPips(),1)," lockPips=",DoubleToString(STB_ProfitLockLockPips(),1));
 
-// Keep the eight dedicated EA controls in a non-overlapping row along the lower-left, away from
-// the native MT5 one-click panel. Button handlers only dispatch to
-// dedicated strategy/trade-management functions.
+// Keep the eight dedicated EA controls in a non-overlapping vertical stack at the lower-left,
+// away from the native MT5 one-click panel. Button handlers dispatch to dedicated
+// strategy/trade-management functions.
    CreateButton(g_prefix+"BUY_STOP","BUY STOP",8,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"SELL_STOP","SELL STOP",100,8,88,26,clrTomato);
    CreateButton(g_prefix+"AUTO","AUTO",192,8,80,26,clrFireBrick);
@@ -12004,7 +12004,7 @@ int OnInit()
    CreateButton(g_prefix+"BUY_LIMIT","BUY LIMIT",548,8,88,26,clrSeaGreen);
    CreateButton(g_prefix+"PEND_TRAIL","PEND TRAIL",640,8,96,26,clrSlateBlue);
 
-   g_dashboardLastAction="CONTROL BAR READY - click results appear here; rejection details are in Experts.";
+   g_controlLastAction="CONTROL BAR READY - click results appear here; rejection details are in Experts.";
    UpdateButtons();
    STB_LogControlButtonHealth();
    ResetLastError();
@@ -12154,7 +12154,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0,g_prefix+"TF_TREND_LOW");
    ObjectDelete(0,g_prefix+"TF_TREND_LOW_EXT");
 
-   STB_DashDeleteAll();
+   STB_DeleteStaleDashboardObjects();
    DeleteVisuals();
    ObjectDelete(0,g_prefix+"OSC_PANEL");
    ObjectDelete(0,g_prefix+"OSC_SIG_B");
@@ -13087,15 +13087,6 @@ void OnChartEvent(const int id,
       if(hoveredControl!="")
          STB_ReleaseSelectedLineOverControl(lparam,(long)dparam,hoveredControl);
       return;
-     }
-
-   if(id==CHARTEVENT_KEYDOWN)
-     {
-      Print("STB UI KEY EVENT keyCode=",IntegerToString((int)lparam),
-            " repeat=",DoubleToString(dparam,0),
-            " keyMask=",sparam,
-            " chart=",(string)ChartID());
-
      }
 
    // Trace a named control event before name filtering. This separates a UI
