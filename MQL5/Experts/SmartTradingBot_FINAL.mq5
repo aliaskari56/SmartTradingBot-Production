@@ -16947,7 +16947,18 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
    // this order. Other chart instances defer before proposal calculation so
    // they cannot consume retry budget or emit false writer-failure logs.
    string managedSymbol=OrderGetString(ORDER_SYMBOL);
-   if(!STB_SymbolManagementOwnedVerified(managedSymbol))
+   // Acquire this symbol's lease here; merely checking a lease owned by
+   // another chart leaves cross-symbol pending orders unmanaged.
+   // Selecting the symbol also enables quote and M5-history requests.
+   if(managedSymbol=="" || !SymbolSelect(managedSymbol,true))
+     {
+      Print("PENDING_TRAIL_WAIT ticket=",ticket,
+            " symbol=",managedSymbol,
+            " reason=SYMBOL_SELECT_FAILED err=",GetLastError());
+      return true;
+     }
+   if(!STB_SymbolManagementOwned(managedSymbol) ||
+      !STB_SymbolManagementOwnedVerified(managedSymbol))
       return true;
 
    // After lifecycle/ownership checks, honor per-ticket backoff before
