@@ -52,10 +52,12 @@ while ($pending.Count -gt 0) {
 
 $files = [System.Collections.Generic.List[string]]::new()
 foreach ($path in $seen) {
-    $relative = [System.IO.Path]::GetRelativePath($root, $path)
-    if ($relative.StartsWith('..')) {
+    $rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $path.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Dependency resolves outside repository root: $path"
     }
+    # Substring-based relative paths keep this script compatible with Windows PowerShell 5.1.
+    $relative = $path.Substring($rootPrefix.Length)
     if ([System.IO.Path]::GetExtension($relative) -notin @('.mq5', '.mqh')) {
         throw "Unexpected dependency type in include closure: $relative"
     }
