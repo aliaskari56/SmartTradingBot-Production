@@ -6008,6 +6008,22 @@ bool STB_PendingRiskFloorOK(const long orderType,const double curEntry,
    return (newRisk<=origRisk*cap);
   }
 
+// Stop-Limit orders activate a child LIMIT at ORDER_PRICE_STOPLIMIT, not at
+// the trigger price. Their SL must therefore remain on the protective side of
+// the child fill price as well as passing the trigger-price validation.
+bool STB_StopLimitSLSideOK(const ENUM_ORDER_TYPE orderType,
+                           const double stopLimit,
+                           const double sl)
+  {
+   if(orderType==ORDER_TYPE_BUY_STOP_LIMIT)
+      return (stopLimit>0.0 && sl>0.0 && sl<stopLimit);
+
+   if(orderType==ORDER_TYPE_SELL_STOP_LIMIT)
+      return (stopLimit>0.0 && sl>stopLimit);
+
+   return true;
+  }
+
 bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                                     const double newEntry,
                                     const double newSL,
@@ -6122,6 +6138,18 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
                " newStopLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
          return false;
         }
+
+      if(!STB_StopLimitSLSideOK((ENUM_ORDER_TYPE)stbOt,stopLimit,newSL))
+        {
+         failureReason="STOP_LIMIT_SL_WRONG_SIDE_OF_CHILD_LIMIT";
+         Print("STB STOP-LIMIT SL REJECT ticket=",ticket,
+               " symbol=",symbol,
+               " type=",EnumToString((ENUM_ORDER_TYPE)stbOt),
+               " trigger=",DoubleToString(newEntry,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " childLimit=",DoubleToString(stopLimit,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+               " sl=",DoubleToString(newSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
+         return false;
+        }
      }
 
    // One broker geometry write per ticket per management cycle. This also
@@ -6200,6 +6228,7 @@ bool STB_ModifyPendingOrderGeometry(const ulong ticket,
 
    if(!STB_SymbolManagementOwnedVerified(symbol) ||
       !IsValidSLForPendingOrder(symbol,(ENUM_ORDER_TYPE)stbOt,newEntry,newSL) ||
+      !STB_StopLimitSLSideOK((ENUM_ORDER_TYPE)stbOt,stopLimit,newSL) ||
       !STB_PendingEntryDirectionOK(stbOt,latestEntry,newEntry,latestTolerance) ||
       !STB_PendingRiskFloorOK(stbOt,latestEntry,latestSL,newEntry,newSL))
      {
@@ -11280,12 +11309,19 @@ bool VerifyPendingInitialSL(const ulong ticket)
       return false;
 
    ENUM_ORDER_TYPE orderType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   string symbol=OrderGetString(ORDER_SYMBOL);
+   double entry=OrderGetDouble(ORDER_PRICE_OPEN);
+   double sl=OrderGetDouble(ORDER_SL);
 
-   return IsValidSLForPendingOrder(
-      OrderGetString(ORDER_SYMBOL),
-      orderType,
-      OrderGetDouble(ORDER_PRICE_OPEN),
-      OrderGetDouble(ORDER_SL));
+   if(!IsValidSLForPendingOrder(symbol,orderType,entry,sl))
+      return false;
+
+   if(orderType==ORDER_TYPE_BUY_STOP_LIMIT ||
+      orderType==ORDER_TYPE_SELL_STOP_LIMIT)
+      return STB_StopLimitSLSideOK(
+         orderType,OrderGetDouble(ORDER_PRICE_STOPLIMIT),sl);
+
+   return true;
   }
 
 bool CalculateInitialProtectionSL(const string symbol,
@@ -11419,8 +11455,11 @@ bool EnsureInitialSLForPendingOrder(const ulong ticket)
 
    double currentSL=OrderGetDouble(ORDER_SL);
 
-   if(currentSL>0.0)
-      return VerifyPendingInitialSL(ticket);
+   // Keep a valid existing SL untouched. If a Stop-Limit's SL is on the
+   // wrong side of its child limit, attempt a structural repair instead of
+   // treating the trigger-price check alone as sufficient.
+   if(currentSL>0.0 && VerifyPendingInitialSL(ticket))
+      return true;
 
    string symbol=OrderGetString(ORDER_SYMBOL);
 
@@ -12088,8 +12127,14 @@ void ManagePendingOrders()
       if(!STB_SymbolManagementOwnedVerified(symbol)) continue; // P6/P10 cross-instance single pending lifecycle owner
 
       // Protect every managed pending order with no SL, not only orders created
-      // by this EA. The helper respects manual overrides and throttles failures.
-      if(OrderGetDouble(ORDER_SL)<=0.0)
+      // by this EA. Also recheck Stop-Limit SL geometry against the child LIMIT
+      // price; a trigger-only-valid SL may be on the wrong side of the actual
+      // child entry. The helper respects manual overrides and throttles failures.
+      ENUM_ORDER_TYPE pendingType=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool stopLimitType=(pendingType==ORDER_TYPE_BUY_STOP_LIMIT ||
+                          pendingType==ORDER_TYPE_SELL_STOP_LIMIT);
+      if(OrderGetDouble(ORDER_SL)<=0.0 ||
+         (stopLimitType && !VerifyPendingInitialSL(ticket)))
         {
          EnsureInitialSLForPendingOrder(ticket);
          if(!OrderSelect(ticket))
