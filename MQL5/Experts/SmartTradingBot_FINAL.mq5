@@ -18517,7 +18517,7 @@ void OnChartEvent(const int id,
    if(clickName==autoName)
      {
       g_autoTrading=!g_autoTrading;
-      GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0);
+      if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0) Print("STB AUTO STATE PERSIST FAILED state=",g_autoTrading ? "ON":"OFF"," err=",GetLastError());
 
       // Manual overrides are released ONLY when AUTO is explicitly enabled.
       // Turning AUTO OFF must not erase a user's persisted per-ticket authority.
