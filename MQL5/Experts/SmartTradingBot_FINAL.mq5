@@ -1808,40 +1808,51 @@ double STB_AdaptiveTesterCriterion()
 
    if(pf==DBL_MAX)
       pf=10.0;
-
    if(recovery==DBL_MAX)
       recovery=0.0;
 
-   if(trades<10.0)
+   // Do not let a low-trade-count or losing optimization pass outrank a
+   // candidate with a real positive edge. The previous multiplicative score
+   // could reward a negative-return pass when its stability multiplier was
+   // smaller (less negative score), which is the wrong optimization ordering.
+   if(trades<30.0)
       return -1.0e9+trades;
+
+   double returnPct=(profit/deposit)*100.0;
+   if(!MathIsValidNumber(returnPct))
+      return -1.0e12;
+
+   // Require both positive net profit and PF > 1 before applying secondary
+   // quality metrics. This is an optimizer ranking guard, not a live-trading
+   // filter and does not guarantee out-of-sample profitability.
+   if(profit<=0.0 || pf<=1.0 || expected<=0.0)
+      return -1.0e6+MathMax(-100.0,MathMin(0.0,returnPct));
 
    pf=MathMax(0.0,MathMin(5.0,pf));
    sharpe=MathMax(-5.0,MathMin(5.0,sharpe));
    dd=MathMax(0.0,dd);
    recovery=MathMax(-10.0,MathMin(10.0,recovery));
 
-// Normalize money-denominated metrics so the criterion remains
-// comparable across different tester deposit sizes.
-   double returnPct=(profit/deposit)*100.0;
    double payoffPct=(expected/deposit)*100.0;
+   if(!MathIsValidNumber(payoffPct))
+      return -1.0e12;
 
    returnPct=MathMax(-100.0,MathMin(100.0,returnPct));
    payoffPct=MathMax(-10.0,MathMin(10.0,payoffPct));
 
-   double confidence=MathMin(1.0,trades/50.0);
-
-   double stability=
+   // Keep profit as the primary objective; PF, Sharpe, payoff, recovery and
+   // equity drawdown are bounded secondary modifiers. All candidates passing
+   // the positive-edge gate therefore rank above rejected losing candidates.
+   double quality=
       1.0+
       pf*0.12+
-      sharpe*0.06+
+      MathMax(-5.0,MathMin(5.0,sharpe))*0.06+
       MathMax(-1.0,MathMin(1.0,payoffPct*0.10))*0.08+
       MathMax(-1.0,MathMin(1.0,recovery*0.10))*0.06;
 
-   double score=
-      returnPct*
-      stability*
-      confidence/
-      (1.0+dd*0.10);
+   quality=MathMax(0.25,quality);
+   double confidence=MathMin(1.0,trades/50.0);
+   double score=returnPct*quality*confidence/(1.0+dd*0.10);
 
    return MathIsValidNumber(score) ? score:-1.0e12;
   }
@@ -1958,14 +1969,30 @@ double NormalizeVolume(const string symbol,double volume)
    if(volume<minLot)
       volume=minLot;
 
-   int digits=2;
-   if(step<0.01)
-      digits=3;
-   if(step<0.001)
-      digits=4;
+   // Derive decimal precision from the broker's actual volume step.
+   // Fixed thresholds (0.01/0.001) break valid grids such as 0.125.
+   int digits=-1;
+   for(int d=0;d<=8;d++)
+     {
+      double scaledStep=step*MathPow(10.0,d);
+      if(MathAbs(scaledStep-MathRound(scaledStep))<=1e-8)
+        {
+         digits=d;
+         break;
+        }
+     }
+
+   if(digits<0)
+      return 0.0;
 
    double normalized=NormalizeDouble(volume,digits);
    if(normalized<minLot-1e-9 || normalized>maxLot+1e-9)
+      return 0.0;
+
+   // Fail closed if decimal normalization no longer lies on the broker grid.
+   double stepUnits=normalized/step;
+   if(!MathIsValidNumber(stepUnits) ||
+      MathAbs(stepUnits-MathRound(stepUnits))>1e-7)
       return 0.0;
 
    return normalized;
@@ -12552,6 +12579,61 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    long entryType=HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
    string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
+
+   // Audit-only realized-result telemetry. Log every exit/partial-exit deal
+   // with trading costs so loss analysis can distinguish small wins from
+   // oversized losses. This block does not alter trade decisions or controls.
+   if(entryType==DEAL_ENTRY_OUT ||
+      entryType==DEAL_ENTRY_OUT_BY ||
+      entryType==DEAL_ENTRY_INOUT)
+     {
+      double dealProfit=HistoryDealGetDouble(trans.deal,DEAL_PROFIT);
+      double dealCommission=HistoryDealGetDouble(trans.deal,DEAL_COMMISSION);
+      double dealSwap=HistoryDealGetDouble(trans.deal,DEAL_SWAP);
+      double dealFee=HistoryDealGetDouble(trans.deal,DEAL_FEE);
+      double dealNet=dealProfit+dealCommission+dealSwap+dealFee;
+      double dealVolume=HistoryDealGetDouble(trans.deal,DEAL_VOLUME);
+      double dealPrice=HistoryDealGetDouble(trans.deal,DEAL_PRICE);
+      long dealReason=HistoryDealGetInteger(trans.deal,DEAL_REASON);
+
+      // Deal-level net can omit entry-side commission/fees. Also calculate the
+      // cumulative net across all currently recorded deals for this position
+      // identifier, then restore the original single-deal selection for the
+      // remaining transaction handler.
+      double positionNetToDate=0.0;
+      bool positionNetValid=false;
+      if(positionId>0 && HistorySelectByPosition(positionId))
+        {
+         int positionDeals=HistoryDealsTotal();
+         for(int dealIndex=0;dealIndex<positionDeals;dealIndex++)
+           {
+            ulong historyTicket=HistoryDealGetTicket(dealIndex);
+            if(historyTicket==0)
+               continue;
+            positionNetToDate+=HistoryDealGetDouble(historyTicket,DEAL_PROFIT)
+                               +HistoryDealGetDouble(historyTicket,DEAL_COMMISSION)
+                               +HistoryDealGetDouble(historyTicket,DEAL_SWAP)
+                               +HistoryDealGetDouble(historyTicket,DEAL_FEE);
+           }
+         positionNetValid=true;
+        }
+      HistoryDealSelect(trans.deal);
+
+      Print("STB CLOSED DEAL RESULT ticket=",trans.deal,
+            " positionId=",positionId,
+            " symbol=",symbol,
+            " entryType=",EnumToString((ENUM_DEAL_ENTRY)entryType),
+            " reason=",EnumToString((ENUM_DEAL_REASON)dealReason),
+            " volume=",DoubleToString(dealVolume,8),
+            " price=",DoubleToString(dealPrice,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " profit=",DoubleToString(dealProfit,2),
+            " commission=",DoubleToString(dealCommission,2),
+            " swap=",DoubleToString(dealSwap,2),
+            " fee=",DoubleToString(dealFee,2),
+            " dealNet=",DoubleToString(dealNet,2),
+            " positionNetToDate=",(positionNetValid ? DoubleToString(positionNetToDate,2) : "NA"),
+            " magic=",magic);
+     }
 
    // Reconcile per-ticket protection state before filtering by deal magic:
    // a manual/foreign-magic deal can partially or fully close a managed

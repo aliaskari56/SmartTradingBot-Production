@@ -582,6 +582,13 @@ bool STB_PendingTrailManageOne(const ulong ticket,const bool manual=false)
       return false;
    }
 
+   // Only the verified terminal-wide symbol lease owner may evaluate/submit
+   // this order. Other chart instances defer before proposal calculation so
+   // they cannot consume retry budget or emit false writer-failure logs.
+   string managedSymbol=OrderGetString(ORDER_SYMBOL);
+   if(!STB_SymbolManagementOwnedVerified(managedSymbol))
+      return true;
+
    // After lifecycle/ownership checks, honor per-ticket backoff before
    // rebuilding an actionable-bar proposal.
    if(g_stbPendingTrail[idx].nextRetryTime>TimeCurrent())

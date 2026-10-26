@@ -1,0 +1,56 @@
+name: Clean source package check
+
+on:
+  pull_request:
+    paths:
+      - 'MQL5/**'
+      - 'tools/Package-CleanSource.ps1'
+      - 'docs/RELEASE_PACKAGE_GUIDE.md'
+      - '.github/workflows/source-package-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build and verify source-only ZIP (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'STB-Packages'
+          $expanded = Join-Path $env:RUNNER_TEMP 'STB-Package-Expanded'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Package-CleanSource.ps1 -RepositoryRoot $env:GITHUB_WORKSPACE -OutputDirectory $out
+          if ($LASTEXITCODE -ne 0) { throw "Package script failed with exit code $LASTEXITCODE" }
+          $zip = Get-ChildItem -LiteralPath $out -Filter '*.zip' -File | Select-Object -First 1
+          if (-not $zip) { throw 'No source package ZIP was produced.' }
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $expanded -Force
+          $main = Join-Path $expanded 'MQL5\Experts\SmartTradingBot_FINAL.mq5'
+          $manifestPath = Join-Path $expanded 'SOURCE_SHA256_MANIFEST.csv'
+          $notePath = Join-Path $expanded 'PACKAGE_README.txt'
+          if (-not (Test-Path -LiteralPath $main -PathType Leaf)) { throw 'Primary EA missing from package.' }
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'SHA-256 manifest missing.' }
+          if (-not (Test-Path -LiteralPath $notePath -PathType Leaf)) { throw 'Package README missing.' }
+          if (Get-ChildItem -LiteralPath $expanded -Recurse -Filter '*.ex5' -File) { throw 'Compiled EX5 unexpectedly included.' }
+          foreach ($entry in (Import-Csv -LiteralPath $manifestPath)) {
+            $relative = $entry.Path.Replace('/', '\')
+            $filePath = Join-Path $expanded $relative
+            if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "Manifest file missing: $relative" }
+            $actual = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash
+            if ($actual -ne $entry.SHA256) { throw "Manifest hash mismatch: $relative" }
+          }
+          Write-Host "Verified source package: $($zip.FullName)"
+          Write-Host "ZIP SHA256: $((Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash)"
+
+      - name: Upload verified source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartTradingBot-source-only
+          path: ${{ runner.temp }}\STB-Packages\*.zip
+          if-no-files-found: error
+          retention-days: 14
