@@ -11166,7 +11166,7 @@ void STB_ScannerRun()
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-void STB_DeleteStaleDashboardObjects()
+void STB_DashDeleteAll()
   {
    int total=ObjectsTotal(0,-1,-1);
 
@@ -11257,7 +11257,7 @@ void STB_DrawTradingLevels()
 void UpdatePanel()
   {
 // Keep the chart clean by removing any stale dashboard objects left by older builds.
-   STB_DeleteStaleDashboardObjects();
+   STB_DashDeleteAll();
    STB_DrawTradingLevels();
   }
 
@@ -12154,7 +12154,7 @@ void OnDeinit(const int reason)
    ObjectDelete(0,g_prefix+"TF_TREND_LOW");
    ObjectDelete(0,g_prefix+"TF_TREND_LOW_EXT");
 
-   STB_DeleteStaleDashboardObjects();
+   STB_DashDeleteAll();
    DeleteVisuals();
    ObjectDelete(0,g_prefix+"OSC_PANEL");
    ObjectDelete(0,g_prefix+"OSC_SIG_B");
