@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.141"
+#property version   "1.142"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -4111,6 +4111,15 @@ bool STB_DailyLossLimitHit()
 
    if(InpMaxDailyLossPercent<=0.0)
       return false;
+
+   // Once the daily loss limit has been breached, keep entries blocked until
+   // the next valid server-day baseline. An equity recovery later in the day
+   // must not silently re-arm new entries after the guard has tripped.
+   if(g_stbDailyLimitLogged)
+     {
+      g_stbDailyLossThresholdReached=true;
+      return true;
+     }
 
    // Use the persisted start-of-day account-equity baseline and current
    // account equity. Summing today's closed deals with the FULL floating P/L
