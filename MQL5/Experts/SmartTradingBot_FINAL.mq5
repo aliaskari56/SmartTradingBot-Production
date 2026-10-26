@@ -6334,12 +6334,16 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
 
       double risk=s.entry-s.sl;
       double target=DBL_MAX;
+      double nearestSwing=DBL_MAX;
 
       for(int i=0;i<ArraySize(highs);i++)
         {
          double candidate=highs[i].price;
          if(candidate<=s.entry)
             continue;
+
+         if(candidate<nearestSwing)
+            nearestSwing=candidate;
 
          if(candidate-s.entry+1e-12 < risk*STB_EffectiveMinimumRR())
             continue;
@@ -6350,9 +6354,13 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
 
       if(target==DBL_MAX || target<=s.entry+minDist)
         {
+         double availableReward=(nearestSwing==DBL_MAX ? 0.0 : nearestSwing-s.entry);
          Print("STB setup rejected after broker normalization: BUY TP is too close or no RR target symbol=",s.symbol,
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
+               " nearestSwing=",nearestSwing==DBL_MAX ? "NONE" : DoubleToString(nearestSwing,digits),
+               " availableReward=",DoubleToString(availableReward,digits),
+               " requiredReward=",DoubleToString(risk*STB_EffectiveMinimumRR(),digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
          failureReason="BUY_NO_VALID_TP_OR_MINIMUM_RR";
          return false;
@@ -6421,12 +6429,16 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
 
       double risk=s.sl-s.entry;
       double target=-DBL_MAX;
+      double nearestSwing=-DBL_MAX;
 
       for(int i=0;i<ArraySize(lows);i++)
         {
          double candidate=lows[i].price;
          if(candidate>=s.entry)
             continue;
+
+         if(candidate>nearestSwing)
+            nearestSwing=candidate;
 
          if(s.entry-candidate+1e-12 < risk*STB_EffectiveMinimumRR())
             continue;
@@ -6437,9 +6449,13 @@ bool PreparePendingSetup(Setup &s,string &failureReason)
 
       if(target==-DBL_MAX || target>=s.entry-minDist)
         {
+         double availableReward=(nearestSwing==-DBL_MAX ? 0.0 : s.entry-nearestSwing);
          Print("STB setup rejected after broker normalization: SELL TP is too close or no RR target symbol=",s.symbol,
                " entry=",DoubleToString(s.entry,digits),
                " sl=",DoubleToString(s.sl,digits),
+               " nearestSwing=",nearestSwing==-DBL_MAX ? "NONE" : DoubleToString(nearestSwing,digits),
+               " availableReward=",DoubleToString(availableReward,digits),
+               " requiredReward=",DoubleToString(risk*STB_EffectiveMinimumRR(),digits),
                " minRR=",DoubleToString(STB_EffectiveMinimumRR(),2));
          failureReason="SELL_NO_VALID_TP_OR_MINIMUM_RR";
          return false;
