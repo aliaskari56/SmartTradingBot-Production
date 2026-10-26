@@ -4007,6 +4007,21 @@ void STB_DailyRiskClearState()
    g_stbDailyLossThresholdReached=false;
   }
 
+// Return true only for realized deals attributable to this EA or its UI-manual
+// commands. Unrelated terminal trades must not contribute to the EA daily guard.
+bool STB_DailyGuardDealIsEAOwned(const ulong dealTicket)
+  {
+   if(dealTicket==0)
+      return false;
+
+   long magic=HistoryDealGetInteger(dealTicket,DEAL_MAGIC);
+   if(magic==(long)InpMagic)
+      return true;
+
+   string comment=HistoryDealGetString(dealTicket,DEAL_COMMENT);
+   return (StringFind(comment,"STB|M|")==0);
+  }
+
 bool STB_DailyLossLimitHit()
   {
    g_stbDailyLossThresholdReached=false;
@@ -4082,8 +4097,9 @@ bool STB_DailyLossLimitHit()
       g_stbDailyStartEquity=equity;
       g_stbDailyLimitLogged=false;
       Print("STB DAILY RISK BASELINE day=",dayKey,
-            " equity=",DoubleToString(equity,2),
-            " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2));
+            " accountEquityReference=",DoubleToString(equity,2),
+            " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2),
+            " scope=EA_TRADES_ONLY");
       if(!STB_DailyRiskPersist(dayKey,equity,false))
          return true;
       return false;
@@ -4092,7 +4108,57 @@ bool STB_DailyLossLimitHit()
    if(InpMaxDailyLossPercent<=0.0)
       return false;
 
-   double lossPct=(g_stbDailyStartEquity-equity)/g_stbDailyStartEquity*100.0;
+   // Calculate today's P/L only from this EA's deals. Account-wide equity
+   // changes caused by unrelated manual trades or other EAs are excluded.
+   MqlDateTime dayParts=nowParts;
+   dayParts.hour=0;
+   dayParts.min=0;
+   dayParts.sec=0;
+   datetime dayStart=StructToTime(dayParts);
+   if(dayStart<=0 || !HistorySelect(dayStart,now))
+     {
+      Print("STB DAILY RISK HISTORY UNAVAILABLE; entries remain blocked.");
+      return true; // fail closed, but do not mark a verified loss breach
+     }
+
+   double eaRealizedNetToday=0.0;
+   int dealCount=HistoryDealsTotal();
+   for(int i=0;i<dealCount;i++)
+     {
+      ulong dealTicket=HistoryDealGetTicket(i);
+      if(dealTicket==0 || !STB_DailyGuardDealIsEAOwned(dealTicket))
+         continue;
+
+      eaRealizedNetToday+=HistoryDealGetDouble(dealTicket,DEAL_PROFIT)
+                          +HistoryDealGetDouble(dealTicket,DEAL_COMMISSION)
+                          +HistoryDealGetDouble(dealTicket,DEAL_SWAP)
+                          +HistoryDealGetDouble(dealTicket,DEAL_FEE);
+     }
+
+   // Add current floating P/L only for positions owned by this EA or created
+   // through its UI-manual command. Other open positions are ignored.
+   double eaFloatingNet=0.0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong positionTicket=PositionGetTicket(i);
+      if(positionTicket==0 || !PositionSelectByTicket(positionTicket))
+         continue;
+
+      long positionMagic=PositionGetInteger(POSITION_MAGIC);
+      string positionComment=PositionGetString(POSITION_COMMENT);
+      bool eaOwned=(positionMagic==(long)InpMagic);
+      bool eaUiManual=(StringFind(positionComment,"STB|M|")==0);
+      if(!eaOwned && !eaUiManual)
+         continue;
+
+      eaFloatingNet+=PositionGetDouble(POSITION_PROFIT)
+                     +PositionGetDouble(POSITION_SWAP);
+     }
+
+   double eaNetToday=eaRealizedNetToday+eaFloatingNet;
+   double lossMoney=MathMax(0.0,-eaNetToday);
+   double lossPct=lossMoney/g_stbDailyStartEquity*100.0;
+
    if(lossPct+1e-9>=InpMaxDailyLossPercent)
      {
       g_stbDailyLossThresholdReached=true;
@@ -4102,14 +4168,17 @@ bool STB_DailyLossLimitHit()
          if(!STB_DailyRiskPersist(dayKey,g_stbDailyStartEquity,true))
             return true;
          Print("STB DAILY LOSS LIMIT HIT day=",dayKey,
-            " startEquity=",DoubleToString(g_stbDailyStartEquity,2),
-            " equity=",DoubleToString(equity,2),
+            " startEquityReference=",DoubleToString(g_stbDailyStartEquity,2),
+            " eaRealizedNetToday=",DoubleToString(eaRealizedNetToday,2),
+            " eaFloatingNet=",DoubleToString(eaFloatingNet,2),
+            " eaNetToday=",DoubleToString(eaNetToday,2),
             " lossPct=",DoubleToString(lossPct,2),
             " limitPct=",DoubleToString(InpMaxDailyLossPercent,2),
-            " action=BLOCK_NEW_SETUPS");
+            " scope=EA_TRADES_ONLY action=BLOCK_NEW_SETUPS");
         }
       return true;
      }
+
    return false;
   }
 
