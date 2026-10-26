@@ -33,18 +33,18 @@ def main() -> int:
     handler = source[handler_start:] if handler_start >= 0 else ""
     init = region(source, "int OnInit()", "//==================================================================\n// DEINIT")
 
-    init_buttons = region(source, "int OnInit()", "//==================================================================\\n// DEINIT")
+    init_buttons = init
     init_layout = [
         (name, int(x), int(width))
         for name, x, width in __import__("re").findall(
-            r'CreateButton\\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\\d+),8,(\\d+),26,',
+            r'CreateButton\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\d+),8,(\d+),26,',
             init_buttons,
         )
     ]
     ensure_layout = [
         (name, int(x), int(width))
         for name, x, width in __import__("re").findall(
-            r'CreateButton\\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\\d+),28,(\\d+),19,',
+            r'CreateButton\(g_prefix+"(BUY_STOP|SELL_STOP|AUTO|SAVE20|HEDGE|SELL_LIMIT|BUY_LIMIT|PEND_TRAIL)","[^"]+",(\d+),28,(\d+),19,',
             ensure,
         )
     ]
