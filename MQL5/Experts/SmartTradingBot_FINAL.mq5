@@ -4028,11 +4028,111 @@ bool STB_DailyGuardDealIsEAOwned(const ulong dealTicket)
 
 bool STB_DailyLossLimitHit()
   {
-   // Daily loss blocking was explicitly disabled by request.
-   // Keep the shared guard API and clear the legacy threshold flag so callers
-   // cannot accidentally block entries or cancel automatic pending orders.
-   // All independent risk, sizing, quote-integrity, broker and order checks remain active.
+   // Daily loss limit is an AUTO-ENTRY guard only. Manual button orders,
+   // HEDGE actions, existing-position protection and manual SL/TP edits do
+   // not consult this function. The guard never closes open positions.
    g_stbDailyLossThresholdReached=false;
+
+   if(InpMaxDailyLossPercent<=0.0)
+      return false;
+
+   datetime now=TimeCurrent();
+   double equity=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(now<=0 || !MathIsValidNumber(equity) || equity<=0.0)
+     {
+      Print("STB DAILY RISK BLOCK: valid server time/equity unavailable; AUTO entries fail-closed.");
+      return true;
+     }
+
+   MqlDateTime dateParts;
+   if(!TimeToStruct(now,dateParts))
+     {
+      Print("STB DAILY RISK BLOCK: cannot resolve server date; AUTO entries fail-closed.");
+      return true;
+     }
+
+   int dayKey=dateParts.year*10000+dateParts.mon*100+dateParts.day;
+   string dayName=STB_DailyRiskStateName("DAY");
+   string equityName=STB_DailyRiskStateName("EQ");
+   string loggedName=STB_DailyRiskStateName("LOG");
+
+   bool stateExists=(GlobalVariableCheck(dayName) &&
+                     GlobalVariableCheck(equityName) &&
+                     GlobalVariableCheck(loggedName));
+   int storedDay=0;
+   double storedEquity=0.0;
+   bool storedLatched=false;
+
+   if(stateExists)
+     {
+      double dayValue=GlobalVariableGet(dayName);
+      storedEquity=GlobalVariableGet(equityName);
+      double latchValue=GlobalVariableGet(loggedName);
+      if(MathIsValidNumber(dayValue) && dayValue>=20000101.0 &&
+         dayValue<=21001231.0 &&
+         MathIsValidNumber(storedEquity) && storedEquity>0.0 &&
+         MathIsValidNumber(latchValue) && (latchValue==0.0 || latchValue==1.0))
+        {
+         storedDay=(int)dayValue;
+         storedLatched=(latchValue>=1.0);
+        }
+      else
+         stateExists=false;
+     }
+
+   if(!stateExists || storedDay!=dayKey)
+     {
+      g_stbDailyStartEquity=equity;
+      g_stbDailyKey=dayKey;
+      g_stbDailyLimitLogged=false;
+      g_stbDailyLossThresholdReached=false;
+      if(!STB_DailyRiskPersist(dayKey,equity,false))
+        {
+         Print("STB DAILY RISK BLOCK: failed to persist new daily baseline; AUTO entries fail-closed.");
+         return true;
+        }
+      Print("STB DAILY RISK BASELINE day=",dayKey,
+            " startEquity=",DoubleToString(equity,2),
+            " maxDailyLossPct=",DoubleToString(InpMaxDailyLossPercent,2),
+            " scope=AUTO_ENTRIES_ONLY");
+      return false;
+     }
+
+   g_stbDailyKey=dayKey;
+   g_stbDailyStartEquity=storedEquity;
+   g_stbDailyLimitLogged=storedLatched;
+
+   if(storedLatched)
+     {
+      g_stbDailyLossThresholdReached=true;
+      return true;
+     }
+
+   double lossPercent=((storedEquity-equity)/storedEquity)*100.0;
+   if(!MathIsValidNumber(lossPercent))
+     {
+      Print("STB DAILY RISK BLOCK: daily loss calculation invalid; AUTO entries fail-closed.");
+      return true;
+     }
+
+   if(lossPercent>=InpMaxDailyLossPercent)
+     {
+      g_stbDailyLossThresholdReached=true;
+      g_stbDailyLimitLogged=true;
+      if(!STB_DailyRiskPersist(dayKey,storedEquity,true))
+        {
+         Print("STB DAILY RISK BLOCK: threshold reached and latch persistence failed; AUTO entries remain blocked.");
+         return true;
+        }
+      Print("STB DAILY LOSS LIMIT REACHED day=",dayKey,
+            " lossPct=",DoubleToString(lossPercent,2),
+            " limitPct=",DoubleToString(InpMaxDailyLossPercent,2),
+            " startEquity=",DoubleToString(storedEquity,2),
+            " currentEquity=",DoubleToString(equity,2),
+            " action=BLOCK_AUTO_ENTRIES_ONLY");
+      return true;
+     }
+
    return false;
   }
 
@@ -17612,10 +17712,11 @@ void STB_AfterExposureCreated(const ulong ticket,const string source)
      }
   }
 
-// Enforce the daily equity guard for automatic entries. Explicit UI-manual
-// pending orders and manual button actions bypass this entry gate; automatic EA
-// pending orders are canceled while normal position protection continues. Broker rejection,
-// gaps, and slippage mean this guard is not a guaranteed maximum-loss boundary.
+// Enforce the daily equity guard for automatic entries only. Explicit UI-manual
+// pending orders and manual button actions bypass this entry gate. The guard
+// never closes open positions or disables position protection; it only cancels
+// automatic EA pending entries. Broker rejection, gaps, and slippage mean this
+// guard is not a guaranteed maximum-loss boundary.
 void STB_EnforceDailyRiskGuard()
   {
    bool riskBlocked=STB_DailyLossLimitHit();
@@ -17624,56 +17725,8 @@ void STB_EnforceDailyRiskGuard()
    if(!riskBlocked)
       return;
 
-   // Preserve historical tester liquidation only for a verified threshold breach.
-   // In terminal/demo/live runtime, existing positions remain under normal
-   // protection; managed EA pending entries are canceled to avoid new exposure.
-   if(MQLInfoInteger(MQL_TESTER) && g_stbDailyLossThresholdReached)
-     {
-      for(int i=PositionsTotal()-1;i>=0;i--)
-        {
-         ulong ticket=PositionGetTicket(i);
-         if(ticket==0 || !PositionSelectByTicket(ticket))
-            continue;
-         if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
-            continue;
-
-         // HEDGE-button orders are manual-origin even though they use the EA
-         // magic. Exclude their resulting positions from daily-guard liquidation.
-         string positionComment=PositionGetString(POSITION_COMMENT);
-         if(StringFind(positionComment,"STB|HEDGE|")==0)
-            continue;
-
-         string symbol=PositionGetString(POSITION_SYMBOL);
-         if(!STB_SymbolManagementOwnedVerified(symbol))
-            continue;
-
-         trade.SetExpertMagicNumber(InpMagic);
-         trade.SetAsyncMode(false);
-         ResetLastError();
-         bool closeOK=trade.PositionClose(ticket);
-         uint closeRetcode=trade.ResultRetcode();
-
-         if(!closeOK || closeRetcode!=TRADE_RETCODE_DONE)
-           {
-            Print("STB DAILY GUARD CLOSE FAILED ticket=",ticket,
-                  " symbol=",symbol,
-                  " requestOK=",closeOK ? "YES":"NO",
-                  " retcode=",IntegerToString((int)closeRetcode),
-                  " description=",trade.ResultRetcodeDescription(),
-                  " error=",GetLastError());
-            continue;
-           }
-
-         if(PositionSelectByTicket(ticket))
-            Print("STB DAILY GUARD CLOSE UNCONFIRMED ticket=",ticket,
-                  " symbol=",symbol,
-                  " retcode=",IntegerToString((int)closeRetcode));
-         else
-            Print("STB DAILY GUARD POSITION CLOSED ticket=",ticket,
-                  " symbol=",symbol);
-        }
-     }
-
+   // Daily loss guard never liquidates positions in tester or live trading.
+   // It only blocks new automatic entries and cancels automatic EA pending entries.
    // In both modes, prevent managed EA pending entries from triggering after
    // the daily risk threshold is reached.
    for(int i=OrdersTotal()-1;i>=0;i--)
