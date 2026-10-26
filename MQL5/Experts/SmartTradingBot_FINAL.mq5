@@ -3601,7 +3601,7 @@ bool CTrade::SelectPosition(const string symbol)
 
 // ===== END INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
 
-d headers are inlined below.
+// Standard headers are inlined below.
 
 CTrade trade;
 
