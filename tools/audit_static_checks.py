@@ -171,7 +171,7 @@ def main() -> int:
     on_trade_transaction = source_region(
         source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)")
     on_trade_transaction_full = source_region(
-        source, "void OnTradeTransaction(", "void STB_ToggleDashboard()")
+        source, "void OnTradeTransaction(", "string STB_ControlAtChartXY(")
     trade_intake = source_region(
         source, "void STB_TradeIntakeFromTransaction(", "// EXPOSURE MANAGEMENT")
     management_cycle = source_region(
@@ -584,13 +584,17 @@ def main() -> int:
               body.find("GlobalVariableDel(TicketLockName(closedTicket));") <
               body.find("if(magic!=(long)InpMagic &&"))
           (source_region(source, "void OnTradeTransaction(", "if(entryType==DEAL_ENTRY_IN && positionId>0)"))),
-        ("closed lifecycle PnL can be reconstructed from OUT/OUT_BY broker history",
+        ("closed lifecycle PnL recovery includes entry costs and isolates netting reversals",
          "bool STB_SumClosedLifecyclePnlFromHistory(" in source
          and "HistorySelectByPosition(positionId)" in source
          and "entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY" in source
+         and "if(entry==DEAL_ENTRY_IN)" in source
+         and "HistoryDealGetDouble(deal,DEAL_COMMISSION)" in source
+         and "HistoryDealGetDouble(deal,DEAL_FEE)" in source
          and "lastReversalDeal" in source
          and "DEAL_TIME_MSC" in source
          and "DEAL_ENTRY_INOUT" in source
+         and "bool lifecycleComplete=(lastReversalDeal>0 || foundEntry);" in source
          and "STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)" in on_trade_transaction_full
          and on_trade_transaction_full.find("TakeAccumulatedPositionPnl(positionId)") <
              on_trade_transaction_full.find("STB_SumClosedLifecyclePnlFromHistory(positionId,historyLifecyclePnl)")),
