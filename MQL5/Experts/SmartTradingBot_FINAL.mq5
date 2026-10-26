@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
-//|                                                      ProjectName |
-//|                                      Copyright 2020, CompanyName |
-//|                                       http://www.companyname.net |
+//| SmartTradingBot_FINAL.mq5                                        |
+//| Main Expert Advisor source for SmartTradingBot-Production        |
+//| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.138"
-#property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Execution Hardening"
+#property version   "1.139"
+#property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
 
@@ -3711,8 +3711,6 @@ input group "=== TRADE MANAGEMENT ==="
 // SIMPLIFIED: per-magic / per-origin management flags removed (ownership scope = allowed symbol only).
 
 
-
-
 input bool    InpAllowOneClickHedge      = true;
 
 input group "=== TRENDLINE ==="
@@ -4254,7 +4252,6 @@ struct STBIndicatorCache
    int               rsiHandle;
    int               cciHandle;
   };
-
 
 
 struct Setup
@@ -5519,7 +5516,6 @@ double STB_AdaptiveTesterCriterion()
 
    return MathIsValidNumber(score) ? score:-1.0e12;
   }
-
 
 
 //==================================================================
@@ -7107,7 +7103,6 @@ TrendInfo GetH4Trend(const string symbol)
 //+------------------------------------------------------------------+
 
 
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -7209,9 +7204,6 @@ bool DetectStructure(const string symbol,
            }
         }
      }
-
-
-
 
 
    return false;
@@ -8363,8 +8355,6 @@ void STB_ReconcileTradeRegistry()
    // SIMPLIFIED: origin registry prune loop removed.
 
 
-
-
   }
 
 //+------------------------------------------------------------------+
@@ -8540,7 +8530,6 @@ bool IsManagedPosition(const ulong ticket)
    return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
 
 
-
   }
 
 //+------------------------------------------------------------------+
@@ -8550,7 +8539,6 @@ bool IsManagedOrder(const ulong ticket)
   {
    if(ticket==0 || !OrderSelect(ticket)) return false;
    return STB_IsSymbolAllowed(OrderGetString(ORDER_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
 
 
   }
@@ -12838,9 +12826,6 @@ bool PlaceSetup(Setup &s,const double entryLockToken)
    STB_AP_SetActive(s.adaptiveProfile);
 
 
-
-
-
    STB_AP_ClearActive();
 
    Print("STB AUTO PENDING CREATED ",s.symbol," ",
@@ -13478,7 +13463,6 @@ bool PlaceManualPendingDirection(const int direction)
 //==================================================================
 // SCANNER ARCHITECTURE — UNIVERSE -> TOP10 CANDIDATES
 //==================================================================
-
 
 
 //+------------------------------------------------------------------+
@@ -14960,7 +14944,6 @@ void STB_DashDeleteAll()
   }
 
 
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -15044,7 +15027,6 @@ void UpdatePanel()
 //==================================================================
 // BUTTONS
 //==================================================================
-
 
 
 //+------------------------------------------------------------------+
@@ -15386,7 +15368,6 @@ void UpdateButtons()
 //==================================================================
 
 
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -15429,9 +15410,6 @@ void DrawHLine(const string name,const double price,const color clr)
 //+------------------------------------------------------------------+
 
 
-
-
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -15448,7 +15426,6 @@ void DrawHLine(const string name,const double price,const color clr)
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-
 
 
 //+------------------------------------------------------------------+
@@ -15800,12 +15777,6 @@ int OnInit()
    g_lastM15Bar=iTime(_Symbol,PERIOD_M15,0);
 
 
-
-
-
-
-
-
 // P9 restart/reinitialize recovery: rebuild pending-trail state for EVERY
 // managed pending type before the first management cycle. This prevents the
 // first cycle from registering/trailing recovered orders before a clean rebuild.
@@ -15970,7 +15941,6 @@ void OnDeinit(const int reason)
    ============================================================== */
 
 // LRN-04 record codec was removed: it had no call sites in the EA.
-
 
 
 // ===== INLINED FROM MQL5/Include/STB/STB_PendingDistanceResolver.mqh; standalone source integration =====
@@ -18408,14 +18378,6 @@ void OnChartEvent(const int id,
      }
 
    if(id==CHARTEVENT_CHART_CHANGE) return; // P6 STB-CLEANUP: no rebuild/redraw on chart change
-
-
-
-
-
-
-
-
 
 
    // Some MT5 chart objects can steal a mouse click even when a button has higher Z-order.
