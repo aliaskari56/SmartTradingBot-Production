@@ -8746,15 +8746,10 @@ bool STB_ResolveManualPendingEntry(const string symbol,
 
 bool OneClickHedge()
   {
-   // Reject before submitting a hedge if the daily loss guard is active.
-   // This prevents the guard from immediately cancelling an accepted hedge order.
-   if(STB_DailyLossLimitHit())
-     {
-      STB_LogControlReject("HEDGE","DAILY_LOSS_LIMIT_ACTIVE",
-                           "daily risk guard blocked hedge before order placement");
-      return false;
-     }
-
+   // One-click hedge is an explicit user-triggered action, not an automatic
+   // scanner entry. The daily-loss gate applies only to automatic entries.
+   // Trade permissions, hedge-account checks, exposure, volume, SL and broker
+   // validation remain mandatory.
    if(!InpAllowOneClickHedge)
      {
       STB_LogControlReject("HEDGE","INPUT_DISABLED",
@@ -17747,6 +17742,12 @@ void STB_EnforceDailyRiskGuard()
          if(PositionGetInteger(POSITION_MAGIC)!=(long)InpMagic)
             continue;
 
+         // HEDGE-button orders are manual-origin even though they use the EA
+         // magic. Exclude their resulting positions from daily-guard liquidation.
+         string positionComment=PositionGetString(POSITION_COMMENT);
+         if(StringFind(positionComment,"STB|HEDGE|")==0)
+            continue;
+
          string symbol=PositionGetString(POSITION_SYMBOL);
          if(!STB_SymbolManagementOwnedVerified(symbol))
             continue;
@@ -17790,9 +17791,11 @@ void STB_EnforceDailyRiskGuard()
       bool eaOwned=(orderMagic==(long)InpMagic);
       bool eaUiManual=(orderMagic==0 &&
                        StringFind(orderComment,"STB|M|")==0);
+      bool manualHedge=(eaOwned &&
+                        StringFind(orderComment,"STB|HEDGE|")==0);
       // Daily loss guard cancels only automatic EA pending entries.
-      // Explicitly placed UI-manual pending orders are left untouched.
-      if(!eaOwned || eaUiManual)
+      // Explicit UI-manual orders and HEDGE-button orders are excluded.
+      if(!eaOwned || eaUiManual || manualHedge)
          continue;
       if(!IsManagedOrder(ticket))
          continue;
