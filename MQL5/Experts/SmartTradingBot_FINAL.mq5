@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property strict
 #property version   "1.136"
-#property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Advanced Dashboard + Execution Hardening"
+#property description "SmartTradingBot - H4 Trend + M15 CHoCH/BOS + Swing + FVG + OB + RSI/CCI + Adaptive Parameter Learning + Auto Pending + Manual Trade Manager + Execution Hardening"
 #include <Trade/Trade.mqh>
 
 CTrade trade;
@@ -669,7 +669,6 @@ int                g_activeAdaptiveProfileId=0;
 string             g_lastBuildRejectReason="UNKNOWN";
 STBDiagnosticState g_diagnosticStates[];
 string             g_dashboardLastAction="EA INITIALIZED";
-bool               g_dashHidden=false;
 datetime           g_lastSignalScanBar=0;
 int                g_panelScanSymbols=0;
 int                g_panelScanTradable=0;
@@ -11202,7 +11201,7 @@ void STB_DashDeleteAll()
 // Marker taxonomy in FINAL:
 //   TRADING SIGNAL : entry / SL / TP lines for the chart symbol's MANAGED
 //                    exposures -> restored here (this function).
-//   DECORATIVE     : oscillator panel / dashboard -> intentionally disabled.
+//   DECORATIVE     : oscillator panel / legacy dashboard -> not rendered.
 //   DEBUG          : none active.
 //   LEGACY         : the old professional visual engine has 0 callers.
 // Only this EA's own objects (prefix TM_) are touched. This is a handful of
@@ -11257,9 +11256,7 @@ void STB_DrawTradingLevels()
 
 void UpdatePanel()
   {
-// Large dashboard intentionally disabled.
-// Dashboard objects are removed, while the bottom controls
-// continue to operate independently.
+// Keep the chart clean by removing any stale dashboard objects left by older builds.
    STB_DashDeleteAll();
    STB_DrawTradingLevels();
   }
@@ -12932,21 +12929,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-void STB_ToggleDashboard()
-  {
-   g_dashHidden=!g_dashHidden;
-   if(g_dashHidden)
-      STB_DashDeleteAll();
-   else
-      UpdatePanel();
-
-   // The large dashboard painter is disabled in this source. Acknowledge D
-   // visibly instead of swallowing the keyboard event with no feedback.
-   STB_SetControlStatus(g_dashHidden ?
-                        "D KEY RECEIVED - dashboard hidden; control buttons remain active." :
-                        "D KEY RECEIVED - dashboard rendering is disabled in this build.");
-  }
-
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -13114,11 +13096,6 @@ void OnChartEvent(const int id,
             " keyMask=",sparam,
             " chart=",(string)ChartID());
 
-      if(lparam==68 || lparam==100)
-        {
-         STB_ToggleDashboard();
-         return;
-        }
      }
 
    // Trace a named control event before name filtering. This separates a UI
