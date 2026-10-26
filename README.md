@@ -15,7 +15,7 @@
 
 ## Source-of-truth policy
 
-1. Treat `main` as the canonical repository branch for the source currently stored here; the EA property version is `1.135`. This repository snapshot does **not** establish identity with any separate local `v1.141` build. Do not overwrite or deploy that local build based on version labels alone.
+1. Treat `main` as the canonical repository branch for the source currently stored here; the EA property version is `1.136`. This repository snapshot does **not** establish identity with any separate local `v1.141` build. Do not overwrite or deploy that local build based on version labels alone.
 2. Keep experimental changes on topic branches and submit them through pull requests.
 3. Review the diff and run the required validation gates for future EA or include-file changes before merging.
 4. Do not distribute an `.ex5` as verified unless its relationship to the reviewed `.mq5`, exact include dependency set, MetaEditor build, compile log, and artifact SHA-256 is documented and reproducible.
