@@ -15694,24 +15694,22 @@ int OnInit()
    if(STB_DailyLossLimitHit())
       Print("STB INIT WARNING: daily risk guard initialized in fail-closed state.");
 
-// Tester reproducibility override is isolated from normal terminal runtime.
-   // Startup AUTO policy: do not let stale .set files silently leave the EA off.
-   // The on-chart AUTO button remains the explicit runtime toggle. Trade permission,
-   // quote validation, exposure checks, and daily-risk guards remain unchanged.
-   if(MQLInfoInteger(MQL_TESTER))
+// Tester AUTO override is opt-in through InpTesterForceAutoTrading.
+   // When it is OFF, honor InpAutoTrading just as the normal terminal does.
+   // Trade permission, quote validation, exposure checks, and daily-risk guards
+   // remain unchanged; the on-chart AUTO button remains available in both modes.
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterForceAutoTrading)
      {
       g_autoTrading=true;
       if(GlobalVariableSet(g_autoStateName,1.0)<=0)
          Print("STB INIT WARNING: unable to persist forced tester AUTO state err=",GetLastError());
-      STB_ManualOverrideClearAll(); // MANUAL_OVERRIDE: startup AUTO policy is forced ON
-      if(!InpAutoTrading || !InpTesterForceAutoTrading)
-         Print("STB INIT AUTO OVERRIDE: forced ON despite tester inputs autoInput=",
-               InpAutoTrading ? "ON":"OFF",
-               " testerForceAuto=",InpTesterForceAutoTrading ? "ON":"OFF");
+      STB_ManualOverrideClearAll();
+      if(!InpAutoTrading)
+         Print("STB INIT AUTO OVERRIDE: forced ON because InpTesterForceAutoTrading=ON despite autoInput=OFF");
      }
    else if(!InpAutoTrading)
      {
-      // Respect the explicit user setting in the live terminal.
+      // Respect the explicit AUTO=OFF setting in both tester and terminal runtime.
       // The AUTO button remains available for deliberate manual activation.
       g_autoTrading=false;
       if(GlobalVariableSet(g_autoStateName,0.0)<=0)
@@ -15723,6 +15721,8 @@ int OnInit()
       g_autoTrading=true;
       if(GlobalVariableSet(g_autoStateName,1.0)<=0)
          Print("STB INIT WARNING: unable to persist explicit AUTO state err=",GetLastError());
+      if(MQLInfoInteger(MQL_TESTER))
+         STB_ManualOverrideClearAll();
      }
 
    trade.SetExpertMagicNumber(InpMagic);
