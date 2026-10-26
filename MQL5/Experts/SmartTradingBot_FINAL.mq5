@@ -18517,8 +18517,19 @@ void OnChartEvent(const int id,
 
    if(clickName==autoName)
      {
-      g_autoTrading=!g_autoTrading;
-      if(GlobalVariableSet(g_autoStateName,g_autoTrading ? 1.0 : 0.0)<=0) Print("STB AUTO STATE PERSIST FAILED state=",g_autoTrading ? "ON":"OFF"," err=",GetLastError());
+      bool requestedAuto=!g_autoTrading;
+      ResetLastError();
+      if(GlobalVariableSet(g_autoStateName,requestedAuto ? 1.0 : 0.0)<=0)
+        {
+         int persistError=GetLastError();
+         Print("STB AUTO STATE PERSIST FAILED requested=",requestedAuto ? "ON":"OFF",
+               " state unchanged err=",persistError);
+         STB_SetControlStatus("AUTO STATE SAVE FAILED - STATE UNCHANGED");
+         UpdateButtons();
+         UpdatePanel();
+         return;
+        }
+      g_autoTrading=requestedAuto;
 
       // Manual overrides are released ONLY when AUTO is explicitly enabled.
       // Turning AUTO OFF must not erase a user's persisted per-ticket authority.
