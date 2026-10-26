@@ -4403,8 +4403,9 @@ bool STB_SumClosedLifecyclePnlFromHistory(const ulong positionId,
    ulong lastReversalDeal=0;
    long lastReversalTimeMsc=0;
 
-   // Position identifiers may span a netting reversal. Only count OUT/OUT_BY
-   // deals belonging to the latest lifecycle, not exits from its predecessor.
+   // Position identifiers may span a netting reversal. Only count deals after
+   // the latest INOUT boundary; the reversal's realized P/L belongs to the
+   // lifecycle it closed and must not leak into the new lifecycle.
    for(int i=0;i<deals;i++)
      {
       ulong deal=HistoryDealGetTicket(i);
@@ -4422,6 +4423,7 @@ bool STB_SumClosedLifecyclePnlFromHistory(const ulong positionId,
      }
 
    bool foundClose=false;
+   bool foundEntry=false;
    for(int j=0;j<deals;j++)
      {
       ulong deal=HistoryDealGetTicket(j);
@@ -4434,21 +4436,38 @@ bool STB_SumClosedLifecyclePnlFromHistory(const ulong positionId,
          continue;
 
       long entry=HistoryDealGetInteger(deal,DEAL_ENTRY);
+      if(entry==DEAL_ENTRY_IN)
+        {
+         // Entry deals commonly have zero gross P/L, but their commission and
+         // fee are real costs. Include them when reconstructing after restart.
+         double entryCosts=HistoryDealGetDouble(deal,DEAL_COMMISSION)+
+                           HistoryDealGetDouble(deal,DEAL_FEE);
+         if(!MathIsValidNumber(entryCosts))
+            return false;
+         totalPnl+=entryCosts;
+         foundEntry=true;
+         continue;
+        }
+
       if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY)
          continue;
 
-      double pnl=HistoryDealGetDouble(deal,DEAL_PROFIT)+
-                 HistoryDealGetDouble(deal,DEAL_SWAP)+
-                 HistoryDealGetDouble(deal,DEAL_COMMISSION)+
-                 HistoryDealGetDouble(deal,DEAL_FEE);
-      if(!MathIsValidNumber(pnl))
+      double exitPnl=HistoryDealGetDouble(deal,DEAL_PROFIT)+
+                     HistoryDealGetDouble(deal,DEAL_SWAP)+
+                     HistoryDealGetDouble(deal,DEAL_COMMISSION)+
+                     HistoryDealGetDouble(deal,DEAL_FEE);
+      if(!MathIsValidNumber(exitPnl))
          return false;
 
-      totalPnl+=pnl;
+      totalPnl+=exitPnl;
       foundClose=true;
      }
 
-   return foundClose && MathIsValidNumber(totalPnl);
+   // For a normal lifecycle, require its entry to be present before replacing
+   // the accumulated value. After an INOUT reversal, the reversal deal itself
+   // is the new lifecycle boundary and is intentionally excluded here.
+   bool lifecycleComplete=(lastReversalDeal>0 || foundEntry);
+   return foundClose && lifecycleComplete && MathIsValidNumber(totalPnl);
   }
 
 //+------------------------------------------------------------------+
