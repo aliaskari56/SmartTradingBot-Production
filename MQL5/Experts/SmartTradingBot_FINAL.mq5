@@ -15685,8 +15685,11 @@ int OnInit()
    if(MQLInfoInteger(MQL_TESTER) && InpTesterForceAutoTrading)
      {
       g_autoTrading=true;
+      ResetLastError();
       if(GlobalVariableSet(g_autoStateName,1.0)<=0)
          Print("STB INIT WARNING: unable to persist forced tester AUTO state err=",GetLastError());
+      else
+         GlobalVariablesFlush();
       STB_ManualOverrideClearAll();
       if(!InpAutoTrading)
          Print("STB INIT AUTO OVERRIDE: forced ON because InpTesterForceAutoTrading=ON despite autoInput=OFF");
@@ -15696,15 +15699,21 @@ int OnInit()
       // Respect the explicit AUTO=OFF setting in both tester and terminal runtime.
       // The AUTO button remains available for deliberate manual activation.
       g_autoTrading=false;
+      ResetLastError();
       if(GlobalVariableSet(g_autoStateName,0.0)<=0)
          Print("STB INIT WARNING: unable to persist AUTO=OFF state err=",GetLastError());
+      else
+         GlobalVariablesFlush();
       Print("STB INIT AUTO POLICY: AUTO starts OFF because InpAutoTrading=OFF.");
      }
    else
      {
       g_autoTrading=true;
+      ResetLastError();
       if(GlobalVariableSet(g_autoStateName,1.0)<=0)
          Print("STB INIT WARNING: unable to persist explicit AUTO state err=",GetLastError());
+      else
+         GlobalVariablesFlush();
       if(MQLInfoInteger(MQL_TESTER))
          STB_ManualOverrideClearAll();
      }
@@ -18507,6 +18516,9 @@ void OnChartEvent(const int id,
          UpdatePanel();
          return;
         }
+      // Persist the successful AUTO toggle immediately rather than relying on
+      // the terminal's eventual shutdown flush.
+      GlobalVariablesFlush();
       g_autoTrading=requestedAuto;
 
       // Manual overrides are released ONLY when AUTO is explicitly enabled.
