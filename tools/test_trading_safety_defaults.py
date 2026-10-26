@@ -237,7 +237,7 @@ def main() -> int:
     )
     daily_risk_enforcer_code = strip_strings(daily_risk_enforcer)
     trade_transaction = region(
-        source, "void OnTradeTransaction(", "void STB_ToggleDashboard()"
+        source, "void OnTradeTransaction(", "void OnChartEvent("
     )
     trade_transaction_code = strip_strings(strip_comments(trade_transaction))
 
