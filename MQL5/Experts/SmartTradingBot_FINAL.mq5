@@ -3989,6 +3989,12 @@ bool STB_DailyRiskPersist(const int dayKey,const double startEquity,
       Print("STB DAILY RISK STATE PERSIST FAILED; entries will remain blocked.");
       return false;
      }
+
+   // Force the terminal-global snapshot to disk after a baseline rollover or
+   // a verified daily-loss breach. Without a flush, an abrupt terminal/OS
+   // failure could lose the in-memory guard state and make a later attach
+   // treat the same day as a fresh baseline.
+   GlobalVariablesFlush();
    return true;
   }
 
