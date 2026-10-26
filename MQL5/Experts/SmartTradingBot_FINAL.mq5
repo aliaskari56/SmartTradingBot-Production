@@ -11219,37 +11219,62 @@ bool CalculateInitialPendingProtectionSL(const string symbol,
    if(direction<0)
       return false;
 
-   // BUY STOP / SELL STOP initial protection is anchored to the latest CLOSED
-   // M5 candle, as requested. If that structural SL cannot satisfy broker
-   // constraints, reject the pending order rather than silently substituting
-   // a different timeframe/structure.
+   // BUY STOP / SELL STOP prefer the latest CLOSED M5 candle as the
+   // structural protection anchor. A stale/unsuitable candle must not make
+   // the manual control unusable: if its SL is invalid for the current quote
+   // or broker distance, try the existing strategy protection and then the
+   // existing broker-aware fallback. Every candidate is validated before use;
+   // no stop is removed and no unvalidated minimum-distance SL is substituted.
    if(orderType==ORDER_TYPE_BUY_STOP || orderType==ORDER_TYPE_SELL_STOP)
      {
       double pip=PipSize(symbol);
       double point=SymbolInfoDouble(symbol,SYMBOL_POINT);
       double minDistance=TradeMinDistance(symbol);
-      if(pip<=0.0 || point<=0.0 || minDistance<=0.0)
+      if(pip<=0.0 || point<=0.0 || minDistance<=0.0 ||
+         !MathIsValidNumber(entryPrice) || entryPrice<=0.0)
+        {
+         Print("STB INITIAL SL REJECT reason=INVALID_SYMBOL_GEOMETRY",
+               " symbol=",symbol,
+               " pip=",DoubleToString(pip,10),
+               " point=",DoubleToString(point,10),
+               " minDistance=",DoubleToString(minDistance,10),
+               " entry=",DoubleToString(entryPrice,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)));
          return false;
+        }
 
       bool buyStop=(orderType==ORDER_TYPE_BUY_STOP);
       double anchor=(buyStop ? iLow(symbol,PERIOD_M5,1)
                              : iHigh(symbol,PERIOD_M5,1));
-      if(anchor<=0.0)
-         return false;
-
       double buffer=MathMax(MathMax(0.0,InpInitialSLBufferPips)*pip,
                             minDistance+point);
-      double candleSL=NormalizePrice(symbol,
-                                     buyStop ? anchor-buffer:anchor+buffer);
-      if(candleSL<=0.0 ||
-         !IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL))
-         return false;
+      double candleSL=0.0;
 
-      sl=candleSL;
-      return true;
+      if(anchor>0.0)
+        {
+         candleSL=NormalizePrice(symbol,
+                                 buyStop ? anchor-buffer:anchor+buffer);
+         if(candleSL>0.0 &&
+            IsValidSLForPendingOrder(symbol,orderType,entryPrice,candleSL))
+           {
+            sl=candleSL;
+            return true;
+           }
+        }
+
+      Print("STB INITIAL SL M5 STRUCTURE UNUSABLE",
+            " symbol=",symbol,
+            " orderType=",EnumToString(orderType),
+            " entry=",DoubleToString(entryPrice,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " anchor=",DoubleToString(anchor,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " candidateSL=",DoubleToString(candleSL,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " bid=",DoubleToString(SymbolInfoDouble(symbol,SYMBOL_BID),(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " ask=",DoubleToString(SymbolInfoDouble(symbol,SYMBOL_ASK),(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " minDistance=",DoubleToString(minDistance,10),
+            " action=TRY_STRATEGY_SL_THEN_BROKER_FALLBACK");
      }
 
-   // Same protection source as market positions.
+   // Same protection source as market positions, also used when the M5
+   // structure is unavailable or fails current quote/broker validation.
    double candidate=0.0;
 
    if(CalculateInitialProtectionSL(symbol,direction,entryPrice,candidate) &&
@@ -13383,7 +13408,15 @@ bool PlaceManualPendingDirection(const int direction)
                                   _Symbol,direction,entry,sl,InpBaseLots);
       Print("STB MANUAL PENDING REJECTED: ",
             InpUseRiskSizing ? "risk volume invalid" : "fixed volume invalid",
-            " symbol=",_Symbol);
+            " symbol=",_Symbol,
+            " cause=",g_stbVolumeDiag.rejectCause,
+            " equity=",DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2),
+            " riskPct=",DoubleToString(InpRiskPercent,4),
+            " riskBudget=",DoubleToString(g_stbVolumeDiag.riskBudget,4),
+            " rawVolume=",DoubleToString(g_stbVolumeDiag.rawVolume,6),
+            " minVolume=",DoubleToString(g_stbVolumeDiag.minVolume,4),
+            " maxRiskVolume=",DoubleToString(InpMaxRiskVolume,4),
+            " note=volume_never_forced_above_risk_budget");
       return false;
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualPendingDirection"))
@@ -13584,7 +13617,15 @@ bool PlaceManualLimitDirection(const int direction)
                                   _Symbol,direction,entry,sl,InpBaseLots);
       Print("STB MANUAL LIMIT REJECTED: ",
             InpUseRiskSizing ? "risk volume invalid" : "fixed volume invalid",
-            " symbol=",_Symbol);
+            " symbol=",_Symbol,
+            " cause=",g_stbVolumeDiag.rejectCause,
+            " equity=",DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2),
+            " riskPct=",DoubleToString(InpRiskPercent,4),
+            " riskBudget=",DoubleToString(g_stbVolumeDiag.riskBudget,4),
+            " rawVolume=",DoubleToString(g_stbVolumeDiag.rawVolume,6),
+            " minVolume=",DoubleToString(g_stbVolumeDiag.minVolume,4),
+            " maxRiskVolume=",DoubleToString(InpMaxRiskVolume,4),
+            " note=volume_never_forced_above_risk_budget");
       return false;
      }
    if(!STB_DirectionVolumeWithinLimit(_Symbol,direction,volume,"PlaceManualLimitDirection"))
