@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
+$rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 $main = Join-Path $root 'MQL5\Experts\SmartTradingBot_FINAL.mq5'
 $includeRoot = Join-Path $root 'MQL5\Include'
 
@@ -19,22 +20,36 @@ if (-not (Test-Path -LiteralPath $includeRoot -PathType Container)) {
     throw "MQL5 Include directory not found: $includeRoot"
 }
 
-$includePattern = '^\s*#include\s*([<"])([^>"]+)[>"]'
+$includePattern = '^\s*#include\s*(?:"([^"]+)"|<([^>]+)>)'
 $pending = [System.Collections.Generic.Stack[string]]::new()
 $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$platformIncludes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $pending.Push((Resolve-Path -LiteralPath $main).Path)
 
 while ($pending.Count -gt 0) {
     $current = $pending.Pop()
     $currentFull = [System.IO.Path]::GetFullPath($current)
+    if (-not $currentFull.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Dependency resolves outside repository root before reading: $currentFull"
+    }
     if (-not $seen.Add($currentFull)) { continue }
 
     $text = Get-Content -LiteralPath $currentFull -Raw
     foreach ($match in [regex]::Matches($text, $includePattern, [System.Text.RegularExpressions.RegexOptions]::Multiline)) {
-        $kind = $match.Groups[1].Value
-        $includeName = $match.Groups[2].Value.Replace('/', '\')
+        $isQuoted = $match.Groups[1].Success
+        $kind = if ($isQuoted) { '"' } else { '<' }
+        $includeName = if ($isQuoted) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+        $includeName = $includeName.Replace('/', '\')
         if ($kind -eq '<') {
             $candidate = Join-Path $includeRoot $includeName
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                # MetaTrader's standard library is supplied by the terminal, not vendored in this repository.
+                if ($includeName -eq ('Trade' + [System.IO.Path]::DirectorySeparatorChar + 'Trade.mqh')) {
+                    [void]$platformIncludes.Add("<$includeName>")
+                    continue
+                }
+                throw "Missing repository include '$includeName' referenced by '$currentFull'. Package not created."
+            }
         } else {
             $candidate = Join-Path (Split-Path -Parent $currentFull) $includeName
             if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
@@ -46,13 +61,17 @@ while ($pending.Count -gt 0) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             throw "Missing include '$includeName' referenced by '$currentFull'. Package not created."
         }
-        $pending.Push((Resolve-Path -LiteralPath $candidate).Path)
+        $resolvedCandidate = (Resolve-Path -LiteralPath $candidate).Path
+        $resolvedFull = [System.IO.Path]::GetFullPath($resolvedCandidate)
+        if (-not $resolvedFull.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Dependency '$includeName' resolves outside repository root: $resolvedFull. Package not created."
+        }
+        $pending.Push($resolvedFull)
     }
 }
 
 $files = [System.Collections.Generic.List[string]]::new()
 foreach ($path in $seen) {
-    $rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
     if (-not $path.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Dependency resolves outside repository root: $path"
     }
@@ -103,7 +122,8 @@ SmartTradingBot source-only package
 Created: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')
 Source version property: $version
 
-This package contains the primary EA and its recursively discovered .mqh include dependencies.
+This package contains the primary EA and its recursively discovered repository .mqh include dependencies.
+MetaTrader platform-provided includes are not copied; detected requirements: $(@($platformIncludes | Sort-Object) -join ', ')
 No .ex5 binary, terminal profile, credentials, .set file, logs, backups, or temporary artifacts are included.
 The SHA-256 manifest covers each copied source/document file; the manifest does not hash itself.
 
