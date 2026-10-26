@@ -15545,10 +15545,12 @@ int OnInit()
      }
    else if(!InpAutoTrading)
      {
-      g_autoTrading=true;
-      if(GlobalVariableSet(g_autoStateName,1.0)<=0)
-         Print("STB INIT WARNING: unable to persist forced AUTO state err=",GetLastError());
-      Print("STB INIT AUTO OVERRIDE: forced ON despite InpAutoTrading=OFF.");
+      // Respect the explicit user setting in the live terminal.
+      // The AUTO button remains available for deliberate manual activation.
+      g_autoTrading=false;
+      if(GlobalVariableSet(g_autoStateName,0.0)<=0)
+         Print("STB INIT WARNING: unable to persist AUTO=OFF state err=",GetLastError());
+      Print("STB INIT AUTO POLICY: AUTO starts OFF because InpAutoTrading=OFF.");
      }
    else
      {
