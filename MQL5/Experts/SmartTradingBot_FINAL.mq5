@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.140"
+#property version   "1.141"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -4103,7 +4103,7 @@ bool STB_DailyLossLimitHit()
       Print("STB DAILY RISK BASELINE day=",dayKey,
             " accountEquityReference=",DoubleToString(equity,2),
             " maxLossPct=",DoubleToString(InpMaxDailyLossPercent,2),
-            " scope=EA_TRADES_ONLY");
+            " scope=ACCOUNT_EQUITY");
       if(!STB_DailyRiskPersist(dayKey,equity,false))
          return true;
       return false;
