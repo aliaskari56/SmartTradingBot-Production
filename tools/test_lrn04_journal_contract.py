@@ -921,7 +921,7 @@ class JournalIntegrationReleaseGateTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         start = ea.find("void OnTradeTransaction(")
         self.assertGreaterEqual(start, 0, "primary EA transaction handler missing")
-        end = ea.find("\nvoid STB_ToggleDashboard(", start)
+        end = ea.find("\nvoid OnChartEvent(", start)
         self.assertGreater(end, start, "transaction handler boundary changed")
         handler = ea[start:end]
         self.assertNotIn("STB_LRN04_EncodeRecord(", handler)
