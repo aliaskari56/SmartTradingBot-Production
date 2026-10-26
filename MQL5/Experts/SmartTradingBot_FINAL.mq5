@@ -17367,15 +17367,42 @@ int STB_PendingTrailProcess(const bool manual=false)
          continue;
 
       ulong ticket=g_stbPendingTrail[i].ticket;
-      datetime previousModifyTime=g_stbPendingTrail[i].lastModifyTime;
-      g_stbPendingTrail[i].lastProcessedCycle=g_stbPendingTrailCycle;
 
+      // Count only a terminal-confirmed geometry change. lastModifyTime has
+      // one-second resolution, so timestamp comparisons can miss a successful
+      // same-second update and can count a broker-confirmed NO_CHANGE as moved.
+      bool hadBefore=OrderSelect(ticket);
+      long typeBefore=-1;
+      string symbolBefore="";
+      double entryBefore=0.0,slBefore=0.0,tpBefore=0.0,stopLimitBefore=0.0;
+      if(hadBefore)
+      {
+         typeBefore=OrderGetInteger(ORDER_TYPE);
+         symbolBefore=OrderGetString(ORDER_SYMBOL);
+         entryBefore=OrderGetDouble(ORDER_PRICE_OPEN);
+         slBefore=OrderGetDouble(ORDER_SL);
+         tpBefore=OrderGetDouble(ORDER_TP);
+         stopLimitBefore=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+      }
+
+      g_stbPendingTrail[i].lastProcessedCycle=g_stbPendingTrailCycle;
       STB_PendingTrailManageOne(ticket,manual);
 
-      int updatedIdx=STB_PendingTrailFind(ticket);
-      if(updatedIdx>=0 &&
-         g_stbPendingTrail[updatedIdx].lastModifyTime>previousModifyTime)
-         moved++;
+      if(hadBefore && OrderSelect(ticket) &&
+         OrderGetInteger(ORDER_TYPE)==typeBefore &&
+         OrderGetString(ORDER_SYMBOL)==symbolBefore)
+      {
+         double point=SymbolInfoDouble(symbolBefore,SYMBOL_POINT);
+         double tickSize=SymbolInfoDouble(symbolBefore,SYMBOL_TRADE_TICK_SIZE);
+         double tolerance=MathMax(point*0.5,
+                                  tickSize>0.0 ? tickSize*0.5:point*0.5);
+         if(point>0.0 && tolerance>0.0 &&
+            (MathAbs(OrderGetDouble(ORDER_PRICE_OPEN)-entryBefore)>tolerance ||
+             MathAbs(OrderGetDouble(ORDER_SL)-slBefore)>tolerance ||
+             MathAbs(OrderGetDouble(ORDER_TP)-tpBefore)>tolerance ||
+             MathAbs(OrderGetDouble(ORDER_PRICE_STOPLIMIT)-stopLimitBefore)>tolerance))
+            moved++;
+      }
    }
 
    STB_PendingTrailPruneInactive();
