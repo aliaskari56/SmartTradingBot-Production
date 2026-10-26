@@ -1958,14 +1958,30 @@ double NormalizeVolume(const string symbol,double volume)
    if(volume<minLot)
       volume=minLot;
 
-   int digits=2;
-   if(step<0.01)
-      digits=3;
-   if(step<0.001)
-      digits=4;
+   // Derive decimal precision from the broker's actual volume step.
+   // Fixed thresholds (0.01/0.001) break valid grids such as 0.125.
+   int digits=-1;
+   for(int d=0;d<=8;d++)
+     {
+      double scaledStep=step*MathPow(10.0,d);
+      if(MathAbs(scaledStep-MathRound(scaledStep))<=1e-8)
+        {
+         digits=d;
+         break;
+        }
+     }
+
+   if(digits<0)
+      return 0.0;
 
    double normalized=NormalizeDouble(volume,digits);
    if(normalized<minLot-1e-9 || normalized>maxLot+1e-9)
+      return 0.0;
+
+   // Fail closed if decimal normalization no longer lies on the broker grid.
+   double stepUnits=normalized/step;
+   if(!MathIsValidNumber(stepUnits) ||
+      MathAbs(stepUnits-MathRound(stepUnits))>1e-7)
       return 0.0;
 
    return normalized;
