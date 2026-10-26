@@ -17814,7 +17814,25 @@ void STB_RunManagementCycle()
       STB_BeginCycle();
       ManagePositions();
       ManagePendingOrders();
-      STB_PendingTrailProcess();
+      int pendingTrailMoved=STB_PendingTrailProcess();
+      // Emit a rate-limited health line when pending orders exist but no broker-
+      // confirmed geometry changed. Per-ticket rejection details remain in the
+      // PENDING_TRAIL_* / STB PENDING MODIFY messages.
+      static datetime lastPendingTrailHealthLog=0;
+      int managedPendingCount=CountManagedPendingOrders();
+      datetime trailNow=TimeCurrent();
+      if(managedPendingCount>0 && pendingTrailMoved==0 &&
+         (lastPendingTrailHealthLog<=0 || trailNow<=0 ||
+          trailNow-lastPendingTrailHealthLog>=60))
+        {
+         Print("STB PENDING TRAIL HEALTH",
+               " managedPending=",managedPendingCount,
+               " confirmedMoved=0",
+               " trackedStates=",ArraySize(g_stbPendingTrail),
+               " cycle=",IntegerToString((int)g_stbPendingTrailCycle),
+               " detail=inspect per-ticket PENDING_TRAIL_WAIT/REJECT/MODIFY logs");
+         lastPendingTrailHealthLog=trailNow;
+        }
       pass++;
      }
    while(g_stbManagementCyclePending && pass<2);
