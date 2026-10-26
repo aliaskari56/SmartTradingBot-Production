@@ -12553,6 +12553,36 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    string symbol=HistoryDealGetString(trans.deal,DEAL_SYMBOL);
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
 
+   // Audit-only realized-result telemetry. Log every exit/partial-exit deal
+   // with trading costs so loss analysis can distinguish small wins from
+   // oversized losses. This block does not alter trade decisions or controls.
+   if(entryType==DEAL_ENTRY_OUT ||
+      entryType==DEAL_ENTRY_OUT_BY ||
+      entryType==DEAL_ENTRY_INOUT)
+     {
+      double dealProfit=HistoryDealGetDouble(trans.deal,DEAL_PROFIT);
+      double dealCommission=HistoryDealGetDouble(trans.deal,DEAL_COMMISSION);
+      double dealSwap=HistoryDealGetDouble(trans.deal,DEAL_SWAP);
+      double dealFee=HistoryDealGetDouble(trans.deal,DEAL_FEE);
+      double dealNet=dealProfit+dealCommission+dealSwap+dealFee;
+      double dealVolume=HistoryDealGetDouble(trans.deal,DEAL_VOLUME);
+      double dealPrice=HistoryDealGetDouble(trans.deal,DEAL_PRICE);
+      long dealReason=HistoryDealGetInteger(trans.deal,DEAL_REASON);
+      Print("STB CLOSED DEAL RESULT ticket=",trans.deal,
+            " positionId=",positionId,
+            " symbol=",symbol,
+            " entryType=",EnumToString((ENUM_DEAL_ENTRY)entryType),
+            " reason=",EnumToString((ENUM_DEAL_REASON)dealReason),
+            " volume=",DoubleToString(dealVolume,8),
+            " price=",DoubleToString(dealPrice,(int)SymbolInfoInteger(symbol,SYMBOL_DIGITS)),
+            " profit=",DoubleToString(dealProfit,2),
+            " commission=",DoubleToString(dealCommission,2),
+            " swap=",DoubleToString(dealSwap,2),
+            " fee=",DoubleToString(dealFee,2),
+            " net=",DoubleToString(dealNet,2),
+            " magic=",magic);
+     }
+
    // Reconcile per-ticket protection state before filtering by deal magic:
    // a manual/foreign-magic deal can partially or fully close a managed
    // netting position. Preserve state after partial OUT/OUT_BY while the
