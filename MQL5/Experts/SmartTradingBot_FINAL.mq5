@@ -12584,6 +12584,30 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       double dealVolume=HistoryDealGetDouble(trans.deal,DEAL_VOLUME);
       double dealPrice=HistoryDealGetDouble(trans.deal,DEAL_PRICE);
       long dealReason=HistoryDealGetInteger(trans.deal,DEAL_REASON);
+
+      // Deal-level net can omit entry-side commission/fees. Also calculate the
+      // cumulative net across all currently recorded deals for this position
+      // identifier, then restore the original single-deal selection for the
+      // remaining transaction handler.
+      double positionNetToDate=0.0;
+      bool positionNetValid=false;
+      if(positionId>0 && HistorySelectByPosition(positionId))
+        {
+         int positionDeals=HistoryDealsTotal();
+         for(int dealIndex=0;dealIndex<positionDeals;dealIndex++)
+           {
+            ulong historyTicket=HistoryDealGetTicket(dealIndex);
+            if(historyTicket==0)
+               continue;
+            positionNetToDate+=HistoryDealGetDouble(historyTicket,DEAL_PROFIT)
+                               +HistoryDealGetDouble(historyTicket,DEAL_COMMISSION)
+                               +HistoryDealGetDouble(historyTicket,DEAL_SWAP)
+                               +HistoryDealGetDouble(historyTicket,DEAL_FEE);
+           }
+         positionNetValid=true;
+        }
+      HistoryDealSelect(trans.deal);
+
       Print("STB CLOSED DEAL RESULT ticket=",trans.deal,
             " positionId=",positionId,
             " symbol=",symbol,
@@ -12595,7 +12619,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             " commission=",DoubleToString(dealCommission,2),
             " swap=",DoubleToString(dealSwap,2),
             " fee=",DoubleToString(dealFee,2),
-            " net=",DoubleToString(dealNet,2),
+            " dealNet=",DoubleToString(dealNet,2),
+            " positionNetToDate=",(positionNetValid ? DoubleToString(positionNetToDate,2) : "NA"),
             " magic=",magic);
      }
 
