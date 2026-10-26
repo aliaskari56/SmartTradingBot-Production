@@ -15558,6 +15558,7 @@ bool ValidateInputs()
       InpMaxRelativeSpreadPct>100.0 ||
       InpSetupCooldownMinutes<0 ||
       InpMaxSetupAgeBars<0 ||
+      InpPendingTrailMaxRiskExpansion<0.0 ||
       InpPipPointsOverride<0.0 ||
       InpRiskPercent<0.0 ||
       InpMaxRiskVolume<0.0 ||
