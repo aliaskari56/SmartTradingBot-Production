@@ -3624,7 +3624,7 @@ input group "=== ADVANCED SCANNER / ARCHITECTURE ==="
 input double  InpScannerMinQuality        = 0.0;
 input double  InpScannerMinScore          = 0.0;
 input double  InpScannerMinTopGap         = 0.0;
-input int     InpScannerMaxWatchlist      = 50;
+input int     InpScannerMaxWatchlist      = 300;
 input int     InpScannerTopN              = 10;
 input int     InpScannerMaxQuoteAgeSec    = 60;   // reject stale scanner quotes after one minute
 input double  InpManualPendingGapPips     = 5.0;
@@ -14700,7 +14700,8 @@ void STB_ScannerRun()
    g_scannerCandidateCount=ArraySize(g_scannerCurrent);
    STB_SortCandidates(g_scannerCurrent);
 
-   int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,50));
+   // Discover and revalidate a broad universe; the execution Top-N remains bounded separately.
+   int watchLimit=MathMax(1,MathMin(InpScannerMaxWatchlist,300));
    int watchCount=MathMin(watchLimit,ArraySize(g_scannerCurrent));
 
    if(ArrayResize(g_scannerWatchlist,watchCount)!=watchCount)
