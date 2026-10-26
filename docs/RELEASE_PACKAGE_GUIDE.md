@@ -26,8 +26,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Package-CleanSou
 
 ## Package contents and safeguards
 
-- Includes the primary EA, recursively discovered include dependencies, and repository README.
-- Fails before packaging if a referenced include is missing or resolves outside the repository root.
+- Includes the primary EA, recursively discovered repository include dependencies, and repository README.
+- Leaves MetaTrader-provided standard includes (currently `<Trade/Trade.mqh>`) to the installed terminal and records them in `PACKAGE_README.txt`.
+- Fails before packaging if a repository include is missing or any resolved dependency escapes the repository root; it checks the resolved path before reading the dependency.
 - Creates a timestamped ZIP and prints its SHA-256 hash.
 - Writes `SOURCE_SHA256_MANIFEST.csv` for the copied source/document files.
 - Excludes compiled `.ex5` files, terminal data, credentials, `.set` files, logs, backups, and temporary files.
