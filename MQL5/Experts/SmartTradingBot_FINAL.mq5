@@ -15130,8 +15130,18 @@ bool STB_ControlButtonNeedsRepair(const string name)
    if(!ObjectSetInteger(0,name,OBJPROP_HIDDEN,false))
       normalized=false;
    if(!normalized)
+     {
+      int normalizeError=GetLastError();
       Print("STB UI CONTROL NORMALIZE FAILED name=",name,
-            " err=",GetLastError());
+            " err=",normalizeError,
+            " action=RECREATE_CONTROL");
+      // Do not keep a button whose interaction state could not be normalized.
+      // The caller recreates it through CreateButton(), then reapplies layout.
+      if(!ObjectDelete(0,name))
+         Print("STB UI CONTROL DELETE FAILED name=",name,
+               " err=",GetLastError());
+      return true;
+     }
 
    return false;
   }
