@@ -18422,12 +18422,15 @@ void OnChartEvent(const int id,
    if(id==CHARTEVENT_CHART_CHANGE) return; // P6 STB-CLEANUP: no rebuild/redraw on chart change
 
 
-   // Route only named object-click events to avoid dispatching one physical click twice.
-   // Keep hit-test rescue below for OBJECT_CLICK events intercepted by another chart object.
-   if(id!=CHARTEVENT_OBJECT_CLICK)
+   // Named object clicks are primary. Also accept a plain chart click so
+   // coordinate hit-testing can recover when a selected/overlapping chart
+   // object prevents MT5 from emitting CHARTEVENT_OBJECT_CLICK for the button.
+   // The same-control/same-pixel debounce below suppresses duplicate dispatch
+   // when MT5 emits both event types for one physical click.
+   if(id!=CHARTEVENT_OBJECT_CLICK && id!=CHARTEVENT_CLICK)
       return;
 
-   string clickName=sparam;
+   string clickName=(id==CHARTEVENT_OBJECT_CLICK ? sparam : "");
    string buyName=g_prefix+"BUY_STOP";
    string sellName=g_prefix+"SELL_STOP";
    string autoName=g_prefix+"AUTO";
