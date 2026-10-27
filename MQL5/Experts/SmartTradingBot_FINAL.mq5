@@ -4,7 +4,7 @@
 //| Standard-library dependencies are bundled below for portability. |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.147"
+#property version   "1.148"
 #property description "SmartTradingBot - H4/M15 structure analysis, adaptive scanner, pending-order management, chart controls, and execution safeguards"
 // Trade.mqh and its require
 // ===== BEGIN INLINED METAQUOTES STANDARD TRADE DEPENDENCIES =====
@@ -8480,12 +8480,23 @@ bool STB_IsSymbolAllowed(const string s)
    return true;
   }
 
+// Management scope is account-wide in live trading. Scanner symbol filters
+// must not silently limit protection of already-open positions or pending orders.
+// Strategy Tester can still enforce its explicit chart-only isolation setting.
+bool STB_IsManagementSymbolInScope(const string symbol)
+  {
+   if(symbol=="")
+      return false;
+   if(MQLInfoInteger(MQL_TESTER) && InpTesterChartSymbolOnly)
+      return symbol==_Symbol;
+   return true;
+  }
+
 bool IsManagedPosition(const ulong ticket)
   {
-   if(ticket==0 || !PositionSelectByTicket(ticket)) return false;
-   return STB_IsSymbolAllowed(PositionGetString(POSITION_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
+   if(ticket==0 || !PositionSelectByTicket(ticket))
+      return false;
+   return STB_IsManagementSymbolInScope(PositionGetString(POSITION_SYMBOL));
   }
 
 //+------------------------------------------------------------------+
@@ -8493,10 +8504,9 @@ bool IsManagedPosition(const ulong ticket)
 //+------------------------------------------------------------------+
 bool IsManagedOrder(const ulong ticket)
   {
-   if(ticket==0 || !OrderSelect(ticket)) return false;
-   return STB_IsSymbolAllowed(OrderGetString(ORDER_SYMBOL)); // SIMPLIFIED: allowed symbol is the only management scope
-
-
+   if(ticket==0 || !OrderSelect(ticket))
+      return false;
+   return STB_IsManagementSymbolInScope(OrderGetString(ORDER_SYMBOL));
   }
 
 // Exposure deduplication is scoped to this EA instance by Magic Number.
@@ -15222,8 +15232,9 @@ void STB_SetControlStatus(const string message)
 
 string STB_ControlRejectSuffix()
   {
-   if(g_stbDailyLossThresholdReached)
-      return " - DAILY_LOSS_LIMIT_ACTIVE; risk guard blocked this action";
+   // A stale account-wide risk flag must not overwrite the actual reason
+   // emitted by a manual order path (for example RAW_BELOW_MIN_VOLUME).
+   // The per-action log is authoritative for the rejection cause.
    return " - see Experts log for the exact rejection reason";
   }
 
